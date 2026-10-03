@@ -1,0 +1,48 @@
+{
+  "kind": "consent",
+  "title": "Browser Site Grant",
+  "prompt": "Allow interaction with this app?",
+  "options": [
+    {
+      "id": "allow_once",
+      "label": "Allow once",
+      "effect": "grant"
+    },
+    {
+      "id": "deny",
+      "label": "Not now",
+      "effect": "decline"
+    }
+  ],
+  "default": "deny",
+  "urgency": "normal",
+  "on_expiry": "deny",
+  "material_damage": true,
+  "scope": {
+    "origins": [
+      "https://example.com"
+    ],
+    "tier": 2
+  },
+  "late_execution": "execute",
+  "target": {
+    "kind": "site",
+    "label": "example.com"
+  },
+  "expires_in_ms": 60000,
+  "requestedSchema": {
+    "type": "object",
+    "properties": {
+      "decision": {
+        "type": "string",
+        "enum": [
+          "deny",
+          "allow_once"
+        ]
+      }
+    },
+    "required": [
+      "decision"
+    ]
+  }
+}

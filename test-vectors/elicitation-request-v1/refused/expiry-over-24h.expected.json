@@ -1,0 +1,4 @@
+{
+  "code": "elicitation_invalid_request",
+  "message_contains": "expires_in_ms must be positive and at most 24 hours"
+}

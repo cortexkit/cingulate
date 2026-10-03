@@ -1,0 +1,47 @@
+{
+  "kind": "consent",
+  "title": "Capture Login",
+  "prompt": "Allow interaction with this app?",
+  "options": [
+    {
+      "id": "allow_once",
+      "label": "Allow once",
+      "effect": "grant"
+    },
+    {
+      "id": "deny",
+      "label": "Not now",
+      "effect": "decline"
+    }
+  ],
+  "default": "deny",
+  "urgency": "high",
+  "on_expiry": "deny",
+  "material_damage": true,
+  "scope": {
+    "capture_login": {
+      "origin": "https://example.com"
+    }
+  },
+  "late_execution": "execute",
+  "target": {
+    "kind": "site",
+    "label": "example.com"
+  },
+  "expires_in_ms": 60000,
+  "requestedSchema": {
+    "type": "object",
+    "properties": {
+      "decision": {
+        "type": "string",
+        "enum": [
+          "deny",
+          "allow_once"
+        ]
+      }
+    },
+    "required": [
+      "decision"
+    ]
+  }
+}

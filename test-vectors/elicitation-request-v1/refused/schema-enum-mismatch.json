@@ -1,0 +1,39 @@
+{
+  "kind": "consent",
+  "title": "Allow app access",
+  "prompt": "Allow interaction with this app?",
+  "options": [
+    {
+      "id": "allow_once",
+      "label": "Allow once",
+      "effect": "grant"
+    },
+    {
+      "id": "deny",
+      "label": "Not now",
+      "effect": "decline"
+    }
+  ],
+  "default": "deny",
+  "urgency": "normal",
+  "on_expiry": "deny",
+  "material_damage": true,
+  "scope": {
+    "app": "com.apple.TextEdit"
+  },
+  "late_execution": "execute",
+  "target": {
+    "kind": "app",
+    "label": "TextEdit"
+  },
+  "expires_in_ms": 60000,
+  "requestedSchema": {
+    "properties": {
+      "decision": {
+        "enum": [
+          "deny"
+        ]
+      }
+    }
+  }
+}

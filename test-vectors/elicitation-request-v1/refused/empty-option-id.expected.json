@@ -1,0 +1,4 @@
+{
+  "code": "elicitation_invalid_request",
+  "message_contains": "option ids must be unique and nonempty"
+}

@@ -1,0 +1,43 @@
+{
+  "kind": "consent",
+  "title": "Publish report",
+  "prompt": "Allow interaction with this app?",
+  "options": [
+    {
+      "id": "allow_once",
+      "label": "Allow once",
+      "effect": "grant"
+    },
+    {
+      "id": "deny",
+      "label": "Not now",
+      "effect": "decline"
+    }
+  ],
+  "default": "deny",
+  "urgency": "normal",
+  "on_expiry": "deny",
+  "material_damage": true,
+  "late_execution": "execute",
+  "target": {
+    "kind": "tool",
+    "label": "Publish report"
+  },
+  "expires_in_ms": 60000,
+  "args_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "requestedSchema": {
+    "type": "object",
+    "properties": {
+      "decision": {
+        "type": "string",
+        "enum": [
+          "deny",
+          "allow_once"
+        ]
+      }
+    },
+    "required": [
+      "decision"
+    ]
+  }
+}
