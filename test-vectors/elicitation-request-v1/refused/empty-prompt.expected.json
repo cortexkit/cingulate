@@ -1,0 +1,4 @@
+{
+  "code": "elicitation_invalid_request",
+  "message_contains": "title, prompt and nonempty options are required"
+}
