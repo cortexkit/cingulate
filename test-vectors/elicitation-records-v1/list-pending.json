@@ -1,0 +1,87 @@
+{
+  "tag": "elicitation-records-v1",
+  "reply": {
+    "records": [
+      {
+        "elicitationId": "el_head",
+        "createdAtMs": 1000,
+        "expiresAtMs": 61000,
+        "subject": {
+          "agentId": "agent-alf",
+          "headAgentId": "agent-alf",
+          "label": "ALF"
+        },
+        "state": "pending",
+        "kind": "consent",
+        "title": "Copy login",
+        "prompt": "May I copy your login?",
+        "options": [
+          {
+            "id": "transfer:chrome",
+            "label": "Copy from Chrome",
+            "effect": "grant"
+          },
+          {
+            "id": "deny",
+            "label": "Not now",
+            "effect": "decline"
+          }
+        ],
+        "default": "deny",
+        "urgency": "normal",
+        "onExpiry": "deny",
+        "materialDamage": true,
+        "scope": "github.com",
+        "duration": "this call",
+        "lateExecution": "execute",
+        "target": {
+          "kind": "site",
+          "label": "github.com"
+        },
+        "expiresInMs": 60000,
+        "sessionRef": "ses_head",
+        "facts": []
+      },
+      {
+        "elicitationId": "el_worker",
+        "createdAtMs": 1000,
+        "expiresAtMs": 61000,
+        "subject": {
+          "headAgentId": "agent-alf",
+          "label": "a worker of ALF"
+        },
+        "state": "pending",
+        "kind": "consent",
+        "title": "Copy login",
+        "prompt": "May I copy your login?",
+        "options": [
+          {
+            "id": "transfer:chrome",
+            "label": "Copy from Chrome",
+            "effect": "grant"
+          },
+          {
+            "id": "deny",
+            "label": "Not now",
+            "effect": "decline"
+          }
+        ],
+        "default": "deny",
+        "urgency": "normal",
+        "onExpiry": "deny",
+        "materialDamage": true,
+        "scope": "github.com",
+        "duration": "this call",
+        "lateExecution": "execute",
+        "target": {
+          "kind": "site",
+          "label": "github.com"
+        },
+        "expiresInMs": 60000,
+        "sessionRef": "ses_worker",
+        "facts": [],
+        "parentSessionRef": "ses_head"
+      }
+    ]
+  }
+}

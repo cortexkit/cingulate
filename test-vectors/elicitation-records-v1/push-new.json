@@ -1,0 +1,8 @@
+{
+  "tag": "elicitation-records-v1",
+  "reply": {
+    "elicitationId": "el_head",
+    "kind": "elicitation",
+    "eventAtMs": 1000
+  }
+}

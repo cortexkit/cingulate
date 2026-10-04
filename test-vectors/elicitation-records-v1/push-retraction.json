@@ -1,0 +1,8 @@
+{
+  "tag": "elicitation-records-v1",
+  "reply": {
+    "elicitationId": "el_head",
+    "kind": "retraction",
+    "eventAtMs": 2000
+  }
+}
