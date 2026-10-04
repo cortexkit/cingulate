@@ -565,6 +565,49 @@ async fn manifest_envelope_health_and_unknown_ops() {
     }
 }
 
+#[test]
+fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
+    // The SDK decodes this control shape before dispatching a bind. Recognizing
+    // the daemon's wire vocabulary does not opt this module into flow behavior.
+    let wire = json!({
+        "op": "route.bind",
+        "route_channel": 1,
+        "epoch": 1,
+        "target": {"kind": "management_surface", "module_id": "cingulate"},
+        "identity": {"project_root": "/", "harness": "test", "session": "session"},
+        "principal": {"kind": "unverified"},
+        "scope": {
+            "owner": {"kind": "reserved", "module_id": "prefrontal-core"},
+            "ref": "flow-session",
+            "scope_epoch": 1,
+            "kind": "worker",
+            "attributes": {"flow_id": "flow:7"},
+            "owner_authorized": true
+        }
+    });
+    let request: subc_protocol::session::ModuleControlRequest =
+        serde_json::from_slice(&serde_json::to_vec(&wire).unwrap())
+            .expect("current daemon flow attribute must decode");
+    let subc_protocol::session::ModuleControlRequest::RouteBind {
+        scope, principal, ..
+    } = request
+    else {
+        panic!("route bind expected");
+    };
+    assert_eq!(
+        serde_json::to_value(scope.unwrap()).unwrap()["attributes"]["flow_id"],
+        "flow:7"
+    );
+    let stamp = Stamp::from_principal(principal.as_ref());
+    assert_eq!(stamp.principal.as_deref(), Some("unverified"));
+    assert!(!stamp.operator_surface);
+    assert!(stamp.carried_agent_id.is_empty());
+    assert_eq!(
+        ck_cingulate::manifest().capabilities.unwrap().provides,
+        ["consent/v1"]
+    );
+}
+
 #[tokio::test]
 async fn lease_retry_recovers_promptly_and_exhaustion_fails_closed() {
     let f = Fixture::unopened();

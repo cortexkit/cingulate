@@ -36,7 +36,11 @@ prevent settlement/refresh wakes from being lost between a read and a wait.
 Pointer delivery is awaited in order, including retraction before replacement,
 and notification errors cannot reverse a committed state or fail an operation.
 
-The reviewed specification pins subc-client-rs 0.25.2 and subc-protocol 0.28.1.
+The module uses subc-client-rs 0.26.1, subc-protocol 0.29.1 and the SDK's
+subc-transport 0.10.0. The protocol 0.29 line understands the `flow_id` scope
+attribute; the SDK also refuses undecodable control requests without terminating
+the serve loop. Cingulate does not handle flows and does not declare
+`flow-scopes/v1`.
 The SDK source documents per-request task dispatch; a live-daemon test with
 attested route fields is still deferred. In-process tests prove the handler's
 concurrency and do not claim to prove live routing.
