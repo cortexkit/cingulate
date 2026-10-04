@@ -1,0 +1,1248 @@
+use std::{
+    collections::HashSet,
+    fs,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Barrier,
+    },
+};
+
+use cingulate_decode::ConsentRequest;
+use cingulate_store::{
+    storage_descriptor, AnswerOutcome, ConsentStore, ElicitationRecord, Isolation, RequestIdentity,
+    State, StorageBackend, StorageDescriptor, MIGRATION_NAMESPACE, RETENTION_MS,
+};
+use rusqlite::{params, types::ValueRef, Connection};
+use serde_json::{json, Value};
+
+static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+struct Scratch {
+    root: PathBuf,
+    descriptor: StorageDescriptor,
+}
+
+impl Scratch {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "cingulate-store-{}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&root).unwrap();
+        let descriptor = StorageDescriptor {
+            module_id: "cingulate".into(),
+            storage_namespace: "test".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: root.join("chosen.db").to_str().unwrap().into(),
+            },
+        };
+        Self { root, descriptor }
+    }
+
+    fn sql(&self) -> Connection {
+        let StorageBackend::Sqlite { path } = &self.descriptor.backend else {
+            unreachable!()
+        };
+        Connection::open(path).unwrap()
+    }
+
+    fn open(&self, now: i64) -> (ConsentStore, Vec<ElicitationRecord>) {
+        ConsentStore::open(&self.descriptor, now).unwrap()
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).unwrap();
+    }
+}
+
+fn request() -> ConsentRequest {
+    ConsentRequest::decode(
+        serde_json::from_str(include_str!(
+            "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn identity(principal: &str, session: &str) -> RequestIdentity {
+    RequestIdentity {
+        owner: json!([principal, session]).to_string(),
+        requester: principal.into(),
+        subject: cingulate_store::Subject {
+            agent_id: None,
+            head_agent_id: String::new(),
+            label: "an unverified local process".into(),
+        },
+        resolved_name: None,
+    }
+}
+
+fn flow_decision() -> ConsentRequest {
+    let mut value = serde_json::to_value(request()).unwrap();
+    value["kind"] = json!("flow_decision");
+    value["flow_decision"] = json!({"arbitrary":"decision"});
+    value["options"] = json!([
+        {"id":"proceed","label":"Proceed","effect":"choose"},
+        {"id":"decline","label":"Decline","effect":"decline"},
+    ]);
+    value["default"] = json!("decline");
+    ConsentRequest::decode(value).unwrap()
+}
+
+fn rows(conn: &Connection, table: &str) -> Vec<Vec<Value>> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+        .unwrap();
+    let columns = stmt.column_count();
+    stmt.query_map([], |row| {
+        Ok((0..columns)
+            .map(|i| match row.get_ref(i).unwrap() {
+                ValueRef::Null => Value::Null,
+                ValueRef::Integer(n) => json!(n),
+                ValueRef::Real(n) => json!(n),
+                ValueRef::Text(s) => json!(std::str::from_utf8(s).unwrap()),
+                ValueRef::Blob(_) => panic!("no blobs in domain tables"),
+            })
+            .collect())
+    })
+    .unwrap()
+    .collect::<rusqlite::Result<_>>()
+    .unwrap()
+}
+
+#[derive(Debug, PartialEq)]
+struct Snapshot {
+    records: Vec<Vec<Value>>,
+    answers: Vec<Vec<Value>>,
+    id_seq: Vec<Vec<Value>>,
+}
+
+fn snapshot(scratch: &Scratch) -> Snapshot {
+    let conn = scratch.sql();
+    Snapshot {
+        records: rows(&conn, "elicitation_records"),
+        answers: rows(&conn, "elicitation_answers"),
+        id_seq: rows(&conn, "cingulate_id_seq"),
+    }
+}
+
+fn assert_settlement(scratch: &Scratch, record: &ElicitationRecord, count: i64) {
+    let conn = scratch.sql();
+    let (state, record_at, answer_at, raw): (String, i64, i64, String) = conn
+        .query_row(
+            "SELECT r.state,r.settled_at_ms,a.settled_at_ms,r.record_json \
+         FROM elicitation_records r JOIN elicitation_answers a USING(elicitation_id) \
+         WHERE elicitation_id=?1",
+            [&record.elicitation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(state, record.state.as_str());
+    assert_eq!(Some(record_at), record.answered_at_ms);
+    assert_eq!(Some(answer_at), record.answered_at_ms);
+    assert_eq!(
+        serde_json::from_str::<ElicitationRecord>(&raw).unwrap(),
+        *record
+    );
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM elicitation_answers", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        count
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT SUM(notice_delivered) FROM elicitation_records",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn descriptor_path_wal_and_migrations_are_authoritative() {
+    let scratch = Scratch::new();
+    let data_home = scratch.root.join("unused-data-home");
+    let descriptor = storage_descriptor(Some(&scratch.descriptor), data_home.to_str().unwrap());
+    assert_eq!(descriptor, scratch.descriptor);
+    let (store, settlements) = ConsentStore::open(&descriptor, 100).unwrap();
+    assert!(settlements.is_empty());
+    assert!(!data_home.exists());
+    let conn = scratch.sql();
+    assert_eq!(
+        conn.pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+            .unwrap(),
+        "wal"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT GROUP_CONCAT(version, ',') FROM cortexkit_schema_version WHERE namespace=?1",
+            [MIGRATION_NAMESPACE],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "1,2"
+    );
+    let answer_schema: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='elicitation_answers'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(answer_schema.contains("cursor INTEGER PRIMARY KEY AUTOINCREMENT"));
+    assert_eq!(
+        rows(&conn, "cingulate_id_seq"),
+        vec![vec![json!(1), json!(0)]]
+    );
+    assert!(
+        conn.execute("INSERT INTO cingulate_id_seq VALUES(2,0)", [])
+            .is_err(),
+        "counter is single-row"
+    );
+    drop(conn);
+    drop(store);
+    let (store, _) = scratch.open(100);
+    assert_eq!(
+        rows(&scratch.sql(), "cingulate_id_seq"),
+        vec![vec![json!(1), json!(0)]]
+    );
+    drop(store);
+}
+
+#[test]
+fn fallback_uses_supplied_scratch_data_home_and_never_overrides_errors() {
+    let scratch = Scratch::new();
+    let fallback = storage_descriptor(None, scratch.root.to_str().unwrap());
+    assert_eq!(fallback.module_id, "cingulate");
+    assert_eq!(
+        fallback.backend,
+        StorageBackend::Sqlite {
+            path: scratch
+                .root
+                .join("cortexkit/ck-cingulate/store.db")
+                .to_str()
+                .unwrap()
+                .into()
+        }
+    );
+    let (store, _) = ConsentStore::open(&fallback, 1).unwrap();
+    assert!(scratch
+        .root
+        .join("cortexkit/ck-cingulate/store.db")
+        .is_file());
+    drop(store);
+    let bad = StorageDescriptor {
+        backend: StorageBackend::Postgres {
+            dsn: "unavailable".into(),
+            database: "none".into(),
+        },
+        ..scratch.descriptor.clone()
+    };
+    let selected = storage_descriptor(Some(&bad), scratch.root.to_str().unwrap());
+    assert_eq!(selected, bad);
+    let error = ConsentStore::open(&selected, 1).unwrap_err();
+    assert!(!error.is_lease_held());
+    assert!(error.to_string().contains("not supported"));
+}
+
+#[test]
+fn only_live_lease_contention_is_retryable_and_release_allows_reopen() {
+    let scratch = Scratch::new();
+    let (held, _) = scratch.open(0);
+    assert!(ConsentStore::open(&scratch.descriptor, 0)
+        .unwrap_err()
+        .is_lease_held());
+    drop(held);
+    let (reopened, _) = scratch.open(0);
+    drop(reopened);
+}
+
+#[test]
+fn newer_store_is_refused_before_serving_or_sweeping() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(0);
+    store
+        .create(&identity("direct", "s"), request(), 0)
+        .unwrap();
+    drop(store);
+    scratch
+        .sql()
+        .execute(
+            "INSERT INTO cortexkit_schema_version VALUES(?1,3,0)",
+            [MIGRATION_NAMESPACE],
+        )
+        .unwrap();
+    let before = snapshot(&scratch);
+    let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
+    assert!(error.to_string().contains("version 3"));
+    assert!(error.to_string().contains("migration 2"));
+    assert!(!error.is_lease_held());
+    assert_eq!(snapshot(&scratch), before);
+}
+
+#[test]
+fn durable_ids_do_not_reuse_any_value_after_settlement_prune_and_restart() {
+    let scratch = Scratch::new();
+    let owner = identity("direct", "s");
+    let (store, _) = scratch.open(100);
+    let mut seen = HashSet::new();
+    for i in 0..4 {
+        let created = store.create(&owner, request(), 100).unwrap();
+        assert_eq!(created.record.elicitation_id, format!("el_{}", i + 1));
+        assert!(seen.insert(created.record.elicitation_id.clone()));
+        store
+            .withdraw(&owner.owner, &created.record.elicitation_id, 101)
+            .unwrap();
+    }
+    store.ack(&owner.owner, 4).unwrap();
+    store.sweep(101 + RETENTION_MS).unwrap();
+    assert!(rows(&scratch.sql(), "elicitation_records").is_empty());
+    drop(store);
+    let (store, _) = scratch.open(200 + RETENTION_MS);
+    let new = store.create(&owner, request(), 200 + RETENTION_MS).unwrap();
+    assert_eq!(new.record.elicitation_id, "el_5");
+    assert!(!seen.contains(&new.record.elicitation_id));
+    assert!(new.record.elicitation_id.starts_with("el_"));
+    assert_eq!(
+        store
+            .answer("el_1", "allow_once", None, 200 + RETENTION_MS)
+            .unwrap()
+            .value,
+        AnswerOutcome::NotFound
+    );
+    assert_eq!(
+        store
+            .get(&new.record.elicitation_id, 200 + RETENTION_MS)
+            .unwrap()
+            .unwrap()
+            .state,
+        State::Pending
+    );
+}
+
+#[test]
+fn first_terminal_state_wins_and_retries_add_no_log_rows() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let answered = store.answer(&id, "allow_once", None, 101).unwrap();
+    let AnswerOutcome::Answered(record) = answered.value else {
+        panic!("fresh answer")
+    };
+    assert_eq!(answered.settlements, vec![record.clone()]);
+    assert_eq!(record.answered_choice_id.as_deref(), Some("allow_once"));
+    assert_settlement(&scratch, &record, 1);
+    let before = snapshot(&scratch);
+    let repeated = store.answer(&id, "allow_once", None, 102).unwrap();
+    assert_eq!(
+        repeated.value,
+        AnswerOutcome::AlreadyAnswered(record.clone())
+    );
+    assert!(repeated.settlements.is_empty());
+    let conflict = store.answer(&id, "deny", None, 103).unwrap();
+    assert_eq!(conflict.value, AnswerOutcome::Conflict(record.clone()));
+    assert!(conflict.settlements.is_empty());
+    let withdrawn = store.withdraw(&owner.owner, &id, 104).unwrap();
+    assert_eq!(withdrawn.value, record);
+    assert!(withdrawn.settlements.is_empty());
+    assert_eq!(snapshot(&scratch), before);
+    let id2 = store
+        .create(&owner, request(), 105)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let withdrawn = store.withdraw(&owner.owner, &id2, 106).unwrap();
+    assert_eq!(withdrawn.value.state, State::Withdrawn);
+    assert_eq!(withdrawn.value.answered_choice_id, None);
+    assert_settlement(&scratch, &withdrawn.value, 2);
+    let before = snapshot(&scratch);
+    assert!(store
+        .withdraw(&owner.owner, &id2, 107)
+        .unwrap()
+        .settlements
+        .is_empty());
+    assert_eq!(
+        store.answer(&id2, "allow_once", None, 107).unwrap().value,
+        AnswerOutcome::Conflict(withdrawn.value)
+    );
+    assert_eq!(snapshot(&scratch), before);
+}
+
+#[test]
+fn concurrent_answer_and_withdraw_commit_exactly_one_terminal_state() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let store = Arc::new(store);
+    let barrier = Arc::new(Barrier::new(8));
+    let threads: Vec<_> = (0..8)
+        .map(|i| {
+            let store = store.clone();
+            let barrier = barrier.clone();
+            let id = id.clone();
+            let owner = owner.owner.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                if i % 2 == 0 {
+                    store
+                        .answer(&id, "allow_once", None, 101)
+                        .unwrap()
+                        .settlements
+                        .len()
+                } else {
+                    store.withdraw(&owner, &id, 101).unwrap().settlements.len()
+                }
+            })
+        })
+        .collect();
+    assert_eq!(
+        threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .sum::<usize>(),
+        1
+    );
+    let record = store.get(&id, 102).unwrap().unwrap();
+    assert!(matches!(record.state, State::Answered | State::Withdrawn));
+    assert_settlement(&scratch, &record, 1);
+}
+
+#[test]
+fn expiry_precedes_choice_and_console_refusals_and_uses_the_exact_deadline() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let mut consent = request();
+    consent.expires_in_ms = 5;
+    consent.at_console = Some("m1".into());
+    let record = store.create(&owner, consent, 100).unwrap().record;
+    let result = store
+        .answer(&record.elicitation_id, "not-an-option", None, 105)
+        .unwrap();
+    let AnswerOutcome::Conflict(expired) = result.value else {
+        panic!("due answer conflicts")
+    };
+    assert_eq!(expired.state, State::Expired);
+    assert_eq!(expired.answered_choice_id, None);
+    assert_eq!(expired.answered_at_ms, Some(105));
+    assert_eq!(result.settlements, vec![expired.clone()]);
+    assert_settlement(&scratch, &expired, 1);
+    let mut flow = flow_decision();
+    flow.expires_in_ms = 2;
+    let flow = store.create(&owner, flow, 106).unwrap().record;
+    let result = store
+        .answer(&flow.elicitation_id, "decline", None, 108)
+        .unwrap();
+    let AnswerOutcome::Conflict(expired) = result.value else {
+        panic!("default is not a repeat answer")
+    };
+    assert_eq!(expired.answered_at_ms, Some(108));
+    assert_eq!(expired.answered_choice_id.as_deref(), Some("decline"));
+    assert_settlement(&scratch, &expired, 2);
+    let mut req = request();
+    req.expires_in_ms = 1;
+    let id = store
+        .create(&owner, req, 109)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let result = store.withdraw(&owner.owner, &id, 115).unwrap();
+    assert_eq!(result.value.state, State::Expired);
+    assert_eq!(result.value.answered_at_ms, Some(110));
+    assert_settlement(&scratch, &result.value, 3);
+}
+
+#[test]
+fn open_sweep_settles_downtime_expiry_exactly_once_for_all_kinds() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(10);
+    let owner = identity("direct", "s");
+    let mut requests = vec![request(), flow_decision()];
+    let mut install = request();
+    install.kind = "flow_install".into();
+    install.flow_install = Some(serde_json::from_value(json!({"not_a_card":true})).unwrap());
+    requests.push(install);
+    for mut request in requests {
+        request.expires_in_ms = 50;
+        store.create(&owner, request, 10).unwrap();
+    }
+    drop(store);
+    let (store, settlements) = scratch.open(1000);
+    assert_eq!(settlements.len(), 3);
+    for record in &settlements {
+        assert_eq!(record.state, State::Expired);
+        assert_eq!(record.answered_at_ms, Some(60));
+        assert_eq!(
+            record.answered_choice_id,
+            (record.request.kind == "flow_decision").then(|| record.request.default.clone())
+        );
+        assert_settlement(&scratch, record, 3);
+    }
+    assert!(store.pending().unwrap().is_empty());
+    assert!(store.sweep(1000).unwrap().is_empty());
+    drop(store);
+    let (store, settlements) = scratch.open(1001);
+    assert!(settlements.is_empty());
+    assert_eq!(store.outcomes(0, 1001).unwrap().records.len(), 3);
+}
+
+#[test]
+fn pending_choice_console_and_owner_refusals_write_nothing() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let mut req = request();
+    req.at_console = Some("m1".into());
+    let record = store.create(&owner, req, 100).unwrap().record;
+    let before = snapshot(&scratch);
+    assert_eq!(
+        store
+            .answer(&record.elicitation_id, "invalid", Some("m1"), 101)
+            .unwrap_err()
+            .code(),
+        "elicitation_invalid_choice"
+    );
+    for machine in [None, Some("m2")] {
+        assert_eq!(
+            store
+                .answer(&record.elicitation_id, "allow_once", machine, 101)
+                .unwrap_err()
+                .code(),
+            "user_not_at_console"
+        );
+    }
+    for id in ["never-stored", record.elicitation_id.as_str()] {
+        assert_eq!(
+            store.get_owned("wrong-owner", id, 101).unwrap_err().code(),
+            "elicitation_not_owner"
+        );
+        assert_eq!(
+            store.withdraw("wrong-owner", id, 101).unwrap_err().code(),
+            "elicitation_not_owner"
+        );
+        assert_eq!(
+            store
+                .report_execution("wrong-owner", id, "executed", 101)
+                .unwrap_err()
+                .code(),
+            "elicitation_not_owner"
+        );
+    }
+    assert_eq!(snapshot(&scratch), before);
+    assert!(matches!(
+        store
+            .answer(&record.elicitation_id, "allow_once", Some("m1"), 101)
+            .unwrap()
+            .value,
+        AnswerOutcome::Answered(_)
+    ));
+}
+
+#[test]
+fn execution_updates_only_an_answered_non_decision_card_without_logging() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let before = snapshot(&scratch);
+    assert_eq!(
+        store
+            .report_execution(&owner.owner, &id, "not_run", 101)
+            .unwrap_err()
+            .code(),
+        "elicitation_invalid_execution"
+    );
+    assert_eq!(
+        store
+            .report_execution(&owner.owner, &id, "executed", 101)
+            .unwrap_err()
+            .code(),
+        "elicitation_store_error"
+    );
+    assert_eq!(snapshot(&scratch), before);
+    store.answer(&id, "allow_once", None, 102).unwrap();
+    let log = rows(&scratch.sql(), "elicitation_answers");
+    for execution in ["executed", "approved_not_executed", "outcome_unknown"] {
+        let record = store
+            .report_execution(&owner.owner, &id, execution, 103)
+            .unwrap();
+        assert_eq!(record.execution.as_deref(), Some(execution));
+        assert_eq!(store.get(&id, 103).unwrap().unwrap(), record);
+        assert_eq!(rows(&scratch.sql(), "elicitation_answers"), log);
+    }
+    let id = store
+        .create(&owner, flow_decision(), 104)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&id, "proceed", None, 105).unwrap();
+    let before = snapshot(&scratch);
+    assert_eq!(
+        store
+            .report_execution(&owner.owner, &id, "executed", 106)
+            .unwrap_err()
+            .code(),
+        "elicitation_invalid_execution"
+    );
+    assert_eq!(snapshot(&scratch), before);
+}
+
+#[test]
+fn dedup_refresh_ignores_expiry_schema_and_resolver_label_across_restart() {
+    let scratch = Scratch::new();
+    let mut owner = identity("reserved:plexus", "s");
+    owner.subject.agent_id = Some("agent-alf".into());
+    owner.subject.head_agent_id = "agent-alf".into();
+    owner.subject.label = "agent-alf".into();
+    let (store, _) = scratch.open(100);
+    let mut req = request();
+    req.dedup_key = Some("key".into());
+    req.expires_in_ms = 60_000;
+    let first = store.create(&owner, req.clone(), 100).unwrap();
+    assert!(first.created);
+    assert!(first.settlements.is_empty());
+    let second = store.create(&owner, req.clone(), 100).unwrap();
+    assert!(!second.created);
+    assert_eq!(second.record, first.record);
+    drop(store);
+    let (store, _) = scratch.open(200);
+    req.expires_in_ms = 120_000;
+    req.requested_schema = Some(json!({"transient":"not stored"}));
+    owner.resolved_name = Some("ALF".into());
+    let refreshed = store.create(&owner, req.clone(), 200).unwrap();
+    assert!(!refreshed.created);
+    assert_eq!(refreshed.record.elicitation_id, first.record.elicitation_id);
+    assert_eq!(refreshed.record.created_at_ms, 100);
+    assert_eq!(refreshed.record.expires_at_ms, 120_200);
+    assert_eq!(refreshed.record.request.expires_in_ms, 120_000);
+    assert_eq!(refreshed.record.subject.label, "ALF");
+    assert_eq!(refreshed.record.phone(None)["expiresInMs"], 120_000);
+    assert!(refreshed.settlements.is_empty());
+    owner.resolved_name = None;
+    let refreshed = store.create(&owner, req, 300).unwrap();
+    assert_eq!(refreshed.record.subject.label, "ALF");
+    assert_eq!(refreshed.record.elicitation_id, first.record.elicitation_id);
+    assert!(rows(&scratch.sql(), "elicitation_answers").is_empty());
+    let raw: String = scratch
+        .sql()
+        .query_row("SELECT record_json FROM elicitation_records", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(!raw.contains("requestedSchema"));
+    assert!(!raw.contains("requested_schema"));
+}
+
+#[test]
+fn dedup_content_changes_withdraw_then_insert_new_content_atomically() {
+    let cases: Vec<(&str, Value)> = vec![
+        ("scope", json!({"changed":true})),
+        ("args_digest", json!("changed")),
+        ("binding", json!({"k":2})),
+        ("at_console", json!("m1")),
+        ("title", json!("Changed title")),
+        ("preview", json!({"label":"Preview","text":"changed"})),
+    ];
+    for (field, value) in cases {
+        let scratch = Scratch::new();
+        let (store, _) = scratch.open(100);
+        let owner = identity("direct", "s");
+        let mut req = request();
+        req.dedup_key = Some("key".into());
+        let first = store.create(&owner, req.clone(), 100).unwrap().record;
+        let mut body = serde_json::to_value(req).unwrap();
+        body[field] = value;
+        let changed = store
+            .create(&owner, ConsentRequest::decode(body).unwrap(), 101)
+            .unwrap();
+        assert!(changed.created, "{field}");
+        assert_ne!(
+            changed.record.elicitation_id, first.elicitation_id,
+            "{field}"
+        );
+        assert_eq!(changed.settlements.len(), 1, "{field}");
+        assert_eq!(changed.settlements[0].state, State::Withdrawn, "{field}");
+        assert_eq!(
+            changed.settlements[0].elicitation_id, first.elicitation_id,
+            "{field}"
+        );
+        assert_eq!(changed.settlements[0].answered_at_ms, Some(101));
+        assert_settlement(&scratch, &changed.settlements[0], 1);
+        assert!(matches!(
+            store
+                .answer(&first.elicitation_id, "allow_once", None, 102)
+                .unwrap()
+                .value,
+            AnswerOutcome::Conflict(_)
+        ));
+        assert_eq!(
+            store
+                .get(&changed.record.elicitation_id, 102)
+                .unwrap()
+                .unwrap()
+                .state,
+            State::Pending
+        );
+    }
+}
+
+#[test]
+fn dedup_flow_body_and_subject_id_changes_replace_even_when_labels_match() {
+    for field in ["flow_install", "flow_decision", "agent_id", "head_agent_id"] {
+        let scratch = Scratch::new();
+        let (store, _) = scratch.open(100);
+        let mut owner = identity("reserved:plexus", "s");
+        let mut req = if field == "flow_decision" {
+            flow_decision()
+        } else {
+            request()
+        };
+        if field == "flow_install" {
+            req.kind = "flow_install".into();
+            req.flow_install = Some(serde_json::from_value(json!({"old":true})).unwrap());
+        }
+        req.dedup_key = Some("key".into());
+        let old = store.create(&owner, req.clone(), 100).unwrap().record;
+        match field {
+            "flow_install" => {
+                req.flow_install = Some(serde_json::from_value(json!({"new":true})).unwrap())
+            }
+            "flow_decision" => {
+                req.flow_decision = Some(serde_json::from_value(json!({"new":true})).unwrap())
+            }
+            "agent_id" => owner.subject.agent_id = Some("new-agent".into()),
+            "head_agent_id" => owner.subject.head_agent_id = "new-head".into(),
+            _ => unreachable!(),
+        }
+        let new = store.create(&owner, req, 101).unwrap();
+        assert!(new.created, "{field}");
+        assert_ne!(old.elicitation_id, new.record.elicitation_id, "{field}");
+        assert_eq!(new.settlements[0].state, State::Withdrawn);
+    }
+}
+
+#[test]
+fn dedup_matches_only_pending_owner_key_and_no_key_always_inserts() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let a = identity("direct", "session-a");
+    let b = identity("direct", "session-b");
+    let mut req = request();
+    req.dedup_key = Some("key".into());
+    let first = store.create(&a, req.clone(), 100).unwrap().record;
+    let other = store.create(&b, req.clone(), 100).unwrap();
+    assert!(other.created);
+    assert_ne!(other.record.elicitation_id, first.elicitation_id);
+    store
+        .answer(&first.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    let settled = store.get(&first.elicitation_id, 101).unwrap().unwrap();
+    let new = store.create(&a, req, 102).unwrap();
+    assert!(new.created);
+    assert!(new.settlements.is_empty());
+    assert_ne!(new.record.elicitation_id, first.elicitation_id);
+    assert_eq!(
+        store.get(&first.elicitation_id, 102).unwrap().unwrap(),
+        settled
+    );
+    let first = store.create(&a, request(), 103).unwrap();
+    let second = store.create(&a, request(), 103).unwrap();
+    assert_ne!(first.record.elicitation_id, second.record.elicitation_id);
+    assert!(first.created && second.created);
+}
+
+#[test]
+fn due_dedup_match_expires_and_replaces_but_request_never_sweeps_unrelated_cards() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let mut req = request();
+    req.expires_in_ms = 10;
+    let unrelated = store.create(&owner, req.clone(), 100).unwrap().record;
+    req.dedup_key = Some("key".into());
+    let due = store.create(&owner, req.clone(), 100).unwrap().record;
+    let new = store.create(&owner, req, 110).unwrap();
+    assert!(new.created);
+    assert_ne!(new.record.elicitation_id, due.elicitation_id);
+    assert_eq!(new.settlements.len(), 1);
+    assert_eq!(new.settlements[0].elicitation_id, due.elicitation_id);
+    assert_eq!(new.settlements[0].state, State::Expired);
+    assert_eq!(new.settlements[0].answered_at_ms, Some(110));
+    assert_eq!(new.record.created_at_ms, 110);
+    assert_settlement(&scratch, &new.settlements[0], 1);
+    assert_eq!(
+        scratch
+            .sql()
+            .query_row(
+                "SELECT state FROM elicitation_records WHERE elicitation_id=?1",
+                [unrelated.elicitation_id],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        "pending"
+    );
+}
+
+#[test]
+fn failing_replacement_insert_rolls_back_settlement_counter_and_old_record() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let mut req = request();
+    req.dedup_key = Some("key".into());
+    req.expires_in_ms = 10;
+    let old = store.create(&owner, req.clone(), 100).unwrap().record;
+    scratch.sql().execute_batch("CREATE TRIGGER fail_insert BEFORE INSERT ON elicitation_records BEGIN SELECT RAISE(ABORT,'injected insert failure'); END;").unwrap();
+    let before = snapshot(&scratch);
+    for now in [101, 110] {
+        let mut changed = req.clone();
+        changed.title = "changed".into();
+        assert!(store
+            .create(&owner, changed, now)
+            .unwrap_err()
+            .to_string()
+            .contains("injected insert failure"));
+        assert_eq!(
+            snapshot(&scratch),
+            before,
+            "rollback includes old settlement and id increment"
+        );
+    }
+    scratch
+        .sql()
+        .execute_batch("DROP TRIGGER fail_insert")
+        .unwrap();
+    let new = store.create(&owner, req, 110).unwrap();
+    assert_eq!(new.record.elicitation_id, "el_2");
+    assert_eq!(new.settlements[0].elicitation_id, old.elicitation_id);
+}
+
+#[test]
+fn failing_answer_log_insert_rolls_back_record_and_all_sweep_work() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let mut req = request();
+    req.expires_in_ms = 10;
+    let id = store
+        .create(&owner, req.clone(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.create(&owner, req, 100).unwrap();
+    scratch.sql().execute_batch("CREATE TRIGGER fail_log BEFORE INSERT ON elicitation_answers BEGIN SELECT RAISE(ABORT,'injected log failure'); END;").unwrap();
+    let before = snapshot(&scratch);
+    assert!(store.answer(&id, "allow_once", None, 101).is_err());
+    assert_eq!(snapshot(&scratch), before);
+    assert!(store.sweep(110).is_err());
+    assert_eq!(snapshot(&scratch), before);
+    scratch
+        .sql()
+        .execute_batch("DROP TRIGGER fail_log")
+        .unwrap();
+    assert_eq!(store.sweep(110).unwrap().len(), 2);
+}
+
+#[test]
+fn answers_and_outcomes_order_filter_and_global_high_water_survive_ack_and_restart() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owners = [
+        identity("direct", "s"),
+        identity("reserved:basal", "s"),
+        identity("reserved:plexus", "s"),
+    ];
+    let mut req = request();
+    req.binding = Some(json!({"private":true}));
+    let a = store.create(&owners[0], req.clone(), 100).unwrap().record;
+    let mut expiring = flow_decision();
+    expiring.expires_in_ms = 1;
+    let b = store.create(&owners[1], expiring, 100).unwrap().record;
+    let c = store.create(&owners[2], req, 100).unwrap().record;
+    store
+        .answer(&a.elicitation_id, "allow_once", None, 100)
+        .unwrap();
+    store.sweep(101).unwrap();
+    store
+        .withdraw(&owners[2].owner, &c.elicitation_id, 101)
+        .unwrap();
+    let outcomes = store.outcomes(0, 101).unwrap();
+    assert_eq!(outcomes.cursor, 3);
+    assert_eq!(
+        outcomes
+            .records
+            .iter()
+            .map(|row| row["elicitation_id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            a.elicitation_id.as_str(),
+            b.elicitation_id.as_str(),
+            c.elicitation_id.as_str()
+        ]
+    );
+    for record in &outcomes.records {
+        assert!(record.get("requester_label").is_some());
+        assert!(record.get("binding").is_none());
+    }
+    assert_eq!(
+        store.answers(&owners[0].owner, 0, 101).unwrap().records[0]["binding"],
+        json!({"private":true})
+    );
+    assert!(
+        store
+            .answers(&owners[2].owner, 0, 101)
+            .unwrap()
+            .records
+            .is_empty(),
+        "withdrawals excluded from owner feed"
+    );
+    assert_eq!(store.answers("no-owner", 0, 101).unwrap().cursor, 3);
+    assert!(store.outcomes(3, 101).unwrap().records.is_empty());
+    for owner in &owners {
+        store.ack(&owner.owner, 3).unwrap();
+    }
+    assert!(store.get(&a.elicitation_id, 101).unwrap().is_none());
+    assert_eq!(
+        store
+            .get_owned(&owners[0].owner, &a.elicitation_id, 101)
+            .unwrap_err()
+            .code(),
+        "elicitation_not_found"
+    );
+    assert!(store
+        .answers(&owners[0].owner, 0, 101)
+        .unwrap()
+        .records
+        .is_empty());
+    assert_eq!(store.outcomes(0, 101).unwrap(), outcomes);
+    drop(store);
+    let (store, settlements) = scratch.open(102);
+    assert!(settlements.is_empty());
+    assert_eq!(store.outcomes(0, 102).unwrap(), outcomes);
+    store.sweep(101 + RETENTION_MS).unwrap();
+    assert_eq!(store.outcomes(3, 101 + RETENTION_MS).unwrap().cursor, 3);
+    assert!(store
+        .outcomes(0, 101 + RETENTION_MS)
+        .unwrap()
+        .records
+        .is_empty());
+    drop(store);
+    let (store, _) = scratch.open(102 + RETENTION_MS);
+    let empty = store.outcomes(3, 102 + RETENTION_MS).unwrap();
+    assert!(empty.records.is_empty());
+    assert_eq!(empty.cursor, 3);
+    let next = store
+        .create(&owners[0], request(), 102 + RETENTION_MS)
+        .unwrap()
+        .record;
+    store
+        .answer(&next.elicitation_id, "allow_once", None, 103 + RETENTION_MS)
+        .unwrap();
+    let feed = store.outcomes(3, 103 + RETENTION_MS).unwrap();
+    assert_eq!(feed.cursor, 4);
+    assert_eq!(feed.records.len(), 1);
+    assert_eq!(feed.records[0]["elicitation_id"], next.elicitation_id);
+    assert!(store
+        .outcomes(feed.cursor, 103 + RETENTION_MS)
+        .unwrap()
+        .records
+        .is_empty());
+}
+
+#[test]
+fn ack_is_cumulative_owner_scoped_and_includes_withdrawals_only_up_to_cursor() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let a = identity("direct", "a");
+    let b = identity("direct", "b");
+    let first = store.create(&a, request(), 100).unwrap().record;
+    let second = store.create(&b, request(), 100).unwrap().record;
+    let third = store.create(&a, request(), 100).unwrap().record;
+    store
+        .withdraw(&a.owner, &first.elicitation_id, 101)
+        .unwrap();
+    store
+        .answer(&second.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    store
+        .answer(&third.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    store.ack(&a.owner, 2).unwrap();
+    assert!(store.get(&first.elicitation_id, 101).unwrap().is_none());
+    assert!(store.get(&second.elicitation_id, 101).unwrap().is_some());
+    assert!(store.get(&third.elicitation_id, 101).unwrap().is_some());
+    let before = snapshot(&scratch);
+    assert_eq!(
+        store.ack(&a.owner, -1).unwrap_err().code(),
+        "elicitation_invalid_request"
+    );
+    assert_eq!(
+        store.answers(&a.owner, -1, 101).unwrap_err().code(),
+        "elicitation_invalid_request"
+    );
+    assert_eq!(
+        store.outcomes(-1, 101).unwrap_err().code(),
+        "elicitation_invalid_request"
+    );
+    assert_eq!(snapshot(&scratch), before);
+}
+
+#[test]
+fn retention_exact_bound_builds_tombstones_at_read_time_without_changing_the_log() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let answered = store.create(&owner, request(), 100).unwrap().record;
+    let withdrawn = store.create(&owner, request(), 100).unwrap().record;
+    store
+        .answer(&answered.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    store
+        .withdraw(&owner.owner, &withdrawn.elicitation_id, 101)
+        .unwrap();
+    let log = rows(&scratch.sql(), "elicitation_answers");
+    store.sweep(100 + RETENTION_MS).unwrap();
+    assert!(store
+        .answers(&owner.owner, 0, 100 + RETENTION_MS)
+        .unwrap()
+        .records[0]
+        .get("title")
+        .is_some());
+    assert!(store
+        .get(&answered.elicitation_id, 100 + RETENTION_MS)
+        .unwrap()
+        .is_some());
+    store.sweep(101 + RETENTION_MS).unwrap();
+    assert_eq!(
+        scratch
+            .sql()
+            .query_row(
+                "SELECT COUNT(*) FROM elicitation_records WHERE record_json IS NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        2
+    );
+    let answer_tombstone =
+        json!({"elicitation_id":answered.elicitation_id,"state":"expired","settled_at":101});
+    let withdraw_tombstone =
+        json!({"elicitation_id":withdrawn.elicitation_id,"state":"expired","settled_at":101});
+    assert_eq!(
+        store
+            .answers(&owner.owner, 0, 101 + RETENTION_MS)
+            .unwrap()
+            .records,
+        vec![answer_tombstone.clone()]
+    );
+    assert_eq!(
+        store.outcomes(0, 101 + RETENTION_MS).unwrap().records,
+        vec![answer_tombstone, withdraw_tombstone]
+    );
+    assert_eq!(rows(&scratch.sql(), "elicitation_answers"), log);
+    assert!(store
+        .get(&answered.elicitation_id, 101 + RETENTION_MS)
+        .unwrap()
+        .is_none());
+    let before = snapshot(&scratch);
+    let result = store
+        .answer(
+            &answered.elicitation_id,
+            "allow_once",
+            None,
+            101 + RETENTION_MS,
+        )
+        .unwrap();
+    assert_eq!(result.value, AnswerOutcome::NotFound);
+    assert!(result.settlements.is_empty());
+    assert_eq!(snapshot(&scratch), before);
+    drop(store);
+    let (store, settlements) = scratch.open(102 + RETENTION_MS);
+    assert!(settlements.is_empty());
+    assert_eq!(
+        store
+            .answers(&owner.owner, 0, 102 + RETENTION_MS)
+            .unwrap()
+            .records
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn prune_deletes_acknowledged_answers_explicitly_before_record_deletion() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let record = store.create(&owner, request(), 100).unwrap().record;
+    store
+        .answer(&record.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    store.ack(&owner.owner, 1).unwrap();
+    // The trigger observes the order even though the shared-store connection
+    // normally enables foreign keys: cascade must never do this deletion for us.
+    scratch.sql().execute_batch("CREATE TRIGGER require_explicit_answer_delete BEFORE DELETE ON elicitation_records WHEN EXISTS (SELECT 1 FROM elicitation_answers WHERE elicitation_id=OLD.elicitation_id) BEGIN SELECT RAISE(ABORT,'answer must be deleted first'); END;").unwrap();
+    assert!(store.sweep(101 + RETENTION_MS).unwrap().is_empty());
+    assert!(rows(&scratch.sql(), "elicitation_records").is_empty());
+    assert!(rows(&scratch.sql(), "elicitation_answers").is_empty());
+    assert_eq!(store.outcomes(0, 101 + RETENTION_MS).unwrap().cursor, 1);
+}
+
+#[test]
+fn prune_delete_failure_rolls_back_nulling_and_explicit_answer_delete_together() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let record = store.create(&owner, request(), 100).unwrap().record;
+    store
+        .answer(&record.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    store.ack(&owner.owner, 1).unwrap();
+    scratch.sql().execute_batch("CREATE TRIGGER fail_prune BEFORE DELETE ON elicitation_records BEGIN SELECT RAISE(ABORT,'injected prune failure'); END;").unwrap();
+    let before = snapshot(&scratch);
+    assert!(store
+        .sweep(101 + RETENTION_MS)
+        .unwrap_err()
+        .to_string()
+        .contains("injected prune failure"));
+    assert_eq!(snapshot(&scratch), before);
+    scratch
+        .sql()
+        .execute_batch("DROP TRIGGER fail_prune")
+        .unwrap();
+    store.sweep(101 + RETENTION_MS).unwrap();
+    assert!(rows(&scratch.sql(), "elicitation_answers").is_empty());
+}
+
+#[test]
+fn pending_order_and_saturating_expiry_are_durable() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("direct", "s");
+    let mut longer = request();
+    longer.expires_in_ms = 200;
+    let a = store.create(&owner, longer, 100).unwrap().record;
+    let mut shorter = request();
+    shorter.expires_in_ms = 100;
+    let b = store.create(&owner, shorter.clone(), 100).unwrap().record;
+    let c = store.create(&owner, shorter, 100).unwrap().record;
+    assert_eq!(
+        store
+            .pending()
+            .unwrap()
+            .iter()
+            .map(|r| &r.elicitation_id)
+            .collect::<Vec<_>>(),
+        vec![&b.elicitation_id, &c.elicitation_id, &a.elicitation_id]
+    );
+    let near_limit = store
+        .create(&owner, request(), i64::MAX - 1)
+        .unwrap()
+        .record;
+    assert_eq!(near_limit.expires_at_ms, i64::MAX);
+    assert!(matches!(
+        store
+            .answer(&near_limit.elicitation_id, "allow_once", None, i64::MAX)
+            .unwrap()
+            .value,
+        AnswerOutcome::Conflict(_)
+    ));
+}
+
+#[test]
+fn record_projections_preserve_opaque_content_but_do_not_leak_binding_to_phone() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let mut owner = identity("reserved:plexus", "s");
+    owner.subject.agent_id = Some("worker".into());
+    owner.subject.head_agent_id = "worker".into();
+    owner.subject.label = "WORKER".into();
+    let mut req = request();
+    req.scope = Some(json!({"MixedCase":{"inside_key":true}}));
+    req.binding = Some(json!({"nestedOpaque":{"KeepCase":1}}));
+    req.at_console = Some("m1".into());
+    req.preview = Some(cingulate_decode::Preview {
+        label: "Preview".into(),
+        text: "Some text".into(),
+    });
+    req.options[0].detail = Some("More detail".into());
+    let record = store.create(&owner, req, 100).unwrap().record;
+    let phone = record.phone(Some(i64::MAX));
+    assert_eq!(phone["requesterLabel"], "reserved:plexus");
+    assert_eq!(phone["subject"]["headAgentId"], "worker");
+    assert_eq!(phone["atConsole"], "m1");
+    assert_eq!(phone["blockUntilMs"], record.expires_at_ms);
+    assert_eq!(phone["scope"], json!({"MixedCase":{"inside_key":true}}));
+    assert_eq!(
+        phone["preview"],
+        json!({"label":"Preview","text":"Some text"})
+    );
+    assert_eq!(phone["options"][0]["detail"], "More detail");
+    for key in [
+        "binding",
+        "request",
+        "requester",
+        "elicitation_id",
+        "requestedSchema",
+        "requested_schema",
+    ] {
+        assert!(phone.get(key).is_none(), "{key}");
+    }
+    let requester = record.requester_wire(Some(101));
+    assert_eq!(requester["requester_label"], "reserved:plexus");
+    assert_eq!(requester["subject"]["head_agent_id"], "worker");
+    assert_eq!(requester["binding"], json!({"nestedOpaque":{"KeepCase":1}}));
+    assert_eq!(requester["at_console"], "m1");
+    assert_eq!(requester["block_until_ms"], 101);
+    assert!(requester.get("elicitationId").is_none());
+    assert!(requester.get("requester").is_none());
+    let result = store
+        .withdraw(&owner.owner, &record.elicitation_id, 102)
+        .unwrap();
+    assert!(result.value.phone(Some(103)).get("blockUntilMs").is_none());
+    assert!(result
+        .value
+        .requester_wire(None)
+        .get("block_until_ms")
+        .is_none());
+    // Binding and console are durable inside record_json, not extra columns.
+    let raw: String = scratch
+        .sql()
+        .query_row(
+            "SELECT record_json FROM elicitation_records WHERE elicitation_id=?1",
+            params![record.elicitation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<ElicitationRecord>(&raw).unwrap(),
+        result.value
+    );
+}
