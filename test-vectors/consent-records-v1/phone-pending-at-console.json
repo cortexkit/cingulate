@@ -1,0 +1,34 @@
+{
+  "tag": "consent-records-v1",
+  "method": "consent.get",
+  "request": {
+    "elicitationId": "@ELICITATION_ID@"
+  },
+  "reply": {
+    "elicitationId": "@ELICITATION_ID@",
+    "createdAtMs": "@NOW_MS@",
+    "expiresAtMs": "@EXPIRES_AT_MS@",
+    "subject": {
+      "label": "an unverified local process"
+    },
+    "state": "pending",
+    "kind": "consent",
+    "title": "Allow app access",
+    "prompt": "Allow interaction with this app?",
+    "options": [
+      { "id": "allow_once", "label": "Allow once", "effect": "grant" },
+      { "id": "deny", "label": "Not now", "effect": "decline" }
+    ],
+    "default": "deny",
+    "urgency": "normal",
+    "onExpiry": "deny",
+    "materialDamage": true,
+    "scope": { "app": "com.apple.TextEdit" },
+    "lateExecution": "execute",
+    "target": { "kind": "app", "label": "TextEdit" },
+    "expiresInMs": 60000,
+    "facts": [],
+    "requesterLabel": "direct",
+    "atConsole": "m1"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "tag": "consent-records-v1",
+  "reply": {
+    "elicitationId": "@ELICITATION_ID@",
+    "kind": "elicitation",
+    "eventAtMs": "@NOW_MS@",
+    "machineId": "m1"
+  }
+}

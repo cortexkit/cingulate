@@ -1,0 +1,18 @@
+[package]
+name = "cingulate-vectors"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+async-trait = "0.1"
+cingulate-decode = { path = "../cingulate-decode" }
+cingulate-store = { path = "../cingulate-store" }
+ck-cingulate = { path = "../ck-cingulate" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
+sha2 = "0.10"
+subc-client-rs = "=0.26.1"
+subc-protocol = "=0.29.1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

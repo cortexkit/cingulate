@@ -1,0 +1,12 @@
+{
+  "tag": "consent-records-v1",
+  "method": "consent.answer",
+  "request": {
+    "elicitationId": "@ELICITATION_ID@",
+    "choiceId": "allow_once"
+  },
+  "error": {
+    "code": "user_not_at_console",
+    "message": "user_not_at_console: answering machine must match at_console"
+  }
+}

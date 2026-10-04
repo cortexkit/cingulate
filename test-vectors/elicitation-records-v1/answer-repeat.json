@@ -1,0 +1,49 @@
+{
+  "tag": "elicitation-records-v1",
+  "reply": {
+    "ok": true,
+    "alreadyAnswered": true,
+    "elicitation": {
+      "elicitationId": "el_head",
+      "createdAtMs": 1000,
+      "expiresAtMs": 61000,
+      "subject": {
+        "agentId": "agent-alf",
+        "headAgentId": "agent-alf",
+        "label": "ALF"
+      },
+      "state": "answered",
+      "kind": "consent",
+      "title": "Copy login",
+      "prompt": "May I copy your login?",
+      "options": [
+        {
+          "id": "transfer:chrome",
+          "label": "Copy from Chrome",
+          "effect": "grant"
+        },
+        {
+          "id": "deny",
+          "label": "Not now",
+          "effect": "decline"
+        }
+      ],
+      "default": "deny",
+      "urgency": "normal",
+      "onExpiry": "deny",
+      "materialDamage": true,
+      "scope": "github.com",
+      "duration": "this call",
+      "lateExecution": "execute",
+      "target": {
+        "kind": "site",
+        "label": "github.com"
+      },
+      "expiresInMs": 60000,
+      "sessionRef": "ses_head",
+      "facts": [],
+      "answeredChoiceId": "transfer:chrome",
+      "answeredAtMs": 2000
+    }
+  }
+}
