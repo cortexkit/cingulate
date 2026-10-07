@@ -1,0 +1,16 @@
+{
+  "error": {
+    "code": "elicitation_option_group_required",
+    "message": "choice computer_30m is in the danger option group; declare clientFeatures option-group"
+  },
+  "method": "consent.answer",
+  "request": {
+    "choiceId": "computer_30m",
+    "elicitationId": "el_1"
+  },
+  "route": {
+    "operator_surface": true,
+    "principal": "reserved:callosum"
+  },
+  "tag": "danger-option-group-v1"
+}

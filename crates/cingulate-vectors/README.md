@@ -13,6 +13,16 @@ scenario advances it, and the sweep timer is disabled.
 - `consent.rs` pins cingulate's additive fields and the console refusal without
   removing anything from the parsed reply or pointer.
 - `pins.rs` pins each SHA256SUMS and verifies complete file coverage and bytes.
+- `contracts.rs` checks the two contract corpora, `danger-option-group-v1` and
+  `permissions-v1`, which are written from `docs/contracts/` before any
+  implementation exists: each `.jcs` against an independent RFC 8785
+  canonicalizer, each `.sha256`, and the contracts' cross-case rules.
+
+`examples/generate_vectors.rs` writes those two corpora. Check them from the
+workspace root with
+`cargo run -p cingulate-vectors --example generate_vectors --locked -- --check`;
+run it without `--check` to rewrite them after a deliberate contract change,
+then update the manifest pins in `pins.rs`.
 
 Comparisons remove only `requesterLabel` and `atConsole` from upstream phone
 projections, or `requester_label` from upstream requester records. Opaque nested

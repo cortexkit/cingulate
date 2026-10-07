@@ -1,0 +1,1 @@
+{"method":"permissions.revoke","now_ms":2800000,"reply":{"outcome":"already_gone"},"request":{"id":"grt_01","module":"cerebellum"},"route":{"operator_surface":true,"principal":"reserved:callosum"},"tag":"permissions-v1"}

@@ -1,0 +1,1 @@
+{"method":"permissions.revoke","now_ms":1060000,"reply":{"outcome":"module_unreachable"},"request":{"id":"grt_77","module":"plexus"},"route":{"operator_surface":true,"principal":"reserved:callosum"},"tag":"permissions-v1"}
