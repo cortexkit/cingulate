@@ -152,7 +152,7 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 21);
+    assert_eq!(cases(PERMISSIONS).len(), 22);
 }
 
 #[test]

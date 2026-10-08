@@ -84,7 +84,7 @@ fn danger_option_group_manifest_hash_is_pinned() {
 fn permissions_manifest_hash_is_pinned() {
     pin(
         "permissions-v1",
-        "cea1dec80e7ed17900479886571e27559409e167ab7e48b5fac25e72b33fc8a3",
+        "afec5cc3bcca2fdff8fbdd0ed8735e635f1a0425ea6caac002c5d81664c47b85",
     );
 }
 
@@ -95,7 +95,7 @@ fn danger_option_group_manifest_covers_exact_bytes() {
 
 #[test]
 fn permissions_manifest_covers_exact_bytes() {
-    coverage("permissions-v1", 64);
+    coverage("permissions-v1", 67);
 }
 
 #[test]
