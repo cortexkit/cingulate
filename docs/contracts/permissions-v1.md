@@ -147,7 +147,11 @@ route stamp, the same authority `consent.answer` uses today:
   operator-surface stamp (the paired phone, through Callosum's `phone` expose
   profile) and from the local operator's `direct` route
   ([`revoke-direct`](../../test-vectors/permissions-v1/revoke-direct.json)).
-- `permissions.list_all` is admitted from `reserved:callosum` and from `direct`.
+- `permissions.list_all` is admitted from `reserved:callosum` with the
+  operator-surface stamp (the `phone` or `sim` expose profile) and from `direct`.
+  The list is the operator's whole grant inventory, so a paired Mac relaying
+  through Callosum, which carries no operator-surface stamp, can't read it
+  ([`list-all-refused-no-operator-surface`](../../test-vectors/permissions-v1/list-all-refused-no-operator-surface.json)).
 - Everything else is refused with `permissions_operator_required`, including
   `reserved:callosum` without the operator-surface stamp and every agent route
   ([`revoke-refused-not-operator`](../../test-vectors/permissions-v1/revoke-refused-not-operator.json),

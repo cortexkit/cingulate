@@ -70,6 +70,7 @@ Aggregator cases (cingulate, called by the phone through Callosum unless noted):
 | `list-all-unsupported` | `aft` declares the capability but does not serve `permissions.list`. |
 | `list-all-unchanged` | `since_version` equal to `list-all-ok`'s version: `unchanged`, no `modules`. |
 | `list-all-refused` | An agent's carrier route: refused. |
+| `list-all-refused-no-operator-surface` | `reserved:callosum` without the operator-surface stamp (a paired Mac): refused. |
 | `revoke-revoked` | Provider answered `revoked`. |
 | `revoke-stopping` | Provider answered `revoked` with `stopping: true`. |
 | `revoke-already-gone` | Provider answered `not_found` (here: `grt_01` after expiry). |

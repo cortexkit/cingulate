@@ -1,0 +1,14 @@
+{
+  "error": {
+    "code": "permissions_operator_required",
+    "message": "permissions operations need the operator: reserved:callosum on an operator surface, or direct"
+  },
+  "method": "permissions.list_all",
+  "now_ms": 1060000,
+  "request": {},
+  "route": {
+    "operator_surface": false,
+    "principal": "reserved:callosum"
+  },
+  "tag": "permissions-v1"
+}

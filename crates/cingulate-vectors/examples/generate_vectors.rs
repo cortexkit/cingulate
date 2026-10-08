@@ -588,6 +588,19 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
             ),
         ),
         (
+            "list-all-refused-no-operator-surface",
+            with_now(
+                case(
+                    PERMISSIONS,
+                    "permissions.list_all",
+                    json!({"principal": "reserved:callosum", "operator_surface": false}),
+                    json!({}),
+                    operator_required(),
+                ),
+                listed_at,
+            ),
+        ),
+        (
             "revoke-revoked",
             with_now(
                 case(

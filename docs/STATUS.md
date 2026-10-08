@@ -109,7 +109,8 @@ From SUBC. An operation admitted on the local operator's `direct` route proves
 only that the caller runs as the operator's user. Any local process connects as
 `direct`, an agent's shell included. Admitting a card answer there would be a
 self-approval door: an agent could answer its own head's card. This is the same
-open gap as §5.8 and §5.10 of the elevation design (SUBC's `elevdoc` branch). It
+open gap as §5.8 and §5.10 of the elevation design (`docs/designs/operator-elevation.md`
+in the private `cortexkit/subconscious-design` repository). It
 closes with the runtime cell (separate runtime user accounts) or a program check
 on the caller. It is not a v1 blocker, and it must not be read as a guarantee.
 
