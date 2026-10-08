@@ -73,6 +73,32 @@ fn consent_manifest_hash_is_pinned() {
 }
 
 #[test]
+fn danger_option_group_manifest_hash_is_pinned() {
+    pin(
+        "danger-option-group-v1",
+        "b12c50344340930b688ab2f4a1536960e079138d774958f10071ea05d22e2619",
+    );
+}
+
+#[test]
+fn permissions_manifest_hash_is_pinned() {
+    pin(
+        "permissions-v1",
+        "cea1dec80e7ed17900479886571e27559409e167ab7e48b5fac25e72b33fc8a3",
+    );
+}
+
+#[test]
+fn danger_option_group_manifest_covers_exact_bytes() {
+    coverage("danger-option-group-v1", 31);
+}
+
+#[test]
+fn permissions_manifest_covers_exact_bytes() {
+    coverage("permissions-v1", 64);
+}
+
+#[test]
 fn records_manifest_covers_exact_bytes() {
     coverage("elicitation-records-v1", 9);
 }

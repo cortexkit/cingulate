@@ -1,0 +1,15 @@
+{
+  "method": "permissions.revoke",
+  "now_ms": 1060000,
+  "reply": {
+    "outcome": "revoked"
+  },
+  "request": {
+    "id": "grt_03",
+    "module": "cerebellum"
+  },
+  "route": {
+    "principal": "direct"
+  },
+  "tag": "permissions-v1"
+}

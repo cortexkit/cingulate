@@ -1,0 +1,1 @@
+{"method":"permissions.revoke","now_ms":1060000,"reply":{"code":"not_a_provider","outcome":"refused"},"request":{"id":"grt_01","module":"broca"},"route":{"operator_surface":true,"principal":"reserved:callosum"},"tag":"permissions-v1"}

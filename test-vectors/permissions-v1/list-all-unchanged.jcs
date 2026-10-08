@@ -1,0 +1,1 @@
+{"method":"permissions.list_all","now_ms":1060000,"reply":{"unchanged":true,"version":"865a2c989d4a4fbf53828bb6388e40fb6ea16069664d944af46dcb1186d8bc4a"},"request":{"since_version":"865a2c989d4a4fbf53828bb6388e40fb6ea16069664d944af46dcb1186d8bc4a"},"route":{"operator_surface":true,"principal":"reserved:callosum"},"tag":"permissions-v1"}
