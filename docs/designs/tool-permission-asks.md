@@ -132,19 +132,24 @@ a host prompt that cannot be withdrawn shows "Already answered".
   On expiry: `access_head_no_answer`.
 - **User leg: 10 min** (head ask, or escalated worker ask from the escalation, timed from the
   escalation). On expiry: `access_user_no_answer`.
-- **Holding the call:** the call blocks until the ask settles or its leg expires. It never returns
-  early with a "pending" result: a worker given one has no way to wait on it, so it would end its
-  turn before its work is done. To make that possible, every AFT tool that can ask declares a reply
-  deadline (`reply.max_ms` in its catalog entry, for the presets workers and heads use) covering
-  the longest leg plus the tool's own work, at least 11 minutes. The caller then waits that long.
-  Broca computes each call's deadline from that declaration on plan sends, and AFT's host plugins
-  follow the same declaration. A provider that dies or restarts closes its route, which ends its
-  held calls at once, so the long deadline only matters for a provider that is alive but stuck on
-  one call. The daemon's health probes catch a wedged provider long before 11 minutes.
-- **Later, if needed:** a mid-call deadline extension from provider to caller (a progress event
-  with a bounded new deadline) would let normal calls keep a short deadline. It is a contract
-  change across Broca, core's hosts and the Claude Code gateway, so it is left out unless a fixed
-  ceiling proves too slow at catching stuck calls.
+- **Holding the call:** AFT holds the call for its normal reply budget (at most 100 s), so an ask
+  answered quickly never interrupts anything. If the ask is still open then, AFT ends the call with
+  `access_pending`, whose text tells the agent plainly: it is waiting for permission, it should end
+  its turn, and it will be resumed with the answer. Tool deadlines stay short, so a stuck call is
+  still caught at the normal bound.
+- **Ending a turn is not finishing:** this is the same parked path a worker's question to its head
+  already uses. Core records the worker as awaiting an answer when it receives the `head_ask`
+  notice (which names the asking session). While that record is open, core's completion gate
+  answers "blocked", not "completed", and its stall and nudge detectors stand down, so a mason
+  that ends its turn on `access_pending` is never treated as done. When the ask leaves its pending
+  states (answered, refused or expired), the `settled` notice clears the record and steers the
+  result into the same worker session, which resumes the turn; the agent then runs the call again,
+  and AFT matches `allow_once` to the same `args_hash`. A head's own ask parks the same way.
+- **Considered and left out:** declaring an 11-minute `reply.max_ms` on every tool that can ask,
+  so the call blocks for the whole leg. It would make a stuck edit, write or bash call take 11
+  minutes to be caught, and the parked path already keeps a waiting worker from finishing. A
+  mid-call deadline extension would avoid that cost but is a new contract feature across every
+  caller; it is not needed.
 - **Waking a head for its worker's ask:** Cingulate calls core's `session.notice` (core change 2
   below). No phone push goes out for the head leg.
 - **Busy heads:** a head in the middle of a long tool call sees the notice only at its next step
@@ -156,14 +161,17 @@ a host prompt that cannot be withdrawn shows "Already answered".
 1. **Carrier listing:** `reserved:aft` listed as a carrier toward `cingulate` on head and worker
    scope records, unless today's carrier list already covers it.
 2. **`session.notice`**, admitted only from `reserved:cingulate`, with no answer path, refusing
-   sessions core does not hold. Body: `{session_ref, elicitation_id, purpose, fields}`, where
+   sessions core does not hold. Body: `{session_ref, elicitation_id, purpose, fields}`; a
+   `head_ask` notice also carries `asker_session_ref`, the worker that is waiting. Where
    `purpose` is one of `head_ask`, `escalated`, `settled` or `withdrawn`, and `fields` are
    structured (`tool`, `operation`, `paths`, `command`, `reason`, `head_policy`, `answers`,
    `expires_at_ms`, and for `settled` the outcome and note). Core deduplicates on
    `(elicitation_id, purpose)`, so a retry never wakes twice while each step of one ask still
    wakes once. Core renders the text itself and escapes every field, so a worker's `reason`
    cannot inject instructions into its head's session, and every notice reads like core's
-   others.
+   others. On `head_ask`, core records the asker as awaiting an answer (the state a worker's
+   question to its head already uses); `settled` clears it and steers the result into the asker's
+   session.
 3. **The `acc_` arm of `work(prompt)`**, accepting only the four answers and relaying them as
    described above.
 
@@ -188,7 +196,8 @@ request ─┬─ worker ask ─▶ [pending:head] ─escalate─▶ [pending:us
 any pending state ─ head gone / call withdrawn ─▶ [refused: access_head_gone | access_withdrawn]
 ```
 
-The asker's tool call stays open in every pending state and returns when the record leaves it.
+An asker whose call returned `access_pending` stays parked in every pending state and is resumed
+when the record leaves them.
 
 A second request with the same `call_key` returns the same ask; an asker never re-asks.
 
