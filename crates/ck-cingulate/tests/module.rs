@@ -987,7 +987,7 @@ async fn allowlist_table_identity_and_order() {
     );
     assert!(!production.operator_surface);
     assert!(
-        Stamp::from_principal(Some(&Principal::Reserved {
+        !Stamp::from_principal(Some(&Principal::Reserved {
             module_id: "callosum".into()
         }))
         .operator_surface
@@ -1882,4 +1882,242 @@ async fn notifier_is_awaited_after_commit_and_errors_do_not_fail_ops() {
     f.request(&direct(), body()).await;
     assert_eq!(f.counts(), (2, 1));
     assert_eq!(f.payloads().len(), 3);
+}
+
+fn package_body() -> Value {
+    serde_json::from_str::<Value>(include_str!(
+        "../../../test-vectors/consent-package-card-v1/request.json"
+    ))
+    .unwrap()["params"]
+        .clone()
+}
+
+#[tokio::test]
+async fn package_request_is_restricted_to_prefrontal_core() {
+    let f = Fixture::open(None).await;
+    for label in [
+        "direct",
+        "reserved:plexus",
+        "reserved:cerebellum",
+        "reserved:entorhinal",
+        "reserved:basal",
+        "reserved:callosum",
+        "reserved:unknown",
+    ] {
+        let mut requester = stamp(label);
+        requester.carried_agent_id = "agent-alf".into();
+        f.unchanged_error(
+            &requester,
+            "consent.request",
+            package_body(),
+            "elicitation_requester_refused",
+        )
+        .await;
+    }
+    f.request(&stamp("reserved:prefrontal-core"), package_body())
+        .await;
+    assert_eq!(f.counts(), (1, 0));
+    f.unchanged_error(
+        &stamp("reserved:prefrontal-core"),
+        "consent.request",
+        body(),
+        "elicitation_requester_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn request_accepts_exact_size_cap_and_refuses_one_byte_over_without_writes() {
+    let f = Fixture::open(None).await;
+    let requester = stamp("reserved:prefrontal-core");
+    let mut request = package_body();
+    request["package"]["script"] = json!("");
+    let framing = serde_json::to_vec(&json!({"method":"consent.request","params":request.clone()}))
+        .unwrap()
+        .len();
+    let script = "s".repeat(1_310_720 - framing);
+    request["package"]["script"] = json!(script);
+    let mut bytes =
+        serde_json::to_vec(&json!({"method":"consent.request","params":request})).unwrap();
+    assert_eq!(bytes.len(), 1_310_720);
+    let HandlerOutcome::Response(reply) = f.handler.handle_stamped(&requester, &bytes).await else {
+        panic!("exact size cap refused")
+    };
+    let reply: Value = serde_json::from_slice(&reply).unwrap();
+    let record = ok(
+        &f.handler,
+        &requester,
+        "consent.get",
+        json!({"elicitation_id":reply["result"]["elicitation_id"]}),
+    )
+    .await;
+    assert_eq!(record["package"]["script"], script);
+    assert_eq!(f.counts(), (1, 0));
+    let rows = f.rows();
+    let pointers = f.payloads();
+    bytes.push(b' ');
+    assert!(
+        matches!(f.handler.handle_stamped(&requester, &bytes).await, HandlerOutcome::Error { code, .. } if code == "elicitation_request_too_large")
+    );
+    assert_eq!(f.rows(), rows);
+    assert_eq!(f.payloads(), pointers);
+}
+
+#[tokio::test]
+async fn package_pending_answers_and_outcomes_page_below_three_mib_and_get_keeps_bodies() {
+    let f = Fixture::open(None).await;
+    let requester = stamp("reserved:prefrontal-core");
+    let mut ids = Vec::new();
+    // Large display text survives projection, so omitting source alone is not a page limit.
+    for i in 0..10 {
+        let mut request = package_body();
+        request["dedup_key"] = json!(format!("package-{i}"));
+        request["prompt"] = json!("p".repeat(700_000));
+        request["package"]["script"] = json!("s".repeat(300_000));
+        request["package"]["manifest_json"] = json!(format!("\"{}\"", "m".repeat(290_000)));
+        let encoded =
+            serde_json::to_vec(&json!({"method":"consent.request","params":request.clone()}))
+                .unwrap();
+        assert!((1_280_000..=1_310_720).contains(&encoded.len()));
+        ids.push(f.request(&requester, request).await);
+    }
+    let full = ok(
+        &f.handler,
+        &requester,
+        "consent.get",
+        json!({"elicitation_id":ids[0]}),
+    )
+    .await;
+    assert_eq!(full["package"]["script"].as_str().unwrap().len(), 300_000);
+    assert_eq!(
+        full["package"]["manifest_json"].as_str().unwrap().len(),
+        290_002
+    );
+    let phone = ok(
+        &f.handler,
+        &operator(),
+        "consent.get",
+        json!({"elicitationId":ids[0]}),
+    )
+    .await;
+    assert_eq!(phone["package"], full["package"]);
+    let mut params = json!({});
+    let mut seen = std::collections::BTreeSet::new();
+    let mut pages = 0;
+    loop {
+        let reply = ok(&f.handler, &operator(), "consent.list_pending", params).await;
+        assert!(
+            serde_json::to_vec(&json!({"result":reply.clone()}))
+                .unwrap()
+                .len()
+                <= 3 * 1024 * 1024
+        );
+        for record in reply["records"].as_array().unwrap() {
+            assert!(record["package"].get("script").is_none());
+            assert!(record["package"].get("manifest_json").is_none());
+            assert_eq!(record["package"]["version"], 4);
+            assert!(seen.insert(record["elicitationId"].as_str().unwrap().to_owned()));
+        }
+        pages += 1;
+        if let Some(next) = reply.get("continuation") {
+            params = json!({"continuation":next});
+        } else {
+            break;
+        }
+        assert!(pages <= 10);
+    }
+    assert!(pages >= 3);
+    assert_eq!(seen, ids.iter().cloned().collect());
+    for id in &ids {
+        f.answer(id, "allow").await;
+    }
+    for method in ["consent.answers", "consent.outcomes"] {
+        let mut since = 0;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut pages = 0;
+        loop {
+            let reply = ok(&f.handler, &requester, method, json!({"since":since})).await;
+            assert!(
+                serde_json::to_vec(&json!({"result":reply.clone()}))
+                    .unwrap()
+                    .len()
+                    <= 3 * 1024 * 1024
+            );
+            for record in reply["records"].as_array().unwrap() {
+                assert!(record["package"].get("script").is_none());
+                assert!(record["package"].get("manifest_json").is_none());
+                assert!(seen.insert(record["elicitation_id"].as_str().unwrap().to_owned()));
+            }
+            pages += 1;
+            if let Some(next) = reply.get("continuation") {
+                since = next.as_i64().unwrap();
+                assert_eq!(reply["cursor"], since);
+                if method == "consent.answers" {
+                    ok(
+                        &f.handler,
+                        &requester,
+                        "consent.ack",
+                        json!({"cursor":since}),
+                    )
+                    .await;
+                }
+            } else {
+                break;
+            }
+            assert!(pages <= 10);
+        }
+        assert!(pages >= 3);
+        assert_eq!(seen, ids.iter().cloned().collect());
+    }
+}
+
+#[tokio::test]
+async fn attested_carrier_routes_store_subject_and_isolate_scope_epochs() {
+    use subc_client_rs::{RouteBindRequest, RouteHandle};
+    use subc_protocol::{BindIdentity, RouteTarget};
+    let f = Fixture::open(None).await;
+    for principal in ["cerebellum", "plexus", "entorhinal"] {
+        let scope = serde_json::from_value(json!({
+            "owner":{"kind":"reserved","module_id":"prefrontal-core"}, "ref":"head:alf", "scope_epoch":7,
+            "kind":"head", "attributes":{"agent_id":"agent-alf"}, "owner_authorized":true
+        })).unwrap();
+        let req = RouteBindRequest::new(
+            RouteHandle::detached(1, 1),
+            RouteTarget::ManagementSurface {
+                module_id: "cingulate".into(),
+            },
+            BindIdentity::new("/scratch", "ignored", "forged-session"),
+        )
+        .with_principal(Principal::Reserved {
+            module_id: principal.into(),
+        })
+        .with_scope(scope);
+        let requester = Stamp::from_bind(&req);
+        let id = f.request(&requester, body()).await;
+        let record = ok(
+            &f.handler,
+            &requester,
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+        assert_eq!(record["subject"]["agent_id"], "agent-alf");
+        let mut changed = req.clone();
+        changed.scope.as_mut().unwrap().scope_epoch += 1;
+        f.unchanged_error(
+            &Stamp::from_bind(&changed),
+            "consent.get",
+            json!({"elicitation_id":id}),
+            "elicitation_not_owner",
+        )
+        .await;
+        changed.scope = None;
+        f.unchanged_error(
+            &Stamp::from_bind(&changed),
+            "consent.request",
+            body(),
+            "elicitation_requester_refused",
+        )
+        .await;
+    }
 }

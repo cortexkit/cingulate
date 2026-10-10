@@ -131,6 +131,20 @@ pub struct Mutation<T> {
 pub struct Feed {
     pub records: Vec<Value>,
     pub cursor: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<i64>,
+}
+
+// Reserve space for the result envelope, cursors and pending-list continuation.
+// Record bytes include each array separator; the complete reply stays below 3 MiB.
+pub const PAGE_RECORD_BYTES: usize = 3 * 1024 * 1024 - 512;
+
+/// Large package source bodies are read through get, not repeated in card feeds.
+pub fn omit_package_bodies(value: &mut Value) {
+    if let Some(package) = value.get_mut("package").and_then(Value::as_object_mut) {
+        package.remove("script");
+        package.remove("manifest_json");
+    }
 }
 
 /// Owns the shared store's SQLite connection and lifetime single-writer lease.
@@ -499,23 +513,26 @@ impl ConsentStore {
         self.read(|conn| {
             let tx = conn.unchecked_transaction()?;
             let mut stmt = tx.prepare(
-                "SELECT r.elicitation_id,a.settled_at_ms,r.record_json \
+                "SELECT r.elicitation_id,a.settled_at_ms,r.record_json,a.cursor \
                  FROM elicitation_answers a JOIN elicitation_records r USING(elicitation_id) \
                  WHERE a.cursor>?1 AND (?2 IS NULL OR \
                  (a.owner=?2 AND r.acknowledged=0 AND r.state IN ('answered','expired'))) \
                  ORDER BY a.cursor",
             )?;
             let rows = stmt.query_map(params![since, owner], |row| Ok((
-                row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?,
+                 row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?,
             )))?.collect::<std::result::Result<Vec<_>, _>>()?;
             drop(stmt);
-            let cursor = tx.query_row(
+            let mut cursor = tx.query_row(
                 "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='elicitation_answers'),0)",
                 [], |row| row.get(0),
             )?;
             let mut records = Vec::new();
-            for (id, at, raw) in rows {
-                let value = match raw.filter(|_| now_ms.saturating_sub(at) < RETENTION_MS) {
+            let mut bytes = 0;
+            let mut last_cursor = since;
+            let mut continuation = None;
+            for (id, at, raw, row_cursor) in rows {
+                let mut value = match raw.filter(|_| now_ms.saturating_sub(at) < RETENTION_MS) {
                     Some(raw) => {
                         let record: ElicitationRecord = serde_json::from_str(&raw)?;
                         let mut value = record.requester_wire(None);
@@ -526,10 +543,23 @@ impl ConsentStore {
                     }
                     None => json!({"elicitation_id":id,"state":"expired","settled_at":at}),
                 };
+                omit_package_bodies(&mut value);
+                let size = serde_json::to_vec(&value)?.len() + 1;
+                if bytes + size > PAGE_RECORD_BYTES {
+                    if records.is_empty() {
+                        return Err(refuse("elicitation_invalid_request", "card projection exceeds page budget"));
+                    }
+                    // A page cursor may acknowledge only the rows actually returned.
+                    cursor = last_cursor;
+                    continuation = Some(last_cursor);
+                    break;
+                }
+                bytes += size;
+                last_cursor = row_cursor;
                 records.push(value);
             }
             tx.commit()?;
-            Ok(Feed { records, cursor })
+            Ok(Feed { records, cursor, continuation })
         })
     }
 

@@ -70,8 +70,8 @@ pub fn manifest() -> ModuleManifest {
         .build()
 }
 
-/// Internal daemon attestation, never decoded from params. Unavailable SDK
-/// fields deliberately remain empty in production rather than trusting callers.
+/// Requester, session and subject identity taken from the daemon's route bind,
+/// never from a consent request body.
 #[derive(Debug, Default, Clone)]
 pub struct Stamp {
     pub principal: Option<String>,
@@ -89,10 +89,27 @@ impl Stamp {
             Principal::Reserved { module_id } => format!("reserved:{module_id}"),
         });
         Self {
-            operator_surface: principal.as_deref() == Some("reserved:callosum"),
+            operator_surface: false,
             principal,
             ..Self::default()
         }
+    }
+
+    pub fn from_bind(req: &RouteBindRequest) -> Self {
+        let mut stamp = Self::from_principal(req.principal.as_ref());
+        if let Some(scope) = &req.scope {
+            // A scope reference can be reused for a new session. Including its
+            // owner and epoch prevents that session from reading the previous session's cards.
+            stamp.bind_session =
+                serde_json::to_string(&(&scope.owner, &scope.scope_ref, scope.scope_epoch))
+                    .expect("scope identity serialization");
+            stamp.carried_agent_id = scope.attributes.agent_id.clone().unwrap_or_default();
+        }
+        // Only Callosum's phone routes may answer or list pending cards. The
+        // fed-phone: harness prefix restricts that principal, not any other caller.
+        stamp.operator_surface =
+            stamp.label() == "reserved:callosum" && req.identity.harness.starts_with("fed-phone:");
+        stamp
     }
 
     fn label(&self) -> &str {
@@ -101,13 +118,13 @@ impl Stamp {
     fn owner(&self) -> String {
         json!([self.label(), self.bind_session]).to_string()
     }
-    fn allowed_kind(&self) -> Option<&'static str> {
+    fn allowed_kind(&self) -> Option<&'static [&'static str]> {
         match self.label() {
             "reserved:cerebellum" | "reserved:plexus" | "reserved:entorhinal" | "direct" => {
-                Some("consent")
+                Some(&["consent"])
             }
-            "reserved:prefrontal-core" => Some("flow_install"),
-            "reserved:basal" => Some("flow_decision"),
+            "reserved:prefrontal-core" => Some(&["flow_install", "package"]),
+            "reserved:basal" => Some(&["flow_decision"]),
             _ => None,
         }
     }
@@ -492,7 +509,10 @@ impl Handler {
         stamp: &Stamp,
         request: &ConsentRequest,
     ) -> Result<RequestIdentity, Refusal> {
-        if stamp.allowed_kind() != Some(request.kind.as_str()) {
+        if !stamp
+            .allowed_kind()
+            .is_some_and(|kinds| kinds.contains(&request.kind.as_str()))
+        {
             return Err(stamp.refuse());
         }
         let carrier = matches!(
@@ -550,6 +570,12 @@ impl Handler {
 
     /// In-process envelope entry point, also used by the production adapter.
     pub async fn handle_stamped(&self, stamp: &Stamp, body: &[u8]) -> HandlerOutcome {
+        if body.len() > 1_310_720 {
+            return HandlerOutcome::Error {
+                code: "elicitation_request_too_large".into(),
+                message: "consent envelope exceeds 1310720 bytes".into(),
+            };
+        }
         #[derive(Deserialize)]
         struct WireRequest {
             method: String,
@@ -721,7 +747,47 @@ impl Handler {
                     self.project(&mutation.value, false)
                 }
                 "consent.list_pending" => {
-                    json!({"records":store.pending().map_err(store_error)?.iter().map(|record| self.project(record, true)).collect::<Vec<_>>()})
+                    let after = params
+                        .get("continuation")
+                        .filter(|value| !value.is_null())
+                        .map(|value| -> Result<(i64, String), Refusal> {
+                            Ok((
+                                integer(value, "expires_at_ms")?,
+                                text(value, "elicitation_id")?.to_owned(),
+                            ))
+                        })
+                        .transpose()?;
+                    let mut records = Vec::new();
+                    let mut bytes = 0;
+                    let mut last = None;
+                    let mut continuation = None;
+                    for record in store.pending().map_err(store_error)? {
+                        let key = (record.expires_at_ms, record.elicitation_id.clone());
+                        if after.as_ref().is_some_and(|after| &key <= after) {
+                            continue;
+                        }
+                        let mut value = self.project(&record, true);
+                        cingulate_store::omit_package_bodies(&mut value);
+                        let size = serde_json::to_vec(&value)
+                            .expect("projection serialization")
+                            .len()
+                            + 1;
+                        if bytes + size > cingulate_store::PAGE_RECORD_BYTES {
+                            if records.is_empty() {
+                                return Err(invalid("card projection exceeds page budget"));
+                            }
+                            continuation = last;
+                            break;
+                        }
+                        records.push(value);
+                        bytes += size;
+                        last = Some(json!({"expires_at_ms":key.0,"elicitation_id":key.1}));
+                    }
+                    let mut reply = json!({"records":records});
+                    if let Some(continuation) = continuation {
+                        reply["continuation"] = continuation;
+                    }
+                    reply
                 }
                 "consent.answer" => {
                     let mutation = store
@@ -830,7 +896,7 @@ impl ModuleHandler for Handler {
             .routes
             .lock()
             .expect("route lock")
-            .insert(req.handle, Stamp::from_principal(req.principal.as_ref()));
+            .insert(req.handle, Stamp::from_bind(req));
         BindDecision::accept()
     }
     async fn on_route_gone(&self, handle: &RouteHandle) {
@@ -844,6 +910,168 @@ impl ModuleHandler for Handler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use subc_protocol::{BindIdentity, RouteTarget};
+
+    fn bind(principal: &str, harness: &str) -> RouteBindRequest {
+        RouteBindRequest::new(
+            RouteHandle::detached(1, 1),
+            RouteTarget::ManagementSurface {
+                module_id: "cingulate".into(),
+            },
+            BindIdentity::new("/scratch", harness, "untrusted-session"),
+        )
+        .with_principal(Principal::Reserved {
+            module_id: principal.into(),
+        })
+    }
+
+    #[tokio::test]
+    async fn production_bind_uses_attested_scope_and_agent() {
+        let handler = Handler::new(Options {
+            sweep_timer: false,
+            ..Options::default()
+        });
+        let scope = serde_json::from_value(json!({
+            "owner":{"kind":"reserved","module_id":"prefrontal-core"},
+            "ref":"head:alf", "scope_epoch":7, "kind":"head",
+            "attributes":{"agent_id":"agent-alf"}, "owner_authorized":true
+        }))
+        .unwrap();
+        let req = bind("plexus", "fed-mac:ignored").with_scope(scope);
+        handler.on_bind(&req).await;
+        let stamp = handler.inner.routes.lock().unwrap()[&req.handle].clone();
+        assert_eq!(
+            stamp.bind_session,
+            json!([{"kind":"reserved","module_id":"prefrontal-core"}, "head:alf", 7]).to_string()
+        );
+        assert_eq!(stamp.carried_agent_id, "agent-alf");
+        assert!(stamp.console_machine_id.is_none());
+        let mut changed = req.clone();
+        changed.scope.as_mut().unwrap().scope_epoch += 1;
+        assert_ne!(Stamp::from_bind(&changed).owner(), stamp.owner());
+        changed = req.clone();
+        changed.scope.as_mut().unwrap().scope_ref.push('x');
+        assert_ne!(Stamp::from_bind(&changed).owner(), stamp.owner());
+        changed = req.clone();
+        changed.scope.as_mut().unwrap().owner = Principal::Direct;
+        assert_ne!(Stamp::from_bind(&changed).owner(), stamp.owner());
+        changed = req.clone();
+        changed.identity = BindIdentity::new("/different", "other", "forged-session");
+        assert_eq!(Stamp::from_bind(&changed).owner(), stamp.owner());
+        handler.on_route_gone(&req.handle).await;
+        assert!(!handler
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .contains_key(&req.handle));
+    }
+
+    #[tokio::test]
+    async fn production_bind_without_scope_keeps_identity_empty() {
+        let handler = Handler::new(Options {
+            sweep_timer: false,
+            ..Options::default()
+        });
+        let req = bind("plexus", "fed-phone:0123456789abcdef0123456789abcdef");
+        handler.on_bind(&req).await;
+        let stamp = handler.inner.routes.lock().unwrap()[&req.handle].clone();
+        assert!(stamp.bind_session.is_empty());
+        assert!(stamp.carried_agent_id.is_empty());
+        assert!(stamp.console_machine_id.is_none());
+    }
+
+    macro_rules! phone_case {
+        ($name:ident, $principal:expr, $harness:expr, $allowed:expr) => {
+            #[tokio::test]
+            async fn $name() {
+                let handler = Handler::new(Options {
+                    sweep_timer: false,
+                    ..Options::default()
+                });
+                let req = bind($principal, $harness);
+                handler.on_bind(&req).await;
+                let stamp = handler.inner.routes.lock().unwrap()[&req.handle].clone();
+                assert_eq!(stamp.operator_surface, $allowed);
+                assert_eq!(operator(&stamp).is_ok(), $allowed);
+                let dir = tempfile::tempdir().unwrap();
+                let descriptor = storage_descriptor(None, dir.path().to_str().unwrap());
+                handler.hello_ack(&ModuleHelloAckBody {
+                    negotiated_ver: 1,
+                    subc_ops: vec![],
+                    subc_capabilities: vec![],
+                    storage: Some(serde_json::to_value(descriptor).unwrap()),
+                    machine_id: None,
+                }).await;
+                let request: Value = serde_json::from_str(include_str!("../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json")).unwrap();
+                let requester = Stamp::from_principal(Some(&Principal::Direct));
+                let reply = handler.dispatch(&requester, "consent.request", request).await.unwrap();
+                let id = reply["elicitation_id"].as_str().unwrap();
+                let answer = handler.dispatch(&stamp, "consent.answer", json!({"elicitationId":id,"choiceId":"allow_once"})).await;
+                let list = handler.dispatch(&stamp, "consent.list_pending", json!({})).await;
+                if $allowed {
+                    assert_eq!(answer.unwrap()["ok"], true);
+                    assert!(list.is_ok());
+                } else {
+                    assert_eq!(answer.unwrap_err().code, "elicitation_operator_required");
+                    assert_eq!(list.unwrap_err().code, "elicitation_operator_required");
+                }
+                let record = handler.dispatch(&requester, "consent.get", json!({"elicitation_id":id})).await.unwrap();
+                assert_eq!(record["state"], if $allowed { "answered" } else { "pending" });
+            }
+        };
+    }
+    phone_case!(
+        phone_callosum_is_operator,
+        "callosum",
+        "fed-phone:0123456789abcdef0123456789abcdef",
+        true
+    );
+    phone_case!(
+        unknown_callosum_is_not_operator,
+        "callosum",
+        "fed-unknown:0123456789abcdef0123456789abcdef",
+        false
+    );
+    phone_case!(
+        sim_callosum_is_not_operator,
+        "callosum",
+        "fed-sim:0123456789abcdef0123456789abcdef",
+        false
+    );
+    phone_case!(
+        mac_callosum_is_not_operator,
+        "callosum",
+        "fed-mac:0123456789abcdef0123456789abcdef",
+        false
+    );
+    phone_case!(empty_harness_is_not_operator, "callosum", "", false);
+    phone_case!(
+        phone_other_principal_is_not_operator,
+        "plexus",
+        "fed-phone:0123456789abcdef0123456789abcdef",
+        false
+    );
+    phone_case!(
+        phone_literal_prefix_is_sufficient,
+        "callosum",
+        "fed-phone:",
+        true
+    );
+    phone_case!(
+        phone_prefix_is_case_sensitive,
+        "callosum",
+        "Fed-phone:0123456789abcdef0123456789abcdef",
+        false
+    );
+
+    #[test]
+    fn absent_harness_is_rejected_by_sdk_identity_decoder() {
+        assert!(serde_json::from_value::<BindIdentity>(
+            json!({"project_root":"/scratch", "session":"s"})
+        )
+        .is_err());
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn health_does_not_acquire_store_lock() {

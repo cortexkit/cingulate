@@ -32,6 +32,17 @@ no request field names a requester or subject. The owner of a card is the pair
 requesters (`reserved:cerebellum`, `reserved:plexus`, `reserved:entorhinal`) must
 carry an agent on the stamp, or they are refused (`lib.rs:498-504`).
 
+### Package cards and bounded feeds
+
+`reserved:prefrontal-core` may raise `package` cards as well as `flow_install`.
+Package payloads are typed and closed; the tagged prefrontal vector is copied and
+SHA-256 checked in `test-vectors/consent-package-card-v1/`. The consent envelope
+limit is 1,310,720 bytes with `elicitation_request_too_large` on overflow.
+Pending lists, answers and outcomes omit package script and manifest bodies and
+page below 3 MiB, with continuations documented in `crates/ck-cingulate/README.md`.
+A full card remains readable through `consent.get`; existing non-package phone
+projections and pinned corpus bytes are unchanged.
+
 ### Store
 
 `crates/cingulate-store` holds cards in SQLite through `cortexkit-store`
@@ -77,11 +88,15 @@ system temp directory.
 - **Daemon card.** No subc registration for `ck-cingulate` exists yet; the module
   has only been run in process. A live-daemon test with attested route fields is
   deferred (`crates/ck-cingulate/README.md`).
-- **Attested stamp fields.** The production adapter fills only the principal. Bind
-  session, carried agent and console machine id stay empty until the SDK exposes
-  their attested sources, so carrier requests (Cerebellum, Plexus, Entorhinal)
-  and `at_console` answers fail closed in production
-  (`crates/ck-cingulate/README.md`, "Integration and test seams").
+- **Attested stamp fields.** The production adapter now reads the SDK's daemon
+  `RouteBindRequest.scope`: bind session is `[owner, ref, epoch]` serialized as
+  JSON, and carried agent is `attributes.agent_id`. Scoped Cerebellum, Plexus
+  and Entorhinal requests can therefore carry their subjects in production.
+  Unscoped routes keep the previous empty identity and fail closed for carriers.
+  No console machine source exists yet: `at_console` answers remain fail-closed.
+  Operator answers require `reserved:callosum` **and** a bind identity harness
+  with the literal `fed-phone:` prefix; other paired device classes cannot answer.
+  These adapter rules are covered in process; live-daemon routing is still deferred.
 - **Config.** The manifest's config schema is an empty object. Production
   `Options` use wall time, an unavailable resolver (no Entorhinal names; cards
   show raw agent ids) and a no-op notifier (no pushes until Callosum's
@@ -96,8 +111,8 @@ system temp directory.
 
 | Consumer | Operations | Where the code or vectors show it |
 |---|---|---|
-| prefrontal-core | Requester of `flow_install` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (core's dispatch is the source of the requester shapes) |
-| Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `operator_surface` is set only for `reserved:callosum` (`Stamp::from_principal`, `lib.rs:85-96`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
+| prefrontal-core | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (core's dispatch is the source of the requester shapes) |
+| Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `operator_surface` requires `reserved:callosum` and the literal `fed-phone:` harness prefix (`Stamp::from_bind`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
 | Plexus | Requester of `consent` cards as a carrier, then owner ops | `allowed_kind` (`lib.rs:106`), carrier check (`lib.rs:498-504`); `test-vectors/elicitation-requester-v1/README.md` names `reserved:plexus` as the requester |
 | Basal | Requester of `flow_decision` cards, then owner ops | `allowed_kind` (`lib.rs:110`) |
 | Cerebellum, Entorhinal | Requesters of `consent` cards as carriers | `allowed_kind` (`lib.rs:106`) |
@@ -117,7 +132,7 @@ on the caller. It is not a v1 blocker, and it must not be read as a guarantee.
 - **Card answers.** In this code `consent.answer` and `consent.list_pending` are
   not admitted on `direct`: both require `operator_surface` (`dispatch`,
   `crates/ck-cingulate/src/lib.rs:586`; `operator`, `lib.rs:279-288`), which only
-  `reserved:callosum` sets (`lib.rs:92`). `owner_principal_and_operator_refusals_write_nothing`
+  `reserved:callosum` with a `fed-phone:` bind harness sets (`Stamp::from_bind`). `owner_principal_and_operator_refusals_write_nothing`
   (`crates/ck-cingulate/tests/module.rs:788-807`) proves a `direct` answer is
   refused with `elicitation_operator_required`. The gap applies to any change
   that admits `direct` answers. `direct` may raise cards (`lib.rs:106`); those

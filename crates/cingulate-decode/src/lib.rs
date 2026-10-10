@@ -42,6 +42,16 @@ pub struct Preview {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Package {
+    pub package: String,
+    pub version: serde_json::Number,
+    pub code_hash: String,
+    pub script: String,
+    pub manifest_json: String,
+}
+
 /// The request form stored after successful decoding.
 ///
 /// Flow bodies are opaque objects: the consent module checks their presence and
@@ -49,6 +59,8 @@ pub struct Preview {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<Package>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_install: Option<Map<String, Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,6 +158,33 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        if self.kind == "package" {
+            let package = self
+                .package
+                .as_ref()
+                .ok_or_else(|| Refusal::invalid("missing package"))?;
+            if self.flow_install.is_some() || self.flow_decision.is_some() {
+                return Err(Refusal::invalid("package cannot carry flow bodies"));
+            }
+            if !(package.version.is_i64() || package.version.is_u64()) {
+                return Err(Refusal::invalid("package version must be a JSON integer"));
+            }
+            if package.code_hash.len() != 64
+                || !package
+                    .code_hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err(Refusal::invalid(
+                    "package code_hash must be lowercase 64-hex BLAKE3",
+                ));
+            }
+            serde_json::from_str::<Value>(&package.manifest_json).map_err(|_| {
+                Refusal::invalid("package manifest_json must be JSON encoded as a string")
+            })?;
+        } else if self.package.is_some() {
+            return Err(Refusal::invalid("package body requires package kind"));
+        }
         if self.kind == "flow_decision"
             && (self.session_ref.is_some()
                 || self.parent_session_ref.is_some()
@@ -189,8 +228,8 @@ impl ConsentRequest {
         {
             return Err(Refusal::invalid("choose is only valid for flow_decision"));
         }
-        if self.kind == "flow_install" {
-            if self.flow_install.is_none() {
+        if matches!(self.kind.as_str(), "flow_install" | "package") {
+            if self.kind == "flow_install" && self.flow_install.is_none() {
                 return Err(Refusal::invalid("missing flow_install"));
             }
             if self.options.len() != 2
@@ -207,14 +246,16 @@ impl ConsentRequest {
                     .count()
                     != 1
             {
-                return Err(Refusal::invalid(
-                    "flow install needs exactly grant and decline",
-                ));
+                return Err(Refusal::invalid(if self.kind == "package" {
+                    "package needs exactly grant and decline"
+                } else {
+                    "flow install needs exactly grant and decline"
+                }));
             }
         }
         if !matches!(
             self.kind.as_str(),
-            "consent" | "flow_install" | "flow_decision"
+            "consent" | "flow_install" | "flow_decision" | "package"
         ) {
             return Err(Refusal::new(
                 "elicitation_unknown_kind",

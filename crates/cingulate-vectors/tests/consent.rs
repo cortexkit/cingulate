@@ -97,3 +97,37 @@ async fn consent_console_vectors_match_unfiltered_ops_and_notifier_payloads() {
         .clone();
     assert_eq!(fixture.payloads(), vec![new, retraction]);
 }
+
+#[tokio::test]
+async fn tagged_package_vector_hash_is_pinned_and_card_is_stored_end_to_end() {
+    use sha2::{Digest, Sha256};
+    let bytes = include_bytes!("../../../test-vectors/consent-package-card-v1/request.json");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(bytes)),
+        "960d3fd19ee6bcec2cabc22c86063208e6dca5ded4da45bbe4e9b779262be5ed"
+    );
+    let fixture = Fixture::open(None).await;
+    let requester = stamp("reserved:prefrontal-core");
+    let reply = fixture.handler.handle_stamped(&requester, bytes).await;
+    let subc_client_rs::HandlerOutcome::Response(reply) = reply else {
+        panic!("package request refused: {reply:?}")
+    };
+    let reply: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+    let id = reply["result"]["elicitation_id"].as_str().unwrap();
+    let request: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    let record = fixture
+        .ok(&requester, "consent.get", json!({"elicitation_id":id}))
+        .await;
+    assert_eq!(record["kind"], "package");
+    assert_eq!(record["package"], request["params"]["package"]);
+    assert_eq!(record["binding"], request["params"]["binding"]);
+    let rows = fixture.rows();
+    assert_eq!(rows[0].len(), 1);
+    assert!(rows[0][0].iter().any(|column| {
+        let rusqlite::types::Value::Text(raw) = column else {
+            return false;
+        };
+        serde_json::from_str::<serde_json::Value>(raw)
+            .is_ok_and(|stored| stored["request"]["package"] == request["params"]["package"])
+    }));
+}

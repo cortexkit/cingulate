@@ -470,3 +470,105 @@ fn session_references_are_preserved_without_selecting_an_identity() {
         assert!(stored.get(key).is_none());
     }
 }
+
+fn package() -> Value {
+    serde_json::from_str::<Value>(include_str!(
+        "../../../test-vectors/consent-package-card-v1/request.json"
+    ))
+    .unwrap()["params"]
+        .clone()
+}
+
+#[test]
+fn package_payload_requires_closed_typed_fields() {
+    ConsentRequest::decode(package()).unwrap();
+    for field in ["package", "version", "code_hash", "script", "manifest_json"] {
+        let mut request = package();
+        request["package"].as_object_mut().unwrap().remove(field);
+        serde_refusal(request, &format!("missing field `{field}`"));
+        let mut request = package();
+        request["package"][field] = Value::Null;
+        serde_refusal(request, "invalid type: null");
+    }
+    for field in ["package", "code_hash", "script", "manifest_json"] {
+        let mut request = package();
+        request["package"][field] = json!({});
+        serde_refusal(request, "expected a string");
+    }
+    for value in [json!("4"), json!(true), json!({})] {
+        let mut request = package();
+        request["package"]["version"] = value;
+        assert_eq!(ConsentRequest::decode(request).unwrap_err().code, INVALID);
+    }
+    let mut request = package();
+    request["package"]["unknown"] = json!(true);
+    serde_refusal(request, "unknown field `unknown`");
+    for value in [Value::Null, json!([]), json!("package")] {
+        let mut request = package();
+        request["package"] = value;
+        assert_eq!(ConsentRequest::decode(request).unwrap_err().code, INVALID);
+    }
+}
+
+#[test]
+fn package_version_refuses_fractional_and_float_encoded_integers() {
+    for version in [json!(4.1), json!(4.0), json!(4e30)] {
+        let mut request = package();
+        request["package"]["version"] = version;
+        invalid(request, "package version must be a JSON integer");
+    }
+    for version in [json!(0), json!(-1), json!(u64::MAX)] {
+        let mut request = package();
+        request["package"]["version"] = version;
+        ConsentRequest::decode(request).unwrap();
+    }
+}
+
+#[test]
+fn package_hash_requires_exact_lowercase_64_hex() {
+    for hash in [
+        "a".repeat(63),
+        "a".repeat(65),
+        "A".repeat(64),
+        "g".repeat(64),
+        "é".repeat(32),
+        format!("{} ", "a".repeat(63)),
+    ] {
+        let mut request = package();
+        request["package"]["code_hash"] = json!(hash);
+        invalid(request, "package code_hash must be lowercase 64-hex BLAKE3");
+    }
+}
+
+#[test]
+fn package_manifest_must_be_json_encoded_string() {
+    let mut request = package();
+    request["package"]["manifest_json"] = json!("not JSON");
+    invalid(
+        request,
+        "package manifest_json must be JSON encoded as a string",
+    );
+}
+
+#[test]
+fn package_kind_requires_its_own_body_and_fail_closed_options() {
+    let mut request = package();
+    request.as_object_mut().unwrap().remove("package");
+    invalid(request, "missing package");
+    for kind in ["consent", "flow_install", "flow_decision"] {
+        let mut request = package();
+        request["kind"] = json!(kind);
+        invalid(request, "package body requires package kind");
+    }
+    for field in ["flow_install", "flow_decision"] {
+        let mut request = package();
+        request[field] = json!({});
+        invalid(request, "package cannot carry flow bodies");
+    }
+    let mut request = package();
+    request["options"][0]["effect"] = json!("other");
+    invalid(request, "package needs exactly grant and decline");
+    let mut request = package();
+    request["default"] = json!("allow");
+    refusal(request, "elicitation_fail_closed_required", FAIL_CLOSED);
+}

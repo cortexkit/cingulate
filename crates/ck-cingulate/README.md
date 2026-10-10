@@ -10,11 +10,43 @@ by the SDK's control plane and reads only an atomic readiness status.
 
 `Handler::handle_stamped` is the in-process envelope entry point; `Handler` also
 implements the SDK's `ModuleHandler`. `Stamp` is supplied exclusively by the
-daemon adapter. The production adapter uses the principal from `on_bind`, labels
-only `reserved:callosum` an operator, and leaves bind session, carried agent and
-console machine fields empty until the SDK's attested sources are specified.
-Carrier requests therefore fail closed in production; tests inject full stamps.
-No request-body identity or SDK `BindIdentity` field grants authority.
+daemon adapter. The production adapter uses the principal from `on_bind` and the
+SDK's daemon-attested `scope`: bind session is the JSON tuple
+`[owner, ref, epoch]`, and carried agent is `attributes.agent_id`. Unscoped binds
+keep both fields empty; carrier requests without an attested agent fail closed.
+Answering and listing pending cards require an operator surface: both the
+`reserved:callosum` principal and a bind identity `harness` beginning with the
+literal `fed-phone:` prefix. When Callosum opens a route for a paired device's
+call, it sets that harness to `fed-<class>:<device fingerprint>`, where the class
+(`phone`, `sim`, `mac` or `unknown`) is fixed by the operator at pairing and the
+device cannot choose it. Only the phone may approve cards. The harness only
+narrows Callosum's answer authority; on any other principal it grants nothing. Body identity
+and the bind identity's session are never trusted. Console machine stays empty:
+no attested console source exists, so `at_console` answers still fail closed.
+
+## Package cards and paging
+
+Prefrontal core may submit `flow_install` and `package` approval requests. A package payload
+is a closed object under `package`: string `package`, integer `version`, lowercase
+64-hex BLAKE3 `code_hash`, string `script`, and JSON-encoded string `manifest_json`.
+It has exactly one grant and one decline option and a decline default.
+All consent envelopes are limited to 1,310,720 bytes, including JSON framing;
+excess bytes are refused as `elicitation_request_too_large`, never truncated.
+
+`consent.list_pending`, `consent.answers` and `consent.outcomes` omit the package
+`script` and `manifest_json` bodies. Full cards are still returned by `consent.get`.
+Each serialized page, including its result envelope, is below 3 MiB. A pending
+list with more records returns `continuation: {expires_at_ms, elicitation_id}`;
+pass that object unchanged as the next list's `continuation`. Ordering remains
+expiry then id. The continuation is a position, not a frozen snapshot: cards
+settled during traversal disappear and new cards before it require a fresh list.
+Answers and outcomes return an integer `continuation` when more rows remain;
+pass it as the next call's `since`. On partial pages `cursor` is the last returned
+answer cursor, so acknowledging it cannot discard unread answers. On final pages
+the existing global high-water cursor is preserved. No continuation field is
+added to an unpaged reply, preserving existing pinned projections.
+
+## Runtime seams
 
 `Options` injects `Clock`, `Resolver`, `Notifier`, an optional `AwaitHook` and the
 sweep-timer switch. Production uses wall time, an unavailable resolver and a
