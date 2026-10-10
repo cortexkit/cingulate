@@ -171,7 +171,11 @@ a host prompt that cannot be withdrawn shows "Already answered".
    cannot inject instructions into its head's session, and every notice reads like core's
    others. On `head_ask`, core records the asker as awaiting an answer (the state a worker's
    question to its head already uses); `settled` clears it and steers the result into the asker's
-   session.
+   session. If the asker is idle when `settled` arrives (usual after `access_pending`), core
+   starts a new run in the same session with the result, the same path a head's `work(prompt)`
+   uses; a busy asker gets it as a steer at its next step. If the asker's task has already
+   finished (completed, settled or cancelled), core refuses with `session_not_live`, nothing is
+   delivered, and Cingulate records the settlement as unclaimed.
 3. **The `acc_` arm of `work(prompt)`**, accepting only the four answers and relaying them as
    described above.
 
