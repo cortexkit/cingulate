@@ -38,8 +38,10 @@ carry an agent on the stamp, or they are refused (`lib.rs:498-504`).
 Package payloads are typed and closed; the tagged prefrontal vector is copied and
 SHA-256 checked in `test-vectors/consent-package-card-v1/`. The consent envelope
 limit is 1,310,720 bytes with `elicitation_request_too_large` on overflow.
-Pending lists, answers and outcomes omit package script and manifest bodies and
-page below 3 MiB, with continuations documented in `crates/ck-cingulate/README.md`.
+The phone's pending list omits package script and manifest bodies; answers and
+outcomes keep them, because their readers check the answered card against what
+they sent. All three page below 3 MiB, with continuations documented in
+`crates/ck-cingulate/README.md`.
 A full card remains readable through `consent.get`; existing non-package phone
 projections and pinned corpus bytes are unchanged.
 

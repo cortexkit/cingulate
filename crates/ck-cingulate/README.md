@@ -33,8 +33,11 @@ It has exactly one grant and one decline option and a decline default.
 All consent envelopes are limited to 1,310,720 bytes, including JSON framing;
 excess bytes are refused as `elicitation_request_too_large`, never truncated.
 
-`consent.list_pending`, `consent.answers` and `consent.outcomes` omit the package
-`script` and `manifest_json` bodies. Full cards are still returned by `consent.get`.
+`consent.list_pending`, which the phone reads, omits the package `script` and
+`manifest_json` bodies; a full card is returned by `consent.get`. `consent.answers`
+and `consent.outcomes` keep the bodies: their readers (the card's requester and
+prefrontal-core) check an answered card against the one they sent, and one card,
+at most the envelope limit, always fits a page.
 Each serialized page, including its result envelope, is below 3 MiB. A pending
 list with more records returns `continuation: {expires_at_ms, elicitation_id}`;
 pass that object unchanged as the next list's `continuation`. Ordering remains
