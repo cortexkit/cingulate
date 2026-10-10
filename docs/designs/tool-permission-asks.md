@@ -63,7 +63,9 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
   default and the expiry outcome. `allow_scope` is left out when the answerer may not grant it.
 - **`macos_permission`** (keeps D9), requested by `reserved:aft` only, informational: no options,
   nothing waits on it. It names the folder, the program to grant and the steps in System
-  Settings. One open card per (folder, program). Refused on platforms other than macOS.
+  Settings. One open card per (folder, program): a repeat request returns the open card. AFT
+  closes it with `consent.withdraw` when it sees the folder readable again. Refused on platforms
+  other than macOS.
 
 ## Answers (keeps D5)
 
@@ -95,12 +97,25 @@ to the worker's scope, not the head's.
 - **User in the host UI:** AFT holds a `consent.host_feed` long-poll to Cingulate for each head
   session whose plugin is live, and relays `present` and `withdraw` entries to its plugin. The
   plugin's result returns as `consent.answer` from `reserved:aft` with `via: host_ui`, accepted only
-  for a card presented to that session's host. AFT's plugin never shows a prompt on its own for
+  for a card presented to that session's host. The feed subscription names the operations the
+  host can render (`ops`, from `read`, `write` and `exec`): today OpenCode renders all three and Pi
+  none. Cingulate presents a host prompt only for a listed operation; any other ask goes to the
+  card at once, with no 3 s grace. AFT's plugin never shows a prompt on its own for
   an Alfonso agent's call: it shows only what the feed presents.
 
 The first answer to reach Cingulate's record wins (a compare-and-set in one store transaction).
 Cingulate then withdraws every other surface. A late answer is refused with the settled answer, and
 a host prompt that cannot be withdrawn shows "Already answered".
+
+## AFT's side of the record
+
+- **Waiting:** `consent.await {elicitationId}` is a long-poll that returns when the card settles
+  or at the caller's wait bound. It reads only, so AFT may re-await at any time.
+- **Withdrawing:** when a held call ends without an answer (client cancelled, route closed, a run's
+  scope ended, or the asker gone), AFT calls `consent.withdraw {elicitationId}`. Only the principal
+  that raised a card may withdraw it. The record moves to `access_withdrawn`.
+- **After an AFT restart:** AFT re-sends `consent.request` with the persisted `call_key`; the same
+  `call_key` returns the same ask, and AFT awaits or withdraws it.
 
 ## Expiry and waking (keeps D6)
 
