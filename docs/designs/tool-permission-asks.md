@@ -34,11 +34,20 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
 - **Worker to head:** core already sets `parent` on every worker's scope record, naming its head's
   scope at the head's current epoch; it follows the head across epoch changes and is dropped when
   the head ends. The daemon's bind stamp carries it, so Cingulate takes the head from the stamp
-  and never asks core or Entorhinal. A worker ask whose stamp has no `parent` is refused
-  `access_no_head`.
-- **Which calls ask through Cingulate (keeps D2):** only a call whose stamp names an Alfonso agent
-  (`agent_id` set by an authority owner). A call with no stamp, or no agent, belongs to AFT alone,
-  and its plugin asks in the host UI as it does without Alfonso. If Cingulate is not running,
+  and never asks core or Entorhinal. Worker and head are told apart by the scope's `kind`, never by
+  whether a `parent` is present: a `worker` scope with no `parent` (its head has ended) is refused
+  `access_no_head`, so an orphaned worker's ask never reaches the user directly.
+- **Codemode runs:** a run's calls are judged as calls of the agent that started the run. A run
+  scope is `kind: ephemeral` with `agent_id` and `run_id`. Only heads can start runs today, so a
+  run scope has no `parent` and its ask is that head's own ask. If workers are later allowed to
+  start runs, core will set the run scope's `parent` to the worker's scope, and Cingulate will
+  walk run, then worker (through the daemon's `scope.describe`), then head; nothing else changes.
+  AFT ends a run's hold early when the run has less time left than the leg, and withdraws the ask.
+- **Which calls ask through Cingulate (changes D2's test):** a call whose stamped scope is owned by
+  `reserved:prefrontal-core` with `kind` `head`, `worker` or `ephemeral`. Testing `agent_id` alone
+  would miss every worker, because worker scopes carry no `agent_id`. A call with no stamp, or a
+  scope from any other owner, belongs to AFT alone, and its plugin asks in the host UI as it does
+  without Alfonso. If Cingulate is not running,
   AFT denies an Alfonso agent's call with `access_unavailable`; it never falls back to a host
   prompt for a worker, since nobody would answer it.
 
