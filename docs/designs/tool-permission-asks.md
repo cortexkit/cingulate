@@ -128,18 +128,21 @@ a host prompt that cannot be withdrawn shows "Already answered".
 
 ## Expiry and waking (keeps D6)
 
-- **Head leg: 90 s.** AFT's hold must end under Broca's 120 s tool-call ceiling. On expiry:
-  `access_head_no_answer`.
-- **User leg: 10 min** (head ask, or escalated worker ask from the escalation). AFT ends a held
-  call at its route's reply budget (at most 100 s) with `access_pending`, not a deny; when the
-  ask settles, the asker is woken with the result and retries, and AFT matches `allow_once` to the
-  same `args_hash`. On expiry: `access_user_no_answer`.
+- **Head leg: 10 min.** A head is often busy with its own work, so it gets as long as the user.
+  On expiry: `access_head_no_answer`.
+- **User leg: 10 min** (head ask, or escalated worker ask from the escalation, timed from the
+  escalation). On expiry: `access_user_no_answer`.
+- **Holding the call:** a tool call can wait at most 120 s, so AFT never holds one for a whole
+  leg. It ends a held call at its route's reply budget (at most 100 s) with `access_pending`, not
+  a deny, and the asker can carry on with other work. When the ask settles, the asker is woken
+  with the result and retries, and AFT matches `allow_once` to the same `args_hash`. Most heads
+  answer inside the hold, so most calls never see `access_pending`.
 - **Waking a head for its worker's ask:** Cingulate calls core's `session.notice` (core change 2
   below). No phone push goes out for the head leg.
 - **Waking a parked asker after settlement:** the same `session.notice`, with a different purpose.
 - **Busy heads:** a head in the middle of a long tool call sees the notice only at its next step
-  (Pi steers between calls, OpenCode at the next step), so some head legs will expire on busy
-  heads. `access_head_no_answer` is the intended outcome there, and the audit will show it.
+  (Pi steers between calls, OpenCode at the next step). That is why the head leg is 10 minutes and
+  not the length of one tool call.
 
 ## What core builds
 
@@ -173,7 +176,7 @@ One record per ask, in Cingulate's store:
 ```
 request ─┬─ worker ask ─▶ [pending:head] ─escalate─▶ [pending:user] ─first answer─▶ [settled]
          │                      │ answer ─────────────────────────────────────────▶ [settled]
-         │                      └─ 90 s ─▶ [refused: access_head_no_answer]
+         │                      └─ 10 min ─▶ [refused: access_head_no_answer]
          └─ head ask ──────────────────────▶ [pending:user] ─ 10 min ─▶ [refused: access_user_no_answer]
 any pending state ─ head gone / call withdrawn ─▶ [refused: access_head_gone | access_withdrawn]
 ```
@@ -189,7 +192,8 @@ escalation note, and the final state. Standing grants stay with AFT (`grants.lis
 
 ## Open questions for Ufuk
 
-1. The 90 s head leg and 10 min user leg.
+1. The 10 min head leg and 10 min user leg. (The earlier draft gave the head 90 s, the length of
+   one held tool call; Ufuk asked whether that was too short for a busy head.)
 2. Whether to show a host prompt that cannot be withdrawn beside the phone card, or the card only.
 3. Whether a user's "allow for this task" on an escalated ask should also be offered for the
    head's scope.
