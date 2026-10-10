@@ -29,7 +29,8 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
 
 - **Asker:** AFT sends the ask as `reserved:aft`, carried under the asking session's scope. Cingulate
   reads the session, its agent and its harness from the daemon's bind stamp, never from the body.
-  Core must list `reserved:aft` as a carrier toward `cingulate` on head and worker scopes.
+  Core must list `reserved:aft` as a carrier toward `cingulate` on head and worker scopes (core
+  change 1 below).
 - **Worker to head:** core already sets `parent` on every worker's scope record, naming its head's
   scope at the head's current epoch; it follows the head across epoch changes and is dropped when
   the head ends. The daemon's bind stamp carries it, so Cingulate takes the head from the stamp
@@ -82,9 +83,12 @@ to the worker's scope, not the head's.
   already has, `work(action="prompt", id="acc_…", prompt="<answer>[: note]")`, where `acc_…` is
   the ask's id from the notice. The work tool already routes prompts by id prefix, so no head's
   tool list or cached prompt changes. Core relays it to Cingulate as `consent.answer` from
-  `reserved:prefrontal-core`. Cingulate accepts that relay only on a `tool_permission` card still
-  in its head leg, only naming the asking worker's parent head (which Cingulate checks against the
-  worker's stamp), and only with the four answers above. Core is already the authority that
+  `reserved:prefrontal-core` with body `{elicitation_id, answer, note?, answered_by: {agent_id,
+  scope_ref, scope_epoch}}`. Core fills `answered_by` from the calling head's own verified session,
+  never from the prompt text, and refuses locally when that head is not the asking worker's
+  parent, so a wrong head gets a clear error at once. Cingulate accepts the relay only on a
+  `tool_permission` card still in its head leg, only when `answered_by` matches the `parent` in
+  the asking worker's stamp, and only with the four answers above. Core is already the authority that
   assigns agent identity, so relaying a head's answer gives it nothing new.
 - **User on the phone:** the existing phone rule (`consent.answer` from `reserved:callosum` with a
   harness starting `fed-phone:`), plus a new restriction: only while the ask is in its user leg.
@@ -106,10 +110,28 @@ a host prompt that cannot be withdrawn shows "Already answered".
   call at its route's reply budget (at most 100 s) with `access_pending`, not a deny; when the
   ask settles, the asker is woken with the result and retries, and AFT matches `allow_once` to the
   same `args_hash`. On expiry: `access_user_no_answer`.
-- **Waking a head for its worker's ask:** Cingulate calls core's `session.notice` (admitted only
-  from `reserved:cingulate`, idempotent by elicitation id, no answer path). The notice states the
-  ask, `head_policy`, the answers and the expiry time. No phone push goes out for the head leg.
-- **Waking a parked asker after settlement:** the same `session.notice`.
+- **Waking a head for its worker's ask:** Cingulate calls core's `session.notice` (core change 2
+  below). No phone push goes out for the head leg.
+- **Waking a parked asker after settlement:** the same `session.notice`, with a different purpose.
+- **Busy heads:** a head in the middle of a long tool call sees the notice only at its next step
+  (Pi steers between calls, OpenCode at the next step), so some head legs will expire on busy
+  heads. `access_head_no_answer` is the intended outcome there, and the audit will show it.
+
+## What core builds
+
+1. **Carrier listing:** `reserved:aft` listed as a carrier toward `cingulate` on head and worker
+   scope records, unless today's carrier list already covers it.
+2. **`session.notice`**, admitted only from `reserved:cingulate`, with no answer path, refusing
+   sessions core does not hold. Body: `{session_ref, elicitation_id, purpose, fields}`, where
+   `purpose` is one of `head_ask`, `escalated`, `settled` or `withdrawn`, and `fields` are
+   structured (`tool`, `operation`, `paths`, `command`, `reason`, `head_policy`, `answers`,
+   `expires_at_ms`, and for `settled` the outcome and note). Core deduplicates on
+   `(elicitation_id, purpose)`, so a retry never wakes twice while each step of one ask still
+   wakes once. Core renders the text itself and escapes every field, so a worker's `reason`
+   cannot inject instructions into its head's session, and every notice reads like core's
+   others.
+3. **The `acc_` arm of `work(prompt)`**, accepting only the four answers and relaying them as
+   described above.
 
 ## Refusals (keeps D8)
 
