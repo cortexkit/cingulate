@@ -548,12 +548,16 @@ async fn manifest_envelope_health_and_unknown_ops() {
             matches!(f.handler.handle_stamped(&direct(), body).await, HandlerOutcome::Error { code, .. } if code == "invalid_request")
         );
     }
-    assert_eq!(
-        f.handler
-            .handle_stamped(&operator(), br#"{"method":"consent.list_pending"}"#)
-            .await,
-        HandlerOutcome::Response(br#"{"result":{"records":[]}}"#.to_vec())
-    );
+    let HandlerOutcome::Response(bytes) = f
+        .handler
+        .handle_stamped(&operator(), br#"{"method":"consent.list_pending"}"#)
+        .await
+    else {
+        panic!("list without params must respond")
+    };
+    let envelope: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(envelope.as_object().unwrap().len(), 1);
+    assert_empty_pending(&envelope["result"]);
     for method in [
         "flow.revoke",
         "flow.install_status",
@@ -1176,10 +1180,7 @@ async fn expiry_reads_restart_and_persistent_ids() {
     assert_eq!(record["state"], "expired");
     assert_eq!(record["answered_at_ms"], 1010);
     assert!(record.get("answered_choice_id").is_none());
-    assert_eq!(
-        ok(&f.handler, &operator(), "consent.list_pending", Value::Null).await,
-        json!({"records":[]})
-    );
+    assert_empty_pending(&ok(&f.handler, &operator(), "consent.list_pending", Value::Null).await);
     let rows = f.rows();
     let pointers = f.payloads();
     f.reopen(None).await;
@@ -1480,15 +1481,14 @@ async fn invalid_params_do_not_sweep_and_extra_nonrequest_keys_are_accepted() {
         .await["state"],
         "expired"
     );
-    assert_eq!(
-        ok(
+    assert_empty_pending(
+        &ok(
             &f.handler,
             &operator(),
             "consent.list_pending",
-            json!({"ignored":true})
+            json!({"ignored":true}),
         )
         .await,
-        json!({"records":[]})
     );
     assert_eq!(f.counts(), (1, 1));
 }
@@ -2125,4 +2125,229 @@ async fn attested_carrier_routes_store_subject_and_isolate_scope_epochs() {
         )
         .await;
     }
+}
+
+async fn pending_list(fixture: &Fixture, params: Value) -> Value {
+    ok(
+        &fixture.handler,
+        &operator(),
+        "consent.list_pending",
+        params,
+    )
+    .await
+}
+
+fn assert_empty_pending(reply: &Value) {
+    assert_eq!(reply.as_object().unwrap().len(), 2);
+    assert_eq!(reply["records"], json!([]));
+    assert!(reply["revision"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+}
+
+#[tokio::test]
+async fn pending_revision_unchanged_missing_unknown_and_nonstring_conditions() {
+    let fixture = Fixture::open(None).await;
+    fixture.request(&direct(), body()).await;
+    let full = pending_list(&fixture, json!({})).await;
+    assert_eq!(full["records"].as_array().unwrap().len(), 1);
+    assert!(full["revision"].is_string());
+    let unchanged = pending_list(&fixture, json!({"if_revision":full["revision"]})).await;
+    assert_eq!(
+        unchanged,
+        json!({"unchanged":true,"revision":full["revision"]})
+    );
+    for condition in [json!("unknown"), json!(null), json!(42), json!({})] {
+        assert_eq!(
+            pending_list(&fixture, json!({"if_revision":condition})).await,
+            full
+        );
+    }
+}
+
+async fn revision_event(event: &str) {
+    let fixture = Fixture::open(None).await;
+    let mut request = body();
+    request["dedup_key"] = json!("phone-poll");
+    let id = fixture.request(&direct(), request.clone()).await;
+    let before = pending_list(&fixture, json!({})).await;
+    match event {
+        "created" => {
+            fixture.request(&direct(), body()).await;
+        }
+        "answered" => {
+            fixture.answer(&id, "allow_once").await;
+        }
+        "expired" => {
+            fixture.clock.set(61_000);
+            fixture.handler.timer_tick().await.unwrap();
+        }
+        "withdrawn" => {
+            ok(
+                &fixture.handler,
+                &direct(),
+                "consent.withdraw",
+                json!({"elicitation_id":id}),
+            )
+            .await;
+        }
+        "replaced" => {
+            request["title"] = json!("Changed title");
+            assert_ne!(fixture.request(&direct(), request).await, id);
+            assert_eq!(fixture.get(&id).await["state"], "withdrawn");
+        }
+        "refreshed" => {
+            fixture.clock.set(2_000);
+            assert_eq!(fixture.request(&direct(), request).await, id);
+        }
+        _ => panic!("unknown event"),
+    }
+    let after = pending_list(&fixture, json!({"if_revision":before["revision"]})).await;
+    assert!(after.get("unchanged").is_none(), "{event}");
+    assert_ne!(after["revision"], before["revision"], "{event}");
+    assert_ne!(after["records"], before["records"], "{event}");
+    assert_eq!(
+        pending_list(&fixture, json!({"if_revision":after["revision"]})).await,
+        json!({"unchanged":true,"revision":after["revision"]})
+    );
+}
+
+macro_rules! revision_event_test {
+    ($name:ident, $event:literal) => {
+        #[tokio::test]
+        async fn $name() {
+            revision_event($event).await;
+        }
+    };
+}
+revision_event_test!(pending_revision_changes_after_creation, "created");
+revision_event_test!(pending_revision_changes_after_answer, "answered");
+revision_event_test!(pending_revision_changes_after_expiry, "expired");
+revision_event_test!(pending_revision_changes_after_withdrawal, "withdrawn");
+revision_event_test!(pending_revision_changes_after_dedup_replacement, "replaced");
+revision_event_test!(pending_revision_changes_after_dedup_refresh, "refreshed");
+
+#[tokio::test]
+async fn pending_revision_survives_reopen_and_downtime_expiry() {
+    let mut fixture = Fixture::open(None).await;
+    fixture.request(&direct(), body()).await;
+    let before = pending_list(&fixture, json!({})).await;
+    fixture.reopen(None).await;
+    assert_eq!(
+        pending_list(&fixture, json!({"if_revision":before["revision"]})).await,
+        json!({"unchanged":true,"revision":before["revision"]})
+    );
+    fixture.clock.set(61_000);
+    fixture.reopen(None).await;
+    let after = pending_list(&fixture, json!({"if_revision":before["revision"]})).await;
+    assert_ne!(after["revision"], before["revision"]);
+    assert_eq!(after["records"], json!([]));
+    fixture.reopen(None).await;
+    assert_eq!(
+        pending_list(&fixture, json!({"if_revision":after["revision"]})).await,
+        json!({"unchanged":true,"revision":after["revision"]})
+    );
+}
+
+#[tokio::test]
+async fn pending_revision_expiry_swept_on_conditional_read_cannot_be_unchanged() {
+    let fixture = Fixture::open(None).await;
+    let id = fixture.request(&direct(), body()).await;
+    let before = pending_list(&fixture, json!({})).await;
+    fixture.clock.set(61_000);
+    let after = pending_list(&fixture, json!({"if_revision":before["revision"]})).await;
+    assert_ne!(after["revision"], before["revision"]);
+    assert_eq!(after["records"], json!([]));
+    assert_eq!(fixture.get(&id).await["state"], "expired");
+}
+
+#[tokio::test]
+async fn pending_revision_continuation_ignores_condition_and_orders_expiry_then_id() {
+    let fixture = Fixture::open(None).await;
+    let mut request = body();
+    request["expires_in_ms"] = json!(120_000);
+    let late = fixture.request(&direct(), request).await;
+    let first = fixture.request(&direct(), body()).await;
+    let second = fixture.request(&direct(), body()).await;
+    let full = pending_list(&fixture, json!({})).await;
+    let ids: Vec<_> = full["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["elicitationId"].clone())
+        .collect();
+    assert_eq!(ids, vec![json!(first), json!(second), json!(late)]);
+    let continued = pending_list(
+        &fixture,
+        json!({
+            "continuation":{"expires_at_ms":61_000,"elicitation_id":first},
+            "if_revision":full["revision"]
+        }),
+    )
+    .await;
+    assert_eq!(
+        continued["records"],
+        json!([full["records"][1], full["records"][2]])
+    );
+    assert_eq!(continued["revision"], full["revision"]);
+    assert!(continued.get("unchanged").is_none());
+}
+
+#[tokio::test]
+async fn pending_revision_waiter_registration_and_drop_change_rendered_deadline() {
+    let fixture = Fixture::open(None).await;
+    let id = fixture.request(&direct(), body()).await;
+    let before = pending_list(&fixture, json!({})).await;
+    assert!(before["records"][0].get("blockUntilMs").is_none());
+    let handler = fixture.handler.clone();
+    let await_id = id.clone();
+    let task = tokio::spawn(async move {
+        ok(
+            &handler,
+            &direct(),
+            "consent.await",
+            json!({"elicitation_id":await_id,"timeout_ms":120_000}),
+        )
+        .await
+    });
+    fixture.clock.sleeping_at(61_000).await;
+    let registered = pending_list(&fixture, json!({"if_revision":before["revision"]})).await;
+    assert_ne!(registered["revision"], before["revision"]);
+    assert_eq!(registered["records"][0]["blockUntilMs"], 61_000);
+    assert_eq!(
+        pending_list(&fixture, json!({"if_revision":registered["revision"]})).await,
+        json!({"unchanged":true,"revision":registered["revision"]})
+    );
+    task.abort();
+    assert!(bounded(task).await.unwrap_err().is_cancelled());
+    let dropped = pending_list(&fixture, json!({"if_revision":registered["revision"]})).await;
+    assert_ne!(dropped["revision"], registered["revision"]);
+    assert_eq!(dropped, before);
+}
+
+#[tokio::test]
+async fn pending_revision_failed_settlement_rolls_back_counter_and_records() {
+    let fixture = Fixture::open(None).await;
+    let id = fixture.request(&direct(), body()).await;
+    let before = pending_list(&fixture, json!({})).await;
+    fixture
+        .db()
+        .execute_batch(
+            "CREATE TRIGGER reject_answer BEFORE INSERT ON elicitation_answers
+        BEGIN SELECT RAISE(ABORT, 'injected settlement failure'); END;",
+        )
+        .unwrap();
+    error(
+        &fixture.handler,
+        &operator(),
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+        "elicitation_store_error",
+    )
+    .await;
+    assert_eq!(fixture.get(&id).await["state"], "pending");
+    assert_eq!(
+        pending_list(&fixture, json!({"if_revision":before["revision"]})).await,
+        json!({"unchanged":true,"revision":before["revision"]})
+    );
 }

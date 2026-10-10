@@ -301,9 +301,16 @@ async fn undeclared_replies_match_todays_projection_of_the_card_without_danger_o
         *slot = Value::String("el_1".into());
         value
     };
-    let listed = fixture
+    let mut listed = fixture
         .ok(&phone, "consent.list_pending", serde_json::json!({}))
         .await;
+    assert!(listed["revision"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    // danger-option-group-v1 pins replies from before conditional polling.
+    // Require but exclude only the added revision field from this comparison;
+    // consent-phone-v1 separately pins the complete reply including revision.
+    listed.as_object_mut().unwrap().remove("revision");
     assert_eq!(
         rename(listed, "/records/0/elicitationId"),
         cases["list-pending-undeclared"]["reply"]

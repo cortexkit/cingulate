@@ -125,6 +125,7 @@ struct Snapshot {
     records: Vec<Vec<Value>>,
     answers: Vec<Vec<Value>>,
     id_seq: Vec<Vec<Value>>,
+    pending_revision: Vec<Vec<Value>>,
 }
 
 fn snapshot(scratch: &Scratch) -> Snapshot {
@@ -133,6 +134,7 @@ fn snapshot(scratch: &Scratch) -> Snapshot {
         records: rows(&conn, "elicitation_records"),
         answers: rows(&conn, "elicitation_answers"),
         id_seq: rows(&conn, "cingulate_id_seq"),
+        pending_revision: rows(&conn, "cingulate_pending_revision"),
     }
 }
 
@@ -193,7 +195,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2"
+        "1,2,3"
     );
     let answer_schema: String = conn
         .query_row(
@@ -281,14 +283,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,3,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,4,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 3"));
-    assert!(error.to_string().contains("migration 2"));
+    assert!(error.to_string().contains("version 4"));
+    assert!(error.to_string().contains("migration 3"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1245,4 +1247,51 @@ fn record_projections_preserve_opaque_content_but_do_not_leak_binding_to_phone()
         serde_json::from_str::<ElicitationRecord>(&raw).unwrap(),
         result.value
     );
+}
+
+#[test]
+fn pending_revision_migrates_existing_cards_without_rewriting_them() {
+    let scratch = Scratch::new();
+    let owner = identity("direct", "s");
+    let (store, _) = scratch.open(100);
+    let record = store.create(&owner, request(), 100).unwrap().record;
+    drop(store);
+    let before = rows(&scratch.sql(), "elicitation_records");
+    scratch
+        .sql()
+        .execute_batch(
+            "DROP TRIGGER cingulate_pending_insert;
+        DROP TRIGGER cingulate_pending_update;
+        DROP TRIGGER cingulate_pending_delete;
+        DROP TABLE cingulate_pending_revision;
+        DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=3;",
+        )
+        .unwrap();
+    let (store, settlements) = scratch.open(100);
+    assert!(settlements.is_empty());
+    assert_eq!(rows(&scratch.sql(), "elicitation_records"), before);
+    assert_eq!(store.pending_revision().unwrap(), 0);
+    store
+        .answer(&record.elicitation_id, "allow_once", None, 101)
+        .unwrap();
+    assert_eq!(store.pending_revision().unwrap(), 1);
+    drop(store);
+    let (store, _) = scratch.open(102);
+    assert_eq!(store.pending_revision().unwrap(), 1);
+}
+
+#[test]
+fn pending_revision_exhaustion_rolls_back_instead_of_reusing_a_revision() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    scratch
+        .sql()
+        .execute("UPDATE cingulate_pending_revision SET value=?1", [i64::MAX])
+        .unwrap();
+    let before = snapshot(&scratch);
+    assert!(store
+        .create(&identity("direct", "s"), request(), 100)
+        .is_err());
+    assert_eq!(snapshot(&scratch), before);
+    assert_eq!(store.pending_revision().unwrap(), i64::MAX);
 }

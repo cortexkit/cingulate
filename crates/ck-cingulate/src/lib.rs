@@ -20,6 +20,7 @@ use cingulate_store::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use subc_client_rs::{
     BindDecision, HandlerOutcome, ModuleHandler, RequestCtx, RouteBindRequest, RouteHandle,
 };
@@ -757,6 +758,35 @@ impl Handler {
                             ))
                         })
                         .transpose()?;
+                    // Snapshot deadlines once so the revision and every rendered
+                    // blockUntilMs describe the same waiter state.
+                    let blocks: std::collections::BTreeMap<_, _> = self
+                        .inner
+                        .waiters
+                        .lock()
+                        .expect("waiter lock")
+                        .cards
+                        .iter()
+                        .filter_map(|(id, waiters)| {
+                            waiters
+                                .values()
+                                .map(|w| w.deadline)
+                                .max()
+                                .map(|until| (id.clone(), until))
+                        })
+                        .collect();
+                    let revision = format!(
+                        "pending-v1:{}:{:x}",
+                        store.pending_revision().map_err(store_error)?,
+                        Sha256::digest(
+                            serde_json::to_vec(&blocks).expect("deadline serialization")
+                        )
+                    );
+                    if after.is_none()
+                        && params.get("if_revision").and_then(Value::as_str) == Some(&revision)
+                    {
+                        return Ok(json!({"unchanged":true,"revision":revision}));
+                    }
                     let mut records = Vec::new();
                     let mut bytes = 0;
                     let mut last = None;
@@ -766,7 +796,7 @@ impl Handler {
                         if after.as_ref().is_some_and(|after| &key <= after) {
                             continue;
                         }
-                        let mut value = self.project(&record, true);
+                        let mut value = record.phone(blocks.get(&record.elicitation_id).copied());
                         cingulate_store::omit_package_bodies(&mut value);
                         let size = serde_json::to_vec(&value)
                             .expect("projection serialization")
@@ -783,7 +813,7 @@ impl Handler {
                         bytes += size;
                         last = Some(json!({"expires_at_ms":key.0,"elicitation_id":key.1}));
                     }
-                    let mut reply = json!({"records":records});
+                    let mut reply = json!({"records":records,"revision":revision});
                     if let Some(continuation) = continuation {
                         reply["continuation"] = continuation;
                     }

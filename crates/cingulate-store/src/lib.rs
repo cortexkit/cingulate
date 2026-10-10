@@ -18,7 +18,7 @@ pub use record::{ElicitationRecord, State, Subject};
 
 pub const RETENTION_MS: i64 = 86_400_000;
 pub const MIGRATION_NAMESPACE: &str = "cingulate";
-pub const MIGRATIONS: [Migration; 2] = [
+pub const MIGRATIONS: [Migration; 3] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -26,6 +26,10 @@ pub const MIGRATIONS: [Migration; 2] = [
     Migration {
         version: 2,
         statements: include_str!("../migrations/002_id_seq.sql"),
+    },
+    Migration {
+        version: 3,
+        statements: include_str!("../migrations/003_pending_revision.sql"),
     },
 ];
 
@@ -325,6 +329,18 @@ impl ConsentStore {
 
     pub fn get_owned(&self, owner: &str, id: &str, now_ms: i64) -> Result<ElicitationRecord> {
         self.read(|conn| owned(conn, owner, id, now_ms))
+    }
+
+    /// Return the durable polling counter that tracks pending-card changes.
+    /// Triggers update it in the same transaction as each change.
+    pub fn pending_revision(&self) -> Result<i64> {
+        self.read(|conn| {
+            Ok(conn.query_row(
+                "SELECT value FROM cingulate_pending_revision WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )?)
+        })
     }
 
     /// Pending cards are ordered for display, not by insertion or feed order.
