@@ -30,10 +30,11 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
 - **Asker:** AFT sends the ask as `reserved:aft`, carried under the asking session's scope. Cingulate
   reads the session, its agent and its harness from the daemon's bind stamp, never from the body.
   Core must list `reserved:aft` as a carrier toward `cingulate` on head and worker scopes.
-- **Worker to head:** the worker's scope record names its head's scope as `parent`, and the
-  stamp carries it. Cingulate takes the head from there. If core does not set `parent` on worker
-  scopes today, that is the one core change this design needs; Cingulate does not ask core or
-  Entorhinal for it.
+- **Worker to head:** core already sets `parent` on every worker's scope record, naming its head's
+  scope at the head's current epoch; it follows the head across epoch changes and is dropped when
+  the head ends. The daemon's bind stamp carries it, so Cingulate takes the head from the stamp
+  and never asks core or Entorhinal. A worker ask whose stamp has no `parent` is refused
+  `access_no_head`.
 - **Which calls ask through Cingulate (keeps D2):** only a call whose stamp names an Alfonso agent
   (`agent_id` set by an authority owner). A call with no stamp, or no agent, belongs to AFT alone,
   and its plugin asks in the host UI as it does without Alfonso. If Cingulate is not running,
