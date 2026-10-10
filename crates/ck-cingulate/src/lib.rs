@@ -1065,6 +1065,33 @@ mod tests {
         false
     );
 
+    /// Callosum publishes the exact harness strings it stamps for each paired
+    /// device class. Pinning them here means a change to Callosum's format turns
+    /// this test red instead of silently locking the phone out, or letting
+    /// another device class answer cards.
+    #[test]
+    fn callosum_harness_vectors_mark_only_the_phone_as_operator() {
+        use sha2::{Digest, Sha256};
+        let bytes = include_bytes!("../../../test-vectors/device-class-harness/harness.jsonl");
+        assert_eq!(
+            format!("{:x}", Sha256::digest(bytes)),
+            "093493871164662fa6ee02c8240a4e048496d6f36870d1db330fa6725d3f6b35"
+        );
+        let mut operators = Vec::new();
+        let mut rows = 0;
+        for line in std::str::from_utf8(bytes).unwrap().lines() {
+            let row: Value = serde_json::from_str(line).unwrap();
+            let harness = row["harness"].as_str().unwrap();
+            rows += 1;
+            if Stamp::from_bind(&bind("callosum", harness)).operator_surface {
+                operators.push(row["class"].clone());
+            }
+            assert!(!Stamp::from_bind(&bind("plexus", harness)).operator_surface);
+        }
+        assert_eq!(rows, 4);
+        assert_eq!(operators, vec![json!("phone")]);
+    }
+
     #[test]
     fn absent_harness_is_rejected_by_sdk_identity_decoder() {
         assert!(serde_json::from_value::<BindIdentity>(
