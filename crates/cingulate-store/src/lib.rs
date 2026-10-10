@@ -532,7 +532,7 @@ impl ConsentStore {
             let mut last_cursor = since;
             let mut continuation = None;
             for (id, at, raw, row_cursor) in rows {
-                let mut value = match raw.filter(|_| now_ms.saturating_sub(at) < RETENTION_MS) {
+                let value = match raw.filter(|_| now_ms.saturating_sub(at) < RETENTION_MS) {
                     Some(raw) => {
                         let record: ElicitationRecord = serde_json::from_str(&raw)?;
                         let mut value = record.requester_wire(None);
@@ -543,7 +543,10 @@ impl ConsentStore {
                     }
                     None => json!({"elicitation_id":id,"state":"expired","settled_at":at}),
                 };
-                omit_package_bodies(&mut value);
+                // Both feeds keep package bodies. Their only readers are the card's
+                // requester (answers) and prefrontal-core (outcomes), which check an answered
+                // card against the one that was sent. One card is at most the 1.25 MiB request
+                // cap, so it always fits a page; only phone-facing lists drop the bodies.
                 let size = serde_json::to_vec(&value)?.len() + 1;
                 if bytes + size > PAGE_RECORD_BYTES {
                     if records.is_empty() {

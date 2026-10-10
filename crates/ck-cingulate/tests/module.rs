@@ -1964,7 +1964,7 @@ async fn request_accepts_exact_size_cap_and_refuses_one_byte_over_without_writes
 }
 
 #[tokio::test]
-async fn package_pending_answers_and_outcomes_page_below_three_mib_and_get_keeps_bodies() {
+async fn package_lists_page_below_three_mib_and_requester_feeds_keep_bodies() {
     let f = Fixture::open(None).await;
     let requester = stamp("reserved:prefrontal-core");
     let mut ids = Vec::new();
@@ -2044,8 +2044,13 @@ async fn package_pending_answers_and_outcomes_page_below_three_mib_and_get_keeps
                     <= 3 * 1024 * 1024
             );
             for record in reply["records"].as_array().unwrap() {
-                assert!(record["package"].get("script").is_none());
-                assert!(record["package"].get("manifest_json").is_none());
+                // The requester's own feeds carry the full package, so the requester can
+                // check the answered card against the one it sent.
+                assert_eq!(record["package"]["script"].as_str().unwrap().len(), 300_000);
+                assert_eq!(
+                    record["package"]["manifest_json"].as_str().unwrap().len(),
+                    290_002
+                );
                 assert!(seen.insert(record["elicitation_id"].as_str().unwrap().to_owned()));
             }
             pages += 1;
