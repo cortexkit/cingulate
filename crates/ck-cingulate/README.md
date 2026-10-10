@@ -68,14 +68,27 @@ prevent settlement/refresh wakes from being lost between a read and a wait.
 Pointer delivery is awaited in order, including retraction before replacement,
 and notification errors cannot reverse a committed state or fail an operation.
 
-The module uses subc-client-rs 0.26.1, subc-protocol 0.29.1 and the SDK's
-subc-transport 0.10.0. The protocol 0.29 line understands the `flow_id` scope
-attribute; the SDK also refuses undecodable control requests without terminating
-the serve loop. Cingulate does not handle flows and does not declare
-`flow-scopes/v1`.
-The SDK source documents per-request task dispatch; a live-daemon test with
-attested route fields is still deferred. In-process tests prove the handler's
-concurrency and do not claim to prove live routing.
+The module uses subc-client-rs 0.27.0, subc-protocol 0.30.0 and the SDK's
+subc-transport 0.11.0. The SDK refuses undecodable control requests without
+terminating the serve loop. Cingulate does not handle flows or manage agent-run
+scopes and declares neither `flow-scopes/v1` nor `agent-run-scopes/v1`.
+`tests/live_daemon.rs` runs the real daemon router and the SDK-served module in
+one process over authenticated loopback TCP. It checks catalog registration,
+requester refusal, owner `scope.sync` followed by a listed carrier's scoped open,
+scope-owned cards and epoch isolation, and refusal of direct operator answers
+even with a caller-supplied phone harness. Scope records use the protocol's
+non-exhaustive constructors and setters. The daemon's supervisor launch-nonce
+records are seeded for the in-process owner and carriers; the tests do not prove
+supervised spawning or Callosum's paired-phone provenance. The positive phone
+case remains covered by the bind-adapter unit tests, without impersonating a
+paired phone in the daemon test.
+
+The fixture uses `cortexkit-test-support` scratch directories and checks that its
+connection file names the live hosting test process. Connection files, project
+roots and storage are explicitly scratch-local; no connection discovery, child
+process spawning or process-global XDG changes are needed. Every operation has a
+bounded deadline and the fixture cancels and awaits its serving tasks on teardown.
+The separate in-process handler tests continue to prove handler concurrency.
 
 ## Verification
 

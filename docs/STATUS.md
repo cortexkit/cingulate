@@ -76,6 +76,8 @@ tombstones until pruned. The store's own contract is in
 | Request decoding and the refusal order | `crates/cingulate-decode/tests/decoding.rs`; `crates/cingulate-decode/tests/corpus.rs` against `test-vectors/elicitation-request-v1/` |
 | Store: migrations, lease, ids, first-settlement-wins, expiry, dedup, feeds, ack, retention, rollback | `crates/cingulate-store/tests/lifecycle.rs` |
 | Module: manifest, envelope, admission per op, allowlist, console gates, await, timer, notifier ordering, lease retry | `crates/ck-cingulate/tests/module.rs` (for example `owner_principal_and_operator_refusals_write_nothing`, `allowlist_table_identity_and_order`, `console_machine_request_and_answer_gates`, `notifier_is_awaited_after_commit_and_errors_do_not_fail_ops`) |
+| Real daemon transport: registration/catalog, unlisted requester refusal, scoped carrier ownership and epoch isolation, direct answer refusal | `crates/ck-cingulate/tests/live_daemon.rs`; daemon and SDK module serve in process over authenticated TCP, with scratch connection files and stores and seeded supervisor nonce records |
+| Exact current SDK/protocol release pins and lockfile resolutions | `crates/ck-cingulate/tests/dependencies.rs::current_subc_releases_are_exactly_pinned_and_locked` |
 | Wire compatibility with core's shapes | `crates/cingulate-vectors/tests/records.rs`, `requester.rs`, `consent.rs`, against `test-vectors/elicitation-records-v1/`, `elicitation-requester-v1/`, `consent-records-v1/` |
 | Corpus integrity | `crates/cingulate-vectors/tests/pins.rs` |
 | Danger option group and permissions/v1 contracts (vectors only) | `crates/cingulate-vectors/tests/contracts.rs`; `cargo run -p cingulate-vectors --example generate_vectors --locked -- --check` |
@@ -85,9 +87,10 @@ system temp directory.
 
 ## Left before first placement
 
-- **Daemon card.** No subc registration for `ck-cingulate` exists yet; the module
-  has only been run in process. A live-daemon test with attested route fields is
-  deferred (`crates/ck-cingulate/README.md`).
+- **Production daemon card.** Installing `ck-cingulate` in production daemon
+  configuration and checking supervised startup remain. A real in-process daemon
+  test now proves SDK registration and catalog delivery over authenticated TCP;
+  it does not spawn the production binary or exercise the macOS privacy trampoline.
 - **Attested stamp fields.** The production adapter now reads the SDK's daemon
   `RouteBindRequest.scope`: bind session is `[owner, ref, epoch]` serialized as
   JSON, and carried agent is `attributes.agent_id`. Scoped Cerebellum, Plexus
@@ -96,7 +99,13 @@ system temp directory.
   No console machine source exists yet: `at_console` answers remain fail-closed.
   Operator answers require `reserved:callosum` **and** a bind identity harness
   with the literal `fed-phone:` prefix; other paired device classes cannot answer.
-  These adapter rules are covered in process; live-daemon routing is still deferred.
+  Live-daemon tests now exercise scope sync, carrier admission, stamped bind
+  sessions, subject propagation and cross-epoch owner isolation. Direct routes,
+  including a forged phone harness, cannot answer. No actual Callosum or paired
+  phone is present in this fixture: the positive `reserved:callosum` plus
+  `fed-phone:` case remains covered by existing bind-adapter unit tests, not by
+  a fabricated phone identity. Supervisor nonce records are seeded for the
+  in-process scope owner and carriers, so supervised spawning remains untested.
 - **Config.** The manifest's config schema is an empty object. Production
   `Options` use wall time, an unavailable resolver (no Entorhinal names; cards
   show raw agent ids) and a no-op notifier (no pushes until Callosum's
