@@ -132,14 +132,21 @@ a host prompt that cannot be withdrawn shows "Already answered".
   On expiry: `access_head_no_answer`.
 - **User leg: 10 min** (head ask, or escalated worker ask from the escalation, timed from the
   escalation). On expiry: `access_user_no_answer`.
-- **Holding the call:** a tool call can wait at most 120 s, so AFT never holds one for a whole
-  leg. It ends a held call at its route's reply budget (at most 100 s) with `access_pending`, not
-  a deny, and the asker can carry on with other work. When the ask settles, the asker is woken
-  with the result and retries, and AFT matches `allow_once` to the same `args_hash`. Most heads
-  answer inside the hold, so most calls never see `access_pending`.
+- **Holding the call:** the call blocks until the ask settles or its leg expires. It never returns
+  early with a "pending" result: a worker given one has no way to wait on it, so it would end its
+  turn before its work is done. To make that possible, every AFT tool that can ask declares a reply
+  deadline (`reply.max_ms` in its catalog entry, for the presets workers and heads use) covering
+  the longest leg plus the tool's own work, at least 11 minutes. The caller then waits that long.
+  Broca computes each call's deadline from that declaration on plan sends, and AFT's host plugins
+  follow the same declaration. A provider that dies or restarts closes its route, which ends its
+  held calls at once, so the long deadline only matters for a provider that is alive but stuck on
+  one call. The daemon's health probes catch a wedged provider long before 11 minutes.
+- **Later, if needed:** a mid-call deadline extension from provider to caller (a progress event
+  with a bounded new deadline) would let normal calls keep a short deadline. It is a contract
+  change across Broca, core's hosts and the Claude Code gateway, so it is left out unless a fixed
+  ceiling proves too slow at catching stuck calls.
 - **Waking a head for its worker's ask:** Cingulate calls core's `session.notice` (core change 2
   below). No phone push goes out for the head leg.
-- **Waking a parked asker after settlement:** the same `session.notice`, with a different purpose.
 - **Busy heads:** a head in the middle of a long tool call sees the notice only at its next step
   (Pi steers between calls, OpenCode at the next step). That is why the head leg is 10 minutes and
   not the length of one tool call.
@@ -180,6 +187,8 @@ request ─┬─ worker ask ─▶ [pending:head] ─escalate─▶ [pending:us
          └─ head ask ──────────────────────▶ [pending:user] ─ 10 min ─▶ [refused: access_user_no_answer]
 any pending state ─ head gone / call withdrawn ─▶ [refused: access_head_gone | access_withdrawn]
 ```
+
+The asker's tool call stays open in every pending state and returns when the record leaves it.
 
 A second request with the same `call_key` returns the same ask; an asker never re-asks.
 
