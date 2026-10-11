@@ -39,12 +39,10 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
   whether a `parent` is present: a `worker` scope with no `parent` (its head has ended) is refused
   `access_no_head`, so an orphaned worker's ask never reaches the user directly.
 - **Codemode runs:** a run's calls are judged as calls of the agent that started the run. A run
-  scope is `kind: ephemeral` with `agent_id` and `run_id`, and core sets its `parent` to the
-  scope that invoked the run. A run's ask is routed as its parent's own ask: Cingulate reads the
-  parent's `kind` (through the daemon's `scope.describe`) and treats the ask as a head ask when
-  the parent is a `head`, and as a worker ask, with that worker's head as the answerer, when the
-  parent is a `worker`. Only heads start runs today, so today every run's ask is its head's own
-  ask. A run scope with no `parent`, or whose parent is not live, is refused `access_no_head`.
+  scope is `kind: ephemeral` with `agent_id` and `run_id`. Only heads can start runs today, so a
+  run scope has no `parent` and its ask is that head's own ask. If workers are later allowed to
+  start runs, core will set the run scope's `parent` to the worker's scope, and Cingulate will
+  walk run, then worker (through the daemon's `scope.describe`), then head; nothing else changes.
   When a run's scope ends (its deadline passes), AFT withdraws the run's open ask.
 - **Which calls ask through Cingulate (changes D2's test):** a call whose stamped scope is owned by
   `reserved:prefrontal-core` with `kind` `head`, `worker` or `ephemeral`. Testing `agent_id` alone
