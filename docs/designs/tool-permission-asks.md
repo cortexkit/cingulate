@@ -157,25 +157,80 @@ Cingulate then withdraws every other surface, and a late answer is refused with 
 
 1. **Carrier listing:** `reserved:aft` listed as a carrier toward `cingulate` on head and worker
    scope records, unless today's carrier list already covers it.
-2. **`session.notice`**, admitted only from `reserved:cingulate`, with no answer path, refusing
-   sessions core does not hold. Body: `{session_ref, elicitation_id, purpose, fields}`; a
-   `head_ask` notice also carries `asker_session_ref`, the worker that is waiting. Where
-   `purpose` is one of `head_ask`, `escalated`, `settled` or `withdrawn`, and `fields` are
-   structured (`tool`, `operation`, `paths`, `command`, `reason`, `head_policy`, `answers`,
-   and for `settled` the outcome and note). Core deduplicates on
+2. **`session.notice`**, admitted only from `reserved:cingulate`, with no answer path. Its exact
+   wire shape is in "The `session.notice` wire" below. Core deduplicates on
    `(elicitation_id, purpose)`, so a retry never wakes twice while each step of one ask still
    wakes once. Core renders the text itself and escapes every field, so a worker's `reason`
    cannot inject instructions into its head's session, and every notice reads like core's
-   others. On `head_ask`, core records the asker as awaiting an answer (the state a worker's
-   question to its head already uses); `settled` clears it and steers the result into the asker's
-   session. If the asker is idle when `settled` arrives (usual after `access_pending`), core
+   others. If the asker is idle when `settled` arrives (usual after `access_pending`), core
    starts a new run in the same session with the result, the same path a head's `work(prompt)`
-   uses; a busy asker gets it as a steer at its next step. If the asker's task has already
-   finished (completed, settled or cancelled), core refuses with `session_not_live`, nothing is
-   delivered, and Cingulate records the settlement as unclaimed. For an open `head_ask`, core
-   reminds the head periodically until the ask leaves its head leg.
+   uses; a busy asker gets it as a steer at its next step. For an open `head_ask`, core reminds
+   the head periodically until the ask leaves its head leg.
 3. **The `acc_` arm of `work(prompt)`**, accepting only the four answers and relaying them as
    described above.
+
+### The `session.notice` wire
+
+Request body (core refuses unknown top-level keys and ignores unknown keys inside `fields`, so
+Cingulate can add display fields without a core change):
+
+```
+{
+  "elicitation_id": "acc_...",
+  "purpose": "head_ask" | "user_ask" | "escalated" | "settled" | "withdrawn",
+  "asker": { "scope_ref": "...", "scope_epoch": 3 },
+  "head":  { "scope_ref": "...", "scope_epoch": 7 },   // worker asks only
+  "fields": { ... }
+}
+```
+
+`asker` and `head` are daemon scope refs and epochs, exactly as the daemon stamped them on
+Cingulate's routes. Core resolves each to the session it holds, and treats an epoch older than
+the session's current one as not live. `head` is present on every notice about a worker's ask
+and absent on a head's own ask.
+
+What each purpose does in core:
+
+| purpose | Sent when | Core's effect | Must be live |
+|---|---|---|---|
+| `head_ask` | a worker's ask opens | park `asker` as awaiting an answer; wake `head` with the ask; remind `head` periodically | `head` and `asker` |
+| `user_ask` | a head's own ask opens | park `asker` (the head itself) as awaiting an answer; no wake, since the phone carries it | `asker` |
+| `escalated` | the head passed its worker's ask to the user | stop reminding `head`; `asker` stays parked | `asker` |
+| `settled` | the ask got an answer or a refusal | clear the park; stop any reminders; deliver the result to `asker` | `asker` |
+| `withdrawn` | the asker's call ended without an answer | clear the park; stop any reminders; deliver nothing | none (a no-op is fine) |
+
+`fields` (all on `head_ask` and `user_ask`; `outcome`, `answered_by` and `note` on `settled`;
+`note` on `escalated`; nothing required on `withdrawn`):
+
+| field | type |
+|---|---|
+| `tool` | string, at most 64 characters |
+| `operation` | `read` \| `write` \| `exec` |
+| `paths` | array of absolute paths, at most 16 |
+| `command` | string, at most 600 characters; `exec` only |
+| `reason` | string, at most 160 characters |
+| `head_policy` | `allow` \| `not_held`; worker asks only |
+| `answers` | array of `allow_once` \| `allow_scope` \| `deny` \| `escalate`: what the head may answer now |
+| `outcome` | `allow_once` \| `allow_scope` \| `deny` \| `access_head_gone` \| `access_no_head` |
+| `answered_by` | `head` \| `user`; absent for a refusal |
+| `note` | string, at most 160 characters, optional |
+
+Reply: `{"ok": true}`, including for a repeated `(elicitation_id, purpose)`. Refusals by name:
+
+- `unauthorized_caller`: not `reserved:cingulate`;
+- `invalid_params`: a schema violation, naming the field;
+- `unknown_session`: core never held that scope ref;
+- `session_not_live`: the session ended, finished, or the epoch is stale.
+
+What Cingulate does with each refusal:
+
+- **`session_not_live` or `unknown_session`:**
+  - for `head_ask`, the ask becomes `access_head_gone`;
+  - for `settled`, the settlement is recorded as unclaimed;
+  - in every case, no retry.
+- **`unauthorized_caller` or `invalid_params`:** logged as a defect, with no retry.
+- **Transport failure or core unavailable:** retried with backoff. This never blocks the ask's
+  own state.
 
 ## Refusals (keeps D8)
 
