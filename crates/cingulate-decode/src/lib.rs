@@ -76,6 +76,13 @@ pub struct ConsentRequest {
     pub urgency: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_key: Option<String>,
+    /// Correlates requester replies without becoming card text or a dedup key.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_requester_ref"
+    )]
+    pub requester_ref: Option<String>,
     pub on_expiry: String,
     pub material_damage: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +114,24 @@ pub struct ConsentRequest {
         deserialize_with = "deserialize_at_console"
     )]
     pub at_console: Option<String>,
+}
+
+fn deserialize_requester_ref<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    let reference = value.as_str().filter(|reference| {
+        (1..=128).contains(&reference.len())
+            && reference.bytes().all(|byte| (b' '..=b'~').contains(&byte))
+    });
+    reference
+        .map(|reference| Some(reference.to_owned()))
+        .ok_or_else(|| {
+            de::Error::custom(
+                "requester_ref must be a string of 1 to 128 printable ASCII characters",
+            )
+        })
 }
 
 fn deserialize_at_console<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -161,6 +186,9 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        if self.requester_ref.is_some() && self.kind != "consent" {
+            return Err(Refusal::invalid("requester_ref requires consent kind"));
+        }
         if self.kind == "package" {
             let package = self
                 .package

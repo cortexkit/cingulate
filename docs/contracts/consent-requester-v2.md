@@ -1,11 +1,51 @@
 # Consent requester contract, v2
 
 Version 2 preserves every v1 operation and body for existing kinds. It adds AFT
-permission asks. Pin the [served corpus](../../test-vectors/tool-permission-v1/README.md)
+permission asks and the optional generic-consent correlation field described below. Pin the [served corpus](../../test-vectors/tool-permission-v1/README.md)
 and its `SHA256SUMS`; the phone projection is specified in
 [consent-phone-v2.md](consent-phone-v2.md). These asks deliberately have no expiry,
 retention tombstone, execution report, acknowledgment or settlement-feed entry:
 AFT uses durable request/get/await/withdraw and core receives notices.
+
+## Generic consent and requester correlation
+
+`reserved:cerebellum` is admitted for `kind: "consent"` only, preserving the
+v1 generic-consent admission rule. Its seven card families use that generic body;
+it cannot request `flow_install`, `flow_decision`, `package`, `tool_permission`
+or `macos_permission`. A disallowed kind refuses `elicitation_requester_refused`.
+Requester and subject identity come only from the daemon's route stamp, including
+the nonblank carried agent id required for this requester, never from body fields.
+
+Cerebellum may call `consent.request`, `consent.await`, `consent.get`,
+`consent.answers`, `consent.ack`, `consent.withdraw` and
+`consent.report_execution`. Reads and mutations by id require ownership;
+answers and acknowledgments are scoped to cards raised by that principal under
+the existing v1 owner rules. This admission grants no phone/operator authority
+and no access to the core-only `consent.outcomes` feed.
+
+Generic `consent` params add one optional field:
+
+| Field | Rule |
+|---|---|
+| `requester_ref` | Opaque string of 1–128 printable ASCII characters (bytes `0x20`–`0x7e`), returned unchanged. If present, null, non-string, empty, overlong, control and non-ASCII values refuse `elicitation_invalid_request` with `requester_ref` in the message. Other kinds cannot carry it. |
+
+The reference correlates an originating call with a later answer; it supplies
+neither identity nor display text. It is stored durably and returned as
+`requester_ref` in requester `consent.get`, `consent.await`, `consent.answers`
+and the core outcome feed, as well as requester mutation readbacks. When absent,
+the field is omitted. Phone `consent.list_pending`, `consent.get` and answer
+readbacks never include it, in either snake_case or camelCase.
+
+It has no uniqueness or deduplication meaning: two cards may share the same
+reference. Only `dedup_key` selects a pending card to refresh. Changing or removing
+`requester_ref` on an otherwise matching dedup refresh retains the card id and
+updates the stored reference; it does not withdraw and replace the card.
+
+The [generic-consent v2 served vectors](../../test-vectors/consent-requester-v2/README.md)
+cover requests with and without a reference, requester and phone records,
+answers/outcomes, and refusal of a non-consent request. Their `SHA256SUMS` is
+generated from actual handler replies. Existing v1 contracts and corpora remain
+byte-for-byte unchanged.
 
 ## Admission and stamped identity
 
@@ -28,7 +68,7 @@ compares an ask's age or a reply deadline. No answer leg expires.
 
 ## Request bodies
 
-`params` is a closed object with `kind` and the following fields, not a nested
+For permission asks, `params` is a closed object with `kind` and the following fields, not a nested
 body. Unknown keys (including `parent`, `scope`, requester identity and expiry)
 refuse `elicitation_invalid_request`. The entire framed request retains v1's
 1,310,720-byte limit; no field is truncated.

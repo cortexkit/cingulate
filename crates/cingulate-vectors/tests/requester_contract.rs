@@ -283,3 +283,44 @@ async fn requester_cursor_is_global_and_ack_discards_owner_settlements_not_pendi
         "elicitation_invalid_execution"
     );
 }
+
+#[tokio::test]
+async fn requester_v2_served_vectors_regenerate_byte_for_byte() {
+    let generated = requester::generate_v2().await;
+    assert_eq!(generated.len(), 26);
+    for (name, bytes) in generated {
+        assert_eq!(
+            fs::read(corpus("consent-requester-v2").join(&name)).unwrap(),
+            bytes,
+            "served vector differs: {name}"
+        );
+    }
+}
+
+#[test]
+fn requester_v2_sha256sums_cover_and_match_every_file() {
+    let root = corpus("consent-requester-v2");
+    let sums = fs::read(root.join("SHA256SUMS")).unwrap();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&sums)),
+        "d276eaed5330b95923166d006b2f1b5d83a9a95e050cfe99446d685b22c2e568"
+    );
+    let mut names = BTreeSet::new();
+    for line in std::str::from_utf8(&sums).unwrap().lines() {
+        let (hash, name) = line.split_once("  ").unwrap();
+        assert!(names.insert(name.to_string()), "duplicate entry {name}");
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fs::read(root.join(name)).unwrap())),
+            hash,
+            "SHA256SUMS: {name}"
+        );
+    }
+    assert_eq!(names.len(), 27);
+    assert!(names.contains("README.md"));
+    names.insert("SHA256SUMS".into());
+    let actual = fs::read_dir(root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(actual, names);
+}

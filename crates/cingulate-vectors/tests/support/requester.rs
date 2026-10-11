@@ -239,3 +239,100 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
     .await;
     files
 }
+
+/// Generic-consent additions use a separate corpus so v1 stays byte-for-byte stable.
+pub async fn generate_v2() -> BTreeMap<String, Vec<u8>> {
+    let mut files = BTreeMap::new();
+    let requester = Stamp {
+        carried_agent_id: "agent-alf".into(),
+        ..stamp("reserved:cerebellum")
+    };
+    for (name, reference) in [
+        ("cerebellum", None),
+        ("cerebellum-ref", Some("tool-call-42")),
+    ] {
+        let fixture = Fixture::open(None).await;
+        let mut body = crate::support::app_body();
+        if let Some(reference) = reference {
+            body["requester_ref"] = json!(reference);
+        }
+        let reply = record(
+            &mut files,
+            &fixture,
+            &requester,
+            name,
+            "consent.request",
+            body,
+        )
+        .await;
+        let id = reply["elicitation_id"].as_str().unwrap();
+        record(
+            &mut files,
+            &fixture,
+            &requester,
+            &format!("{name}-get"),
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+        record(
+            &mut files,
+            &fixture,
+            &requester,
+            &format!("{name}-await"),
+            "consent.await",
+            json!({"elicitation_id":id,"timeout_ms":0}),
+        )
+        .await;
+        files.insert(
+            format!("{name}-phone-list-reply.json"),
+            phone::served(&fixture, "consent.list_pending", json!({})).await,
+        );
+        files.insert(
+            format!("{name}-phone-get-reply.json"),
+            phone::served(&fixture, "consent.get", json!({"elicitationId":id})).await,
+        );
+        fixture.clock.set(ANSWERED);
+        fixture
+            .ok(
+                &phone::phone_stamp(),
+                "consent.answer",
+                json!({"elicitationId":id,"choiceId":"allow_once"}),
+            )
+            .await;
+        record(
+            &mut files,
+            &fixture,
+            &requester,
+            &format!("{name}-answers"),
+            "consent.answers",
+            json!({"since":0}),
+        )
+        .await;
+        record(
+            &mut files,
+            &fixture,
+            &stamp("reserved:prefrontal-core"),
+            &format!("{name}-outcomes"),
+            "consent.outcomes",
+            json!({"since":0}),
+        )
+        .await;
+    }
+    let fixture = Fixture::open(None).await;
+    let params = decision_body("grant_lost");
+    files.insert(
+        "cerebellum-non-consent-request.json".into(),
+        serde_json::to_vec(&json!({"method":"consent.request","params":params})).unwrap(),
+    );
+    let refusal = fixture
+        .call(&requester, "consent.request", params)
+        .await
+        .unwrap_err();
+    assert_eq!(refusal["code"], "elicitation_requester_refused");
+    files.insert(
+        "cerebellum-non-consent-refusal.json".into(),
+        serde_json::to_vec(&refusal).unwrap(),
+    );
+    files
+}

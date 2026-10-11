@@ -13,12 +13,21 @@ use std::fs;
 async fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     assert!(
-        args.is_empty() || args == ["--check"],
-        "usage: generate_requester_vectors [--check]"
+        args.is_empty() || args == ["--check"] || args == ["--v2"] || args == ["--v2", "--check"],
+        "usage: generate_requester_vectors [--v2] [--check]"
     );
-    let check = !args.is_empty();
-    let root = support::corpus(requester::CORPUS);
-    let mut files = requester::generate().await;
+    let check = args.iter().any(|arg| arg == "--check");
+    let v2 = args.iter().any(|arg| arg == "--v2");
+    let root = support::corpus(if v2 {
+        "consent-requester-v2"
+    } else {
+        requester::CORPUS
+    });
+    let mut files = if v2 {
+        requester::generate_v2().await
+    } else {
+        requester::generate().await
+    };
     files.insert(
         "README.md".into(),
         fs::read(root.join("README.md")).expect("corpus README"),

@@ -672,6 +672,9 @@ fn same_content(old: &ElicitationRecord, request: &ConsentRequest, subject: &Sub
     let mut next = request.clone();
     previous.dedup_key = None;
     next.dedup_key = None;
+    // Reply correlation can change on a refresh without replacing the card.
+    previous.requester_ref = None;
+    next.requester_ref = None;
     previous.expires_in_ms = 0;
     next.expires_in_ms = 0;
     previous.requested_schema = None;

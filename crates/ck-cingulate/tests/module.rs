@@ -2351,3 +2351,411 @@ async fn pending_revision_failed_settlement_rolls_back_counter_and_records() {
         json!({"unchanged":true,"revision":before["revision"]})
     );
 }
+
+fn cerebellum() -> Stamp {
+    Stamp {
+        carried_agent_id: "agent-browser".into(),
+        ..stamp("reserved:cerebellum")
+    }
+}
+
+#[tokio::test]
+async fn cerebellum_requester_lifecycle_and_stamped_identity() {
+    let f = Fixture::open(None).await;
+    let requester = cerebellum();
+    let id = f.request(&requester, body()).await;
+    for method in ["consent.get", "consent.await"] {
+        let card = ok(
+            &f.handler,
+            &requester,
+            method,
+            json!({"elicitation_id":id,"timeout_ms":0}),
+        )
+        .await;
+        assert_eq!(card["requester_label"], "reserved:cerebellum");
+        assert_eq!(card["subject"]["agent_id"], "agent-browser");
+        assert_eq!(card["state"], "pending");
+        assert!(card.get("requester_ref").is_none());
+    }
+    assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
+    let feed = ok(
+        &f.handler,
+        &requester,
+        "consent.answers",
+        json!({"since":0}),
+    )
+    .await;
+    assert_eq!(feed["records"].as_array().unwrap().len(), 1);
+    assert_eq!(feed["records"][0]["elicitation_id"], id);
+    assert_eq!(
+        ok(
+            &f.handler,
+            &requester,
+            "consent.report_execution",
+            json!({"elicitation_id":id,"execution":"executed"})
+        )
+        .await["execution"],
+        "executed"
+    );
+    assert_eq!(
+        ok(
+            &f.handler,
+            &requester,
+            "consent.ack",
+            json!({"cursor":feed["cursor"]})
+        )
+        .await,
+        json!({"ok":true})
+    );
+    assert!(ok(
+        &f.handler,
+        &requester,
+        "consent.answers",
+        json!({"since":0})
+    )
+    .await["records"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let pending = f.request(&requester, body()).await;
+    assert_eq!(
+        ok(
+            &f.handler,
+            &requester,
+            "consent.withdraw",
+            json!({"elicitation_id":pending})
+        )
+        .await["state"],
+        "withdrawn"
+    );
+}
+
+#[tokio::test]
+async fn cerebellum_only_generic_consent() {
+    let f = Fixture::open(None).await;
+    for kind in [
+        "flow_install",
+        "flow_decision",
+        "package",
+        "tool_permission",
+        "macos_permission",
+    ] {
+        let request = if kind == "package" {
+            serde_json::from_str::<Value>(include_str!(
+                "../../../test-vectors/consent-package-card-v1/request.json"
+            ))
+            .unwrap()["params"]
+                .clone()
+        } else {
+            kind_body(kind)
+        };
+        assert!(f
+            .unchanged_error(
+                &cerebellum(),
+                "consent.request",
+                request,
+                "elicitation_requester_refused"
+            )
+            .await
+            .contains("reserved:cerebellum"));
+    }
+}
+
+#[tokio::test]
+async fn cerebellum_card_owner_isolation() {
+    let f = Fixture::open(None).await;
+    let id = f.request(&cerebellum(), body()).await;
+    for other in [direct(), carrier(), stamp("reserved:prefrontal-core")] {
+        for method in [
+            "consent.get",
+            "consent.await",
+            "consent.withdraw",
+            "consent.report_execution",
+        ] {
+            f.unchanged_error(
+                &other,
+                method,
+                json!({"elicitation_id":id,"timeout_ms":0,"execution":"executed"}),
+                "elicitation_not_owner",
+            )
+            .await;
+        }
+        assert!(
+            ok(&f.handler, &other, "consent.answers", json!({"since":0})).await["records"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        ok(
+            &f.handler,
+            &other,
+            "consent.ack",
+            json!({"cursor":i64::MAX}),
+        )
+        .await;
+    }
+    f.answer(&id, "allow_once").await;
+    for other in [direct(), carrier()] {
+        assert!(
+            ok(&f.handler, &other, "consent.answers", json!({"since":0})).await["records"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert_eq!(
+        ok(
+            &f.handler,
+            &cerebellum(),
+            "consent.answers",
+            json!({"since":0})
+        )
+        .await["records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn cerebellum_rejects_body_identity() {
+    let f = Fixture::open(None).await;
+    for key in [
+        "requester",
+        "principal",
+        "subject",
+        "agent_id",
+        "carried_agent_id",
+    ] {
+        let mut request = body();
+        request[key] = json!("forged");
+        f.unchanged_error(
+            &cerebellum(),
+            "consent.request",
+            request,
+            "elicitation_invalid_request",
+        )
+        .await;
+    }
+    f.unchanged_error(
+        &stamp("reserved:cerebellum"),
+        "consent.request",
+        body(),
+        "elicitation_requester_refused",
+    )
+    .await;
+    let mut request = body();
+    request["session_ref"] = json!("forged-agent");
+    let id = f.request(&cerebellum(), request).await;
+    let card = ok(
+        &f.handler,
+        &cerebellum(),
+        "consent.get",
+        json!({"elicitation_id":id}),
+    )
+    .await;
+    assert_eq!(card["subject"]["agent_id"], "agent-browser");
+}
+
+#[tokio::test]
+async fn cerebellum_fail_closed() {
+    let f = Fixture::open(None).await;
+    for (key, value) in [("default", "allow_once"), ("on_expiry", "allow")] {
+        let mut request = body();
+        request[key] = json!(value);
+        f.unchanged_error(
+            &cerebellum(),
+            "consent.request",
+            request,
+            "elicitation_fail_closed_required",
+        )
+        .await;
+    }
+    let id = f.request(&cerebellum(), body()).await;
+    f.clock.set(86_401_000);
+    let card = ok(
+        &f.handler,
+        &cerebellum(),
+        "consent.await",
+        json!({"elicitation_id":id,"timeout_ms":0}),
+    )
+    .await;
+    assert_eq!(card["state"], "expired");
+    assert_ne!(card["answered_choice_id"], "allow_once");
+}
+
+#[tokio::test]
+async fn cerebellum_requester_ref_validation() {
+    let f = Fixture::open(None).await;
+    for reference in [
+        json!(""),
+        json!("x".repeat(129)),
+        json!("line\nbreak"),
+        json!("\t"),
+        json!("\0"),
+        json!("\u{7f}"),
+        json!("é"),
+        json!(null),
+        json!(7),
+        json!({}),
+        json!([]),
+    ] {
+        let mut request = body();
+        request["requester_ref"] = reference;
+        assert!(f
+            .unchanged_error(
+                &cerebellum(),
+                "consent.request",
+                request,
+                "elicitation_invalid_request"
+            )
+            .await
+            .contains("requester_ref"));
+    }
+    for reference in [" ".to_owned(), "~".repeat(128)] {
+        let mut request = body();
+        request["requester_ref"] = json!(reference);
+        let id = f.request(&cerebellum(), request).await;
+        assert_eq!(
+            ok(
+                &f.handler,
+                &cerebellum(),
+                "consent.get",
+                json!({"elicitation_id":id})
+            )
+            .await["requester_ref"],
+            reference
+        );
+    }
+    let mut request = kind_body("flow_decision");
+    request["requester_ref"] = json!("call-1");
+    assert!(f
+        .unchanged_error(
+            &stamp("reserved:basal"),
+            "consent.request",
+            request,
+            "elicitation_invalid_request"
+        )
+        .await
+        .contains("requester_ref"));
+}
+
+#[tokio::test]
+async fn cerebellum_requester_ref_roundtrips_store_and_feeds() {
+    let mut f = Fixture::open(None).await;
+    let mut request = body();
+    request["requester_ref"] = json!("call-42: ~opaque~");
+    let id = f.request(&cerebellum(), request).await;
+    f.reopen(None).await;
+    let stored: String = f
+        .db()
+        .query_row(
+            "SELECT record_json FROM elicitation_records WHERE elicitation_id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&stored).unwrap()["request"]["requester_ref"],
+        "call-42: ~opaque~"
+    );
+    for method in ["consent.get", "consent.await"] {
+        assert_eq!(
+            ok(
+                &f.handler,
+                &cerebellum(),
+                method,
+                json!({"elicitation_id":id,"timeout_ms":0})
+            )
+            .await["requester_ref"],
+            "call-42: ~opaque~"
+        );
+    }
+    f.answer(&id, "allow_once").await;
+    f.reopen(None).await;
+    for method in ["consent.get", "consent.await", "consent.report_execution"] {
+        assert_eq!(
+            ok(
+                &f.handler,
+                &cerebellum(),
+                method,
+                json!({"elicitation_id":id,"timeout_ms":0,"execution":"executed"})
+            )
+            .await["requester_ref"],
+            "call-42: ~opaque~"
+        );
+    }
+    for (requester, method) in [
+        (cerebellum(), "consent.answers"),
+        (stamp("reserved:prefrontal-core"), "consent.outcomes"),
+    ] {
+        assert_eq!(
+            ok(&f.handler, &requester, method, json!({"since":0})).await["records"][0]
+                ["requester_ref"],
+            "call-42: ~opaque~"
+        );
+    }
+}
+
+#[tokio::test]
+async fn cerebellum_requester_ref_never_reaches_phone() {
+    let f = Fixture::open(None).await;
+    let mut request = body();
+    request["requester_ref"] = json!("private-call-key");
+    let id = f.request(&cerebellum(), request).await;
+    let card = ok(
+        &f.handler,
+        &operator(),
+        "consent.get",
+        json!({"elicitationId":id}),
+    )
+    .await;
+    let list = ok(&f.handler, &operator(), "consent.list_pending", json!({})).await;
+    let answer = f.answer(&id, "allow_once").await;
+    for value in [card, list, answer] {
+        let bytes = serde_json::to_string(&value).unwrap();
+        assert!(!bytes.contains("private-call-key"));
+        assert!(!bytes.contains("requester_ref"));
+        assert!(!bytes.contains("requesterRef"));
+    }
+}
+
+#[tokio::test]
+async fn cerebellum_requester_ref_is_not_a_dedup_key() {
+    let mut f = Fixture::open(None).await;
+    let mut request = body();
+    request["requester_ref"] = json!("same-call");
+    let first = f.request(&cerebellum(), request.clone()).await;
+    let second = f.request(&cerebellum(), request.clone()).await;
+    assert_ne!(first, second);
+    request["dedup_key"] = json!("card-key");
+    let keyed = f.request(&cerebellum(), request.clone()).await;
+    f.reopen(None).await;
+    request["requester_ref"] = json!("new-call");
+    assert_eq!(f.request(&cerebellum(), request.clone()).await, keyed);
+    assert_eq!(
+        ok(
+            &f.handler,
+            &cerebellum(),
+            "consent.get",
+            json!({"elicitation_id":keyed})
+        )
+        .await["requester_ref"],
+        "new-call"
+    );
+    request.as_object_mut().unwrap().remove("requester_ref");
+    assert_eq!(f.request(&cerebellum(), request.clone()).await, keyed);
+    assert!(ok(
+        &f.handler,
+        &cerebellum(),
+        "consent.get",
+        json!({"elicitation_id":keyed})
+    )
+    .await
+    .get("requester_ref")
+    .is_none());
+    request["dedup_key"] = json!("different-card-key");
+    request["requester_ref"] = json!("same-call");
+    assert_ne!(f.request(&cerebellum(), request).await, keyed);
+}

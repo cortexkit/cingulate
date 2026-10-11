@@ -51,8 +51,9 @@ pub struct ElicitationRecord {
 }
 
 impl ElicitationRecord {
-    /// Flatten request fields into the phone shape without leaking binding or
-    /// internal transport facts. Nested opaque JSON is copied verbatim.
+    /// Build the flat camelCase JSON shown on the phone. Omit `binding` and
+    /// `requester_ref`: private requester metadata must not become card text.
+    /// Nested opaque JSON is copied verbatim.
     pub fn phone(&self, block_until: Option<i64>) -> Value {
         let mut value = serde_json::to_value(self).expect("record serialization");
         let object = value.as_object_mut().expect("record object");
@@ -63,7 +64,7 @@ impl ElicitationRecord {
             .as_object()
             .expect("request object")
         {
-            if key != "binding" {
+            if key != "binding" && key != "requester_ref" {
                 object.insert(camel(key), value.clone());
             }
         }
@@ -82,6 +83,9 @@ impl ElicitationRecord {
         let mut value = self.phone(block_until);
         value["subject"] = snake_object(value["subject"].take());
         let mut value = snake_object(value);
+        if let Some(reference) = &self.request.requester_ref {
+            value["requester_ref"] = json!(reference);
+        }
         if let Some(binding) = &self.request.binding {
             value["binding"] = binding.clone();
         }
