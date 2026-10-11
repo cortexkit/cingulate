@@ -13,12 +13,17 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod access;
 mod record;
+pub use access::{
+    AccessAnswer, AccessIdentity, AccessMutation, AccessRecord, AnswerAttempt, Notice,
+    ScopeIdentity,
+};
 pub use record::{ElicitationRecord, State, Subject};
 
 pub const RETENTION_MS: i64 = 86_400_000;
 pub const MIGRATION_NAMESPACE: &str = "cingulate";
-pub const MIGRATIONS: [Migration; 3] = [
+pub const MIGRATIONS: [Migration; 4] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -30,6 +35,10 @@ pub const MIGRATIONS: [Migration; 3] = [
     Migration {
         version: 3,
         statements: include_str!("../migrations/003_pending_revision.sql"),
+    },
+    Migration {
+        version: 4,
+        statements: include_str!("../migrations/004_access_asks.sql"),
     },
 ];
 

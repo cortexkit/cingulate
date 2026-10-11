@@ -34,6 +34,9 @@ use subc_protocol::{
 };
 use tokio::sync::{watch, Mutex};
 
+mod access;
+pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
+
 pub const OPERATIONS: [(&str, ManagementOperationKind); 10] = [
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
@@ -50,7 +53,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 10] = [
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder("cingulate", env!("CARGO_PKG_VERSION"))
         .capabilities(Some(CapabilityDeclarations {
-            provides: vec!["consent/v1".into()],
+            provides: vec!["consent/v1".into(), "agent-run-scopes/v1".into()],
             requires: vec![],
             must_never_reach: vec![],
         }))
@@ -75,6 +78,8 @@ pub fn manifest() -> ModuleManifest {
 /// never from a consent request body.
 #[derive(Debug, Default, Clone)]
 pub struct Stamp {
+    pub scope: Option<subc_protocol::scope::ScopeStamp>,
+    pub harness: String,
     pub principal: Option<String>,
     pub bind_session: String,
     pub carried_agent_id: String,
@@ -98,6 +103,8 @@ impl Stamp {
 
     pub fn from_bind(req: &RouteBindRequest) -> Self {
         let mut stamp = Self::from_principal(req.principal.as_ref());
+        stamp.scope = req.scope.clone();
+        stamp.harness = req.identity.harness.clone();
         if let Some(scope) = &req.scope {
             // A scope reference can be reused for a new session. Including its
             // owner and epoch prevents that session from reading the previous session's cards.
@@ -126,6 +133,7 @@ impl Stamp {
             }
             "reserved:prefrontal-core" => Some(&["flow_install", "package"]),
             "reserved:basal" => Some(&["flow_decision"]),
+            "reserved:aft" => Some(&["tool_permission", "macos_permission"]),
             _ => None,
         }
     }
@@ -250,6 +258,8 @@ impl Drop for Registration {
 }
 
 struct Inner {
+    access_runtime: StdMutex<Arc<dyn AccessRuntime>>,
+    notice_delivery: Mutex<()>,
     options: Options,
     store: Mutex<Option<ConsentStore>>,
     health: AtomicU8,
@@ -309,6 +319,8 @@ impl Handler {
     pub fn new(options: Options) -> Self {
         Self {
             inner: Arc::new(Inner {
+                access_runtime: StdMutex::new(Arc::new(access::UnavailableAccessRuntime)),
+                notice_delivery: Mutex::new(()),
                 options,
                 store: Mutex::new(None),
                 health: AtomicU8::new(0),
@@ -431,6 +443,7 @@ impl Handler {
             .with_store(|store| store.sweep(self.inner.options.clock.now_ms()))
             .await?;
         self.settlements(&settlements).await;
+        self.access_maintenance().await?;
         Ok(())
     }
 
@@ -609,6 +622,9 @@ impl Handler {
             ));
         }
         self.available()?;
+        if let Some(reply) = self.access_dispatch(stamp, method, &params).await {
+            return reply;
+        }
         match method {
             "consent.answer" | "consent.list_pending" => operator(stamp)?,
             "consent.get" if stamp.operator_surface => {}
@@ -791,12 +807,31 @@ impl Handler {
                     let mut bytes = 0;
                     let mut last = None;
                     let mut continuation = None;
-                    for record in store.pending().map_err(store_error)? {
-                        let key = (record.expires_at_ms, record.elicitation_id.clone());
+                    let mut cards: Vec<_> = store
+                        .pending()
+                        .map_err(store_error)?
+                        .into_iter()
+                        .map(|record| {
+                            let key = (record.expires_at_ms, record.elicitation_id.clone());
+                            let value = record.phone(blocks.get(&record.elicitation_id).copied());
+                            (key, value)
+                        })
+                        .collect();
+                    for record in store.access_pending().map_err(store_error)? {
+                        if record.state == "pending:user" {
+                            // Pending-list continuations need a common sort key. Place
+                            // nonexpiring asks after expiring cards without adding a deadline.
+                            cards.push((
+                                (i64::MAX, record.elicitation_id.clone()),
+                                record.wire(true, blocks.get(&record.elicitation_id).copied()),
+                            ));
+                        }
+                    }
+                    cards.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (key, mut value) in cards {
                         if after.as_ref().is_some_and(|after| &key <= after) {
                             continue;
                         }
-                        let mut value = record.phone(blocks.get(&record.elicitation_id).copied());
                         cingulate_store::omit_package_bodies(&mut value);
                         let size = serde_json::to_vec(&value)
                             .expect("projection serialization")

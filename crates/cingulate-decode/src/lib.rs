@@ -8,6 +8,9 @@ use std::{collections::HashSet, fmt};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
+mod access;
+pub use access::{validate_note, AccessRequest};
+
 pub const MAX_EXPIRES_IN_MS: i64 = 86_400_000;
 pub const FLOW_DECISION_EFFECT: &str = "choose";
 

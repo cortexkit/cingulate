@@ -195,7 +195,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3"
+        "1,2,3,4"
     );
     let answer_schema: String = conn
         .query_row(
@@ -283,14 +283,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,4,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,5,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 4"));
-    assert!(error.to_string().contains("migration 3"));
+    assert!(error.to_string().contains("version 5"));
+    assert!(error.to_string().contains("migration 4"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1260,7 +1260,12 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
     scratch
         .sql()
         .execute_batch(
-            "DROP TRIGGER cingulate_pending_insert;
+            "DROP TRIGGER access_insert_revision;
+        DROP TRIGGER access_update_revision;
+        DROP TABLE access_notices;
+        DROP TABLE access_asks;
+        DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=4;
+        DROP TRIGGER cingulate_pending_insert;
         DROP TRIGGER cingulate_pending_update;
         DROP TRIGGER cingulate_pending_delete;
         DROP TABLE cingulate_pending_revision;
@@ -1294,4 +1299,63 @@ fn pending_revision_exhaustion_rolls_back_instead_of_reusing_a_revision() {
         .is_err());
     assert_eq!(snapshot(&scratch), before);
     assert_eq!(store.pending_revision().unwrap(), i64::MAX);
+}
+
+#[test]
+fn access_migration_applies_to_version_three_without_changing_existing_cards() {
+    let scratch = Scratch::new();
+    let old = cortexkit_store::open_sqlite(&scratch.descriptor).unwrap();
+    old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..3])
+        .unwrap();
+    let legacy = ElicitationRecord {
+        elicitation_id: "el_1".into(),
+        request: request(),
+        created_at_ms: 100,
+        expires_at_ms: 50_000,
+        subject: identity("direct", "s").subject,
+        requester: "direct".into(),
+        state: State::Pending,
+        answered_at_ms: None,
+        answered_choice_id: None,
+        execution: None,
+    };
+    old.with_conn(|conn| {
+        conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,expires_at_ms) VALUES (?1,?2,?3,'pending',50000)",params![legacy.elicitation_id,identity("direct","s").owner,serde_json::to_string(&legacy).unwrap()])?;
+        conn.execute("UPDATE cingulate_id_seq SET value=1",[])?;
+        Ok(())
+    }).unwrap();
+    drop(old);
+    let before = rows(&scratch.sql(), "elicitation_records");
+    let (store, settlements) = scratch.open(100);
+    assert!(settlements.is_empty());
+    assert_eq!(rows(&scratch.sql(), "elicitation_records"), before);
+    let identity = cingulate_store::AccessIdentity {
+        principal: "reserved:aft".into(),
+        asker: cingulate_store::ScopeIdentity {
+            scope_ref: "head".into(),
+            scope_epoch: 1,
+            agent_id: Some("agent".into()),
+        },
+        scope_kind: "head".into(),
+        harness: "test".into(),
+        head: None,
+    };
+    let access = cingulate_decode::AccessRequest::decode(json!({"kind":"tool_permission","call_key":"key","tool":"read","operation":"read","paths":["/tmp/file"],"reason":"Read file","args_hash":"hash","pattern":"/tmp/file"})).unwrap();
+    let record = store
+        .access_create(identity.clone(), access.clone(), 100)
+        .unwrap()
+        .record;
+    assert_eq!(record.elicitation_id, "acc_2");
+    drop(store);
+    let (store, _) = scratch.open(200);
+    assert_eq!(
+        store
+            .access_create(identity, access, 200)
+            .unwrap()
+            .record
+            .elicitation_id,
+        "acc_2"
+    );
+    assert_eq!(store.access_notices(200).unwrap().len(), 1);
+    assert_eq!(store.access_notices(200).unwrap()[0].purpose, "user_ask");
 }

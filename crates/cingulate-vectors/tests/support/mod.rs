@@ -102,6 +102,7 @@ pub fn route_stamp(request: &Value) -> Stamp {
                 bind_session: route["session"].as_str().unwrap_or_default().into(),
                 operator_surface: route["operator"].as_bool().unwrap_or(false),
                 console_machine_id: None,
+                ..Default::default()
             }
         }
     }

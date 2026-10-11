@@ -1,5 +1,8 @@
 # Phone consent contract, v1
 
+Permission asks require [v2](consent-phone-v2.md). The v1 shapes and pinned
+examples below remain unchanged for their existing kinds.
+
 This contract describes the implemented approval-card interface. The phone calls
 exactly `consent.list_pending`, `consent.get`, and `consent.answer` through
 Callosum. Requests are JSON envelopes:

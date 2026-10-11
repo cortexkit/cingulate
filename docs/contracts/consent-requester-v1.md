@@ -1,5 +1,8 @@
 # Consent requester contract, v1
 
+The AFT permission-ask interface is [v2](consent-requester-v2.md). Existing v1
+request bodies and served examples retain the behavior specified below.
+
 This is the implemented requester interface for raising cards and consuming their
 settlements. Requests use `{method: string, params: object}`; successful responses
 wrap the result in `{result: ...}`. Refusals are transport errors with string
