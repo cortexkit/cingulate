@@ -13,8 +13,30 @@ AFT uses durable request/get/await/withdraw and core receives notices.
 v1 generic-consent admission rule. Its seven card families use that generic body;
 it cannot request `flow_install`, `flow_decision`, `package`, `tool_permission`
 or `macos_permission`. A disallowed kind refuses `elicitation_requester_refused`.
-Requester and subject identity come only from the daemon's route stamp, including
-the nonblank carried agent id required for this requester, never from body fields.
+Requester and subject identity come only from the daemon's route stamp, never
+from body fields. A nonblank carried agent id is required for this requester
+except for the worker admission rule below.
+
+For `kind: "consent"` from any requester already admitted for that kind, a stamp
+without an agent id may be a `worker` owned by `reserved:prefrontal-core`.
+Cingulate resolves its same-owner stamped `parent` through the daemon's
+`scope.describe`, using the permission-ask liveness rules in
+[Admission and stamped identity](#admission-and-stamped-identity). The parent (a
+worker's parent is always its head) must be live at the stamped epoch, with a
+nonblank agent id. A missing parent,
+a definitively non-live parent or a parent without an agent id refuses
+`access_no_head`; unknown or failed liveness refuses `access_unavailable`.
+All other missing-agent stamps retain their existing admission behavior.
+
+The subject is the parent's agent, with its name resolved exactly as on the
+head's own card. The stamped worker scope, not the head scope, is recorded as
+`asker`: a detached card's later `consent_answered` notice targets the worker's
+session. Body fields cannot supply either identity. Requester reads and the core
+outcome feed include `subject.via_worker: true` for these cards; phone reads use
+`subject.viaWorker: true`. The flag is omitted, not false, on every other card.
+Generic worker cards retain the ordinary generic-consent state machine and
+fail-closed expiry. They ask the user directly; they do not first require an
+answer from the head, unlike worker permission asks.
 
 Cerebellum may call `consent.request`, `consent.await`, `consent.get`,
 `consent.answers`, `consent.ack`, `consent.withdraw` and
@@ -42,8 +64,9 @@ reference. Only `dedup_key` selects a pending card to refresh. Changing or remov
 updates the stored reference; it does not withdraw and replace the card.
 
 The [generic-consent v2 served vectors](../../test-vectors/consent-requester-v2/README.md)
-cover requests with and without a reference, requester and phone records,
-answers/outcomes, and refusal of a non-consent request. Their `SHA256SUMS` is
+cover requests with and without a reference, worker admission and liveness
+refusals, requester and phone records, answers/outcomes, and refusal of a
+non-consent request. Their `SHA256SUMS` is
 generated from actual handler replies. Existing v1 contracts and corpora remain
 byte-for-byte unchanged.
 

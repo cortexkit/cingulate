@@ -175,6 +175,33 @@ impl Handler {
             .expect("access runtime lock")
             .clone()
     }
+    pub(super) async fn worker_head(
+        &self,
+        scope: &subc_protocol::scope::ScopeStamp,
+    ) -> Result<ScopeIdentity, Refusal> {
+        let parent = scope
+            .parent
+            .as_ref()
+            .filter(|p| p.owner == scope.owner)
+            .ok_or_else(|| Refusal::new("access_no_head", "worker has no stamped parent head"))?;
+        let target = ScopeIdentity {
+            scope_ref: parent.scope_ref.clone(),
+            scope_epoch: parent.scope_epoch,
+            agent_id: None,
+        };
+        match self.access_runtime().describe(&target).await {
+            Ok(ScopeLife::Live(head)) => Ok(head),
+            Ok(ScopeLife::Gone) => Err(Refusal::new(
+                "access_no_head",
+                "stamped parent head is not live",
+            )),
+            Ok(ScopeLife::Unknown) | Err(_) => Err(Refusal::new(
+                "access_unavailable",
+                "parent head liveness is unavailable",
+            )),
+        }
+    }
+
     async fn access_identity(
         &self,
         stamp: &Stamp,
@@ -203,33 +230,7 @@ impl Handler {
             ));
         }
         let head = if scope.kind == ScopeKind::Worker {
-            let parent = scope
-                .parent
-                .as_ref()
-                .filter(|p| p.owner == scope.owner)
-                .ok_or_else(|| {
-                    Refusal::new("access_no_head", "worker has no stamped parent head")
-                })?;
-            let target = ScopeIdentity {
-                scope_ref: parent.scope_ref.clone(),
-                scope_epoch: parent.scope_epoch,
-                agent_id: None,
-            };
-            match self.access_runtime().describe(&target).await {
-                Ok(ScopeLife::Live(head)) => Some(head),
-                Ok(ScopeLife::Gone) => {
-                    return Err(Refusal::new(
-                        "access_no_head",
-                        "stamped parent head is not live",
-                    ))
-                }
-                Ok(ScopeLife::Unknown) | Err(_) => {
-                    return Err(Refusal::new(
-                        "access_unavailable",
-                        "parent head liveness is unavailable",
-                    ))
-                }
-            }
+            Some(self.worker_head(scope).await?)
         } else {
             None
         };

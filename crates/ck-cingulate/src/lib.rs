@@ -540,7 +540,33 @@ impl Handler {
             stamp.label(),
             "reserved:cerebellum" | "reserved:plexus" | "reserved:entorhinal"
         );
-        if carrier && stamp.carried_agent_id.trim().is_empty() {
+        let worker_head = if request.kind == "consent" && stamp.carried_agent_id.trim().is_empty() {
+            match &stamp.scope {
+                Some(scope)
+                    if scope.kind == subc_protocol::scope::ScopeKind::Worker
+                        && scope.owner
+                            == (Principal::Reserved {
+                                module_id: "prefrontal-core".into(),
+                            }) =>
+                {
+                    Some(self.worker_head(scope).await?)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let agent_id = match &worker_head {
+            Some(head) => head
+                .agent_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| {
+                    Refusal::new("access_no_head", "stamped parent head has no agent_id")
+                })?,
+            None => &stamp.carried_agent_id,
+        };
+        if carrier && agent_id.trim().is_empty() {
             return Err(stamp.refuse());
         }
         if let Some(console) = &request.at_console {
@@ -549,30 +575,24 @@ impl Handler {
             }
         }
         let mut resolved_name = None;
-        let subject = if carrier {
-            if let Ok(Some(agent)) = self
-                .inner
-                .options
-                .resolver
-                .resolve(&stamp.carried_agent_id)
-                .await
-            {
+        let subject = if carrier || worker_head.is_some() {
+            if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
                 if agent.retired {
                     return Err(Refusal::new("consent_retired", "subject agent is retired"));
                 }
                 resolved_name = agent.name;
             }
             Subject {
-                agent_id: Some(stamp.carried_agent_id.clone()),
-                head_agent_id: stamp.carried_agent_id.clone(),
-                label: resolved_name
-                    .clone()
-                    .unwrap_or_else(|| stamp.carried_agent_id.clone()),
+                agent_id: Some(agent_id.to_owned()),
+                head_agent_id: agent_id.to_owned(),
+                label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
+                via_worker: worker_head.is_some(),
             }
         } else {
             Subject {
                 agent_id: None,
                 head_agent_id: String::new(),
+                via_worker: false,
                 label: match stamp.label() {
                     "direct" => "an unverified local process",
                     "reserved:basal" => "operator decision",

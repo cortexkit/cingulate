@@ -9,6 +9,10 @@ render unknown kinds as ordinary expiring approvals. The shared
 and requester bytes. The [requester v2 contract](consent-requester-v2.md) specifies
 admission, identity, state machine and core notices.
 
+Generic consent also admits worker sessions without their own agent id, as
+specified below. Cards raised by other sessions and existing served vectors
+remain unchanged.
+
 ## Identity and visibility
 
 The existing operator rule is unchanged: `reserved:callosum` on a daemon-stamped
@@ -18,6 +22,22 @@ asks appear in `consent.list_pending` and phone `consent.get` **only** while in
 withdrawn permission ids refuse `elicitation_not_found` on phone get; AFT retains
 the durable record. An answer reply still returns the committed terminal record
 for first-answer-wins recovery. Existing kinds retain v1 get retention behavior.
+
+## Generic consent raised by a worker
+
+Generic `kind: "consent"` cards raised by a daemon-stamped worker without its own
+agent id have the live parent head's agent as `subject`. Phone projections add
+`subject.viaWorker: true`; it is omitted, not false, on all other cards. The
+phone shows the lead agent's name from `subject.label` and indicates that a
+worker asked. Cingulate only serves card data; the phone client renders the
+consent UI. The stamped worker remains the requesting session; answering a
+detached card notifies that worker, not its
+head. These cards appear in the ordinary pending list, have a fail-closed expiry,
+and accept an operator's answer without first asking the head to answer. Settled
+cards retain the ordinary get and same-choice answer recovery behavior specified
+in [v1](consent-phone-v1.md). Request, requester get, phone list/get and
+outcome bytes are pinned in the
+[generic-consent v2 corpus](../../test-vectors/consent-requester-v2/README.md).
 
 ## Permission card shape
 

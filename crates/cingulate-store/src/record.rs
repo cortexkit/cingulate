@@ -36,6 +36,8 @@ pub struct Subject {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub head_agent_id: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub via_worker: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

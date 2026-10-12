@@ -1,12 +1,14 @@
 use std::{collections::BTreeMap, time::Duration};
 
+use ck_cingulate::ScopeLife;
 use ck_cingulate::Stamp;
 use serde_json::{json, Value};
 use subc_client_rs::HandlerOutcome;
+use subc_protocol::scope::ScopeKind;
 
 use crate::{
     phone,
-    support::{stamp, Fixture, ANSWERED, NOW},
+    support::{stamp, worker, Fixture, ANSWERED, NOW},
 };
 
 pub const CORPUS: &str = "consent-requester-v1";
@@ -390,5 +392,107 @@ pub async fn generate_v2() -> BTreeMap<String, Vec<u8>> {
         json!({"elicitation_id":settled}),
     )
     .await;
+    worker_vectors(&mut files).await;
     files
+}
+
+async fn worker_vectors(files: &mut BTreeMap<String, Vec<u8>>) {
+    let requester = worker::stamp("cerebellum", ScopeKind::Worker);
+    let fixture = Fixture::open(None).await;
+    fixture
+        .handler
+        .set_access_runtime(worker::Runtime::new(Ok(ScopeLife::Live(worker::head()))));
+    let reply = record(
+        files,
+        &fixture,
+        &requester,
+        "worker-consent",
+        "consent.request",
+        crate::support::app_body(),
+    )
+    .await;
+    let id = reply["elicitation_id"].as_str().unwrap();
+    record(
+        files,
+        &fixture,
+        &requester,
+        "worker-consent-get",
+        "consent.get",
+        json!({"elicitation_id":id}),
+    )
+    .await;
+    record(
+        files,
+        &fixture,
+        &phone::phone_stamp(),
+        "worker-consent-phone-list",
+        "consent.list_pending",
+        json!({}),
+    )
+    .await;
+    record(
+        files,
+        &fixture,
+        &phone::phone_stamp(),
+        "worker-consent-phone-get",
+        "consent.get",
+        json!({"elicitationId":id}),
+    )
+    .await;
+    fixture.clock.set(ANSWERED);
+    fixture
+        .ok(
+            &phone::phone_stamp(),
+            "consent.answer",
+            json!({"elicitationId":id,"choiceId":"allow_once"}),
+        )
+        .await;
+    record(
+        files,
+        &fixture,
+        &stamp("reserved:prefrontal-core"),
+        "worker-consent-outcomes",
+        "consent.outcomes",
+        json!({"since":0}),
+    )
+    .await;
+
+    for (name, parent, life, code) in [
+        (
+            "worker-no-parent",
+            false,
+            ScopeLife::Live(worker::head()),
+            "access_no_head",
+        ),
+        ("worker-head-gone", true, ScopeLife::Gone, "access_no_head"),
+        (
+            "worker-head-unavailable",
+            true,
+            ScopeLife::Unknown,
+            "access_unavailable",
+        ),
+    ] {
+        let fixture = Fixture::open(None).await;
+        fixture
+            .handler
+            .set_access_runtime(worker::Runtime::new(Ok(life)));
+        let mut requester = requester.clone();
+        if !parent {
+            requester.scope.as_mut().unwrap().parent = None;
+        }
+        let params = crate::support::app_body();
+        files.insert(
+            format!("{name}-request.json"),
+            serde_json::to_vec(&json!({"method":"consent.request","params":params})).unwrap(),
+        );
+        let refusal = fixture
+            .call(&requester, "consent.request", params)
+            .await
+            .unwrap_err();
+        assert_eq!(refusal["code"], code);
+        files.insert(
+            format!("{name}-refusal.json"),
+            serde_json::to_vec(&refusal).unwrap(),
+        );
+    }
 }

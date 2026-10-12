@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod worker;
+
 use std::{
     fs,
     path::PathBuf,
@@ -277,6 +279,18 @@ impl Fixture {
                     .collect()
             })
             .collect()
+    }
+
+    pub fn stored_record(&self, id: &str) -> cingulate_store::ElicitationRecord {
+        let record: String = Connection::open(&self.path)
+            .unwrap()
+            .query_row(
+                "SELECT record_json FROM elicitation_records WHERE elicitation_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&record).unwrap()
     }
 
     pub async fn call(&self, stamp: &Stamp, method: &str, params: Value) -> Result<Value, Value> {
