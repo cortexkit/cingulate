@@ -211,6 +211,11 @@ Detach and settlement are ordered in one store transaction, so exactly one of
 requester calls detach exactly when it stops holding the call, and must handle
 the settled-record reply.
 
+Only the `consent.detach` reply carries `detached`. Every other requester read,
+the core outcomes feed and phone reads never do. A dedup refresh that keeps the
+card in place clears the detach mark, because the requester is holding a new
+call.
+
 ### The `consent_answered` notice
 
 When a detached card settles, Cingulate sends core `session.notice` with

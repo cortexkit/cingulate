@@ -19,11 +19,11 @@ pub use access::{
     AccessAnswer, AccessIdentity, AccessMutation, AccessRecord, AnswerAttempt, Notice,
     ScopeIdentity,
 };
-pub use record::{ElicitationRecord, State, Subject};
+pub use record::{ElicitationRecord, State, Subject, LATE_ANSWER_PURPOSE};
 
 pub const RETENTION_MS: i64 = 86_400_000;
 pub const MIGRATION_NAMESPACE: &str = "cingulate";
-pub const MIGRATIONS: [Migration; 4] = [
+pub const MIGRATIONS: [Migration; 5] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -39,6 +39,10 @@ pub const MIGRATIONS: [Migration; 4] = [
     Migration {
         version: 4,
         statements: include_str!("../migrations/004_access_asks.sql"),
+    },
+    Migration {
+        version: 5,
+        statements: include_str!("../migrations/005_shared_notice_outbox.sql"),
     },
 ];
 
@@ -113,6 +117,9 @@ pub struct RequestIdentity {
     /// A resolver-provided name, as distinct from a raw-id fallback. Only a
     /// successful resolution may replace a pending card's existing label.
     pub resolved_name: Option<String>,
+    /// The agent session the daemon stamped on the requester's route, if any.
+    /// A late answer on a detached card is addressed to this session.
+    pub asker: Option<ScopeIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +271,11 @@ impl ConsentStore {
                     if let Some(name) = &identity.resolved_name {
                         old.subject.label = name.clone();
                     }
+                    // Raising the same card again means the requester holds a
+                    // new call for it, so the card is held again: clear the
+                    // detach mark, or an answer delivered in that call would
+                    // also be sent as a late-answer notice.
+                    old.detached = false;
                     save(tx, &old)?;
                     return Ok(CreateResult {
                         record: old,
@@ -296,6 +308,8 @@ impl ConsentStore {
                 answered_at_ms: None,
                 answered_choice_id: None,
                 execution: None,
+                detached: false,
+                asker: identity.asker.clone(),
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
@@ -456,6 +470,45 @@ impl ConsentStore {
                     terminal(tx, &mut record, State::Withdrawn, None, now_ms)?;
                 }
                 settlements.push(record.clone());
+            }
+            Ok(Mutation {
+                value: record,
+                settlements,
+            })
+        })
+    }
+
+    /// Record that the requester stopped holding the agent's call for this card.
+    /// Only settlements committed after this mark queue a `consent_answered`
+    /// notice. Because the mark and every settlement are serialized store
+    /// transactions, each card is either settled while held (no notice) or
+    /// settled after detach (one notice). A settled card is returned unchanged,
+    /// a repeat returns the current record, and a repeat never undoes the mark;
+    /// only an in-place dedup refresh in `create` clears it.
+    pub fn detach(
+        &self,
+        owner: &str,
+        id: &str,
+        now_ms: i64,
+    ) -> Result<Mutation<ElicitationRecord>> {
+        self.transaction(|tx| {
+            let mut record = owned(tx, owner, id, now_ms)?;
+            if record.request.kind != "consent" {
+                return Err(refuse(
+                    "elicitation_requester_refused",
+                    "consent.detach is admitted only for kind consent",
+                ));
+            }
+            let mut settlements = Vec::new();
+            if record.state == State::Pending {
+                if record.expires_at_ms <= now_ms {
+                    // The card was already due, so it settled while still held.
+                    expire(tx, &mut record)?;
+                    settlements.push(record.clone());
+                } else if !record.detached {
+                    record.detached = true;
+                    save(tx, &record)?;
+                }
             }
             Ok(Mutation {
                 value: record,
@@ -717,6 +770,18 @@ fn terminal(
          SELECT elicitation_id,owner,settled_at_ms FROM elicitation_records WHERE elicitation_id=?1",
         [&record.elicitation_id],
     )?;
+    if record.detached {
+        // A card settled after its requester stopped holding the call: queue the
+        // late answer for the agent's session in this same transaction. The
+        // (elicitation_id, purpose) key keeps it to one notice per card.
+        if let Some(body) = record.late_answer_notice() {
+            conn.execute(
+                "INSERT OR IGNORE INTO access_notices(elicitation_id,purpose,body_json) \
+                 VALUES (?1,?2,?3)",
+                params![record.elicitation_id, LATE_ANSWER_PURPOSE, body],
+            )?;
+        }
+    }
     Ok(())
 }
 

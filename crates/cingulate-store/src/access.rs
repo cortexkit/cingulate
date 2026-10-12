@@ -201,6 +201,9 @@ pub struct Notice {
     pub elicitation_id: String,
     pub purpose: String,
     pub body: Value,
+    /// The stored body exactly as queued. Sending these bytes keeps the key
+    /// order that pinned wire formats specify; `body` is the same JSON parsed.
+    pub body_json: String,
     pub attempts: i64,
 }
 
@@ -373,12 +376,14 @@ impl ConsentStore {
         self.read(|conn| {
             let mut stmt = conn.prepare("SELECT elicitation_id,purpose,body_json,attempts FROM access_notices WHERE status='pending' AND retry_at_ms<=?1 ORDER BY rowid")?;
             let rows = stmt.query_map([now], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
-            rows.into_iter().map(|(elicitation_id,purpose,raw,attempts)| Ok(Notice { elicitation_id,purpose,body:serde_json::from_str(&raw)?,attempts })).collect()
+            rows.into_iter().map(|(elicitation_id,purpose,raw,attempts)| Ok(Notice { elicitation_id,purpose,body:serde_json::from_str(&raw)?,body_json:raw,attempts })).collect()
         })
     }
     /// Persist delivery results independently of the ask. A definitive refusal
     /// saying the worker's supervising session ended settles its head-only
     /// question; an unreachable server is not evidence that session ended.
+    /// A late answer on a generic consent card whose session is gone is kept
+    /// as `unclaimed` on its outbox row; the card itself is already settled.
     pub fn access_notice_result(
         &self,
         notice: &Notice,
@@ -388,7 +393,7 @@ impl ConsentStore {
         self.transaction(|tx| {
             let retry = result == "transport";
             let missing = matches!(result, "unknown_session" | "session_not_live");
-            let status = if retry { "pending" } else if result == "ok" { "delivered" } else if missing && notice.purpose == "settled" { "unclaimed" } else { "refused" };
+            let status = if retry { "pending" } else if result == "ok" { "delivered" } else if missing && matches!(notice.purpose.as_str(), "settled" | crate::LATE_ANSWER_PURPOSE) { "unclaimed" } else { "refused" };
             let backoff = (250_i64.saturating_mul(1_i64 << notice.attempts.min(8))).min(60_000);
             tx.execute("UPDATE access_notices SET status=?3,attempts=attempts+1,retry_at_ms=?4,last_error=?5 WHERE elicitation_id=?1 AND purpose=?2 AND status='pending'", params![notice.elicitation_id,notice.purpose,status,now.saturating_add(backoff),if result == "ok" { None } else { Some(result) }])?;
             let Some(mut record) = load(tx, &notice.elicitation_id)? else { return Ok(None); };

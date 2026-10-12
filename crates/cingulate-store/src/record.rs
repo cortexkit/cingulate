@@ -2,6 +2,12 @@ use cingulate_decode::ConsentRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::ScopeIdentity;
+
+/// The `session.notice` purpose for an answer that arrives after the requester
+/// stopped holding the agent's call.
+pub const LATE_ANSWER_PURPOSE: &str = "consent_answered";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
@@ -48,6 +54,14 @@ pub struct ElicitationRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<String>,
     pub requester: String,
+    /// Set once the requester stops holding the agent's call. Requester-private:
+    /// no phone or feed projection shows it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub detached: bool,
+    /// The agent session stamped on the requesting route, kept only to address
+    /// a late-answer notice. No projection shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asker: Option<ScopeIdentity>,
 }
 
 impl ElicitationRecord {
@@ -59,6 +73,8 @@ impl ElicitationRecord {
         let object = value.as_object_mut().expect("record object");
         object.remove("request");
         object.remove("requester");
+        object.remove("detached");
+        object.remove("asker");
         for (key, value) in serde_json::to_value(&self.request)
             .expect("request serialization")
             .as_object()
@@ -90,6 +106,75 @@ impl ElicitationRecord {
             value["binding"] = binding.clone();
         }
         value
+    }
+}
+
+/// Do not reorder these fields: serde emits them in declaration order, and the
+/// notice bytes must match the files in test-vectors/consent-late-answer-v1/.
+#[derive(Serialize)]
+struct LateAnswerNotice<'a> {
+    elicitation_id: &'a str,
+    purpose: &'static str,
+    asker: NoticeTarget<'a>,
+    fields: LateAnswerFields<'a>,
+}
+
+#[derive(Serialize)]
+struct NoticeTarget<'a> {
+    scope_ref: &'a str,
+    scope_epoch: u64,
+}
+
+#[derive(Serialize)]
+struct LateAnswerFields<'a> {
+    requester: &'a str,
+    outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice_label: Option<&'a str>,
+    settled_at_ms: u64,
+}
+
+impl ElicitationRecord {
+    /// The exact `session.notice` body for a settled detached card, or `None`
+    /// for a pending card or one raised on a route with no stamped session.
+    /// It carries only the outcome: never `requester_ref`, the prompt, facts
+    /// or any other request content.
+    pub fn late_answer_notice(&self) -> Option<String> {
+        let asker = self.asker.as_ref()?;
+        let settled_at_ms = self.answered_at_ms?;
+        let outcome = match self.state {
+            State::Pending => return None,
+            State::Answered => "answered",
+            State::Expired => "expired",
+            State::Withdrawn => "withdrawn",
+        };
+        // Only an operator's answer names a choice; expiry and withdrawal do not.
+        let choice = (self.state == State::Answered)
+            .then_some(self.answered_choice_id.as_deref())
+            .flatten()
+            .and_then(|id| self.request.options.iter().find(|option| option.id == id));
+        let notice = LateAnswerNotice {
+            elicitation_id: &self.elicitation_id,
+            purpose: LATE_ANSWER_PURPOSE,
+            asker: NoticeTarget {
+                scope_ref: &asker.scope_ref,
+                scope_epoch: asker.scope_epoch,
+            },
+            fields: LateAnswerFields {
+                // The module id of the raising principal, without `reserved:`.
+                requester: self
+                    .requester
+                    .strip_prefix("reserved:")
+                    .unwrap_or(&self.requester),
+                outcome,
+                choice_id: choice.map(|option| option.id.as_str()),
+                choice_label: choice.map(|option| option.label.as_str()),
+                settled_at_ms: settled_at_ms.max(0) as u64,
+            },
+        };
+        Some(serde_json::to_string(&notice).expect("notice serialization"))
     }
 }
 

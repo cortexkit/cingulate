@@ -37,6 +37,15 @@ struct RelayIdentity {
 pub trait AccessRuntime: Send + Sync {
     async fn describe(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String>;
     async fn notice(&self, body: Value) -> NoticeResult;
+    /// Send a body already serialized as JSON. The delivery loop calls this
+    /// with the queued bytes so pinned key order reaches core unchanged; the
+    /// default parses them and calls `notice`.
+    async fn notice_json(&self, body: &str) -> NoticeResult {
+        match serde_json::from_str(body) {
+            Ok(body) => self.notice(body).await,
+            Err(_) => NoticeResult::Refused("invalid_params".into()),
+        }
+    }
     fn is_macos(&self) -> bool {
         cfg!(target_os = "macos")
     }
@@ -96,6 +105,16 @@ impl AccessRuntime for DaemonAccessRuntime {
         }
     }
     async fn notice(&self, body: Value) -> NoticeResult {
+        self.notice_json(&body.to_string()).await
+    }
+    async fn notice_json(&self, body: &str) -> NoticeResult {
+        if serde_json::from_str::<serde::de::IgnoredAny>(body).is_err() {
+            return NoticeResult::Refused("invalid_params".into());
+        }
+        // Splice the queued body in verbatim: re-encoding it as a JSON value
+        // would sort its keys, and the late-answer notice's key order is fixed
+        // by the files in test-vectors/consent-late-answer-v1/.
+        let request = format!(r#"{{"method":"session.notice","params":{body}}}"#);
         let mut consumer = self.consumer.lock().await;
         if consumer.is_none() {
             match SubcConsumer::connect_default(ConsumerOptions::default()).await {
@@ -111,7 +130,7 @@ impl AccessRuntime for DaemonAccessRuntime {
                     module_id: "prefrontal-core".into(),
                 },
                 BindIdentity::new("/", "cingulate", "permission-notices"),
-                serde_json::to_vec(&json!({"method":"session.notice","params":body})).unwrap(),
+                request.into_bytes(),
                 CallOptions {
                     timeout: Duration::from_secs(5),
                     route_retry_deadline: Duration::from_secs(5),
@@ -419,7 +438,7 @@ impl Handler {
                             Ok(json!({"ok":true,"alreadyAnswered":false,"elicitation":value}))
                         }
                     }
-                    "consent.get" | "consent.await" | "consent.withdraw" => {
+                    "consent.get" | "consent.await" | "consent.withdraw" | "consent.detach" => {
                         if !stamp.operator_surface {
                             stamp.authorize_owner()?;
                         }
@@ -443,6 +462,14 @@ impl Handler {
                             ));
                         }
                         match method {
+                            // Detach applies only to cards whose `kind` is
+                            // `consent`. A permission ask already reaches its
+                            // agent through its own session notices (user_ask,
+                            // settled, withdrawn), so it has no late-answer mark.
+                            "consent.detach" => Err(Refusal::new(
+                                "elicitation_requester_refused",
+                                "consent.detach is admitted only for kind consent",
+                            )),
                             "consent.withdraw" => {
                                 let mutation = self
                                     .with_store(|store| {
@@ -491,10 +518,13 @@ impl Handler {
                 tracing::warn!(%error, "permission phone notification failed after commit");
             }
         }
+        self.spawn_notice_delivery();
+    }
+    pub(super) fn spawn_notice_delivery(&self) {
         let handler = self.clone();
         tokio::spawn(async move {
             if let Err(error) = handler.deliver_access_notices().await {
-                tracing::warn!(%error, "permission notice delivery failed");
+                tracing::warn!(%error, "notice delivery failed");
             }
         });
     }
@@ -510,7 +540,7 @@ impl Handler {
             {
                 continue;
             }
-            let result = self.access_runtime().notice(notice.body.clone()).await;
+            let result = self.access_runtime().notice_json(&notice.body_json).await;
             let code = match &result {
                 NoticeResult::Delivered => "ok",
                 NoticeResult::Refused(code) => {

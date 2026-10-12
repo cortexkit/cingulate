@@ -334,5 +334,61 @@ pub async fn generate_v2() -> BTreeMap<String, Vec<u8>> {
         "cerebellum-non-consent-refusal.json".into(),
         serde_json::to_vec(&refusal).unwrap(),
     );
+
+    // consent.detach on a pending card, a repeat of it, a card that settled
+    // before any detach, and a card raised by another principal.
+    let fixture = Fixture::open(None).await;
+    let id = fixture
+        .request(&requester, crate::support::app_body())
+        .await;
+    for name in ["cerebellum-detach-pending", "cerebellum-detach-repeat"] {
+        record(
+            &mut files,
+            &fixture,
+            &requester,
+            name,
+            "consent.detach",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+    }
+    let other = Stamp {
+        carried_agent_id: "agent-alf".into(),
+        ..stamp("reserved:plexus")
+    };
+    let params = json!({"elicitation_id":id});
+    files.insert(
+        "cerebellum-detach-wrong-owner-request.json".into(),
+        serde_json::to_vec(&json!({"method":"consent.detach","params":params})).unwrap(),
+    );
+    let refusal = fixture
+        .call(&other, "consent.detach", params)
+        .await
+        .unwrap_err();
+    assert_eq!(refusal["code"], "elicitation_not_owner");
+    files.insert(
+        "cerebellum-detach-wrong-owner-refusal.json".into(),
+        serde_json::to_vec(&refusal).unwrap(),
+    );
+    let settled = fixture
+        .request(&requester, crate::support::app_body())
+        .await;
+    fixture.clock.set(ANSWERED);
+    fixture
+        .ok(
+            &phone::phone_stamp(),
+            "consent.answer",
+            json!({"elicitationId":settled,"choiceId":"allow_once"}),
+        )
+        .await;
+    record(
+        &mut files,
+        &fixture,
+        &requester,
+        "cerebellum-detach-settled",
+        "consent.detach",
+        json!({"elicitation_id":settled}),
+    )
+    .await;
     files
 }

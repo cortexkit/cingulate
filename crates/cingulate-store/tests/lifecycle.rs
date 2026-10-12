@@ -84,6 +84,7 @@ fn identity(principal: &str, session: &str) -> RequestIdentity {
             label: "an unverified local process".into(),
         },
         resolved_name: None,
+        asker: None,
     }
 }
 
@@ -195,7 +196,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4"
+        "1,2,3,4,5"
     );
     let answer_schema: String = conn
         .query_row(
@@ -283,14 +284,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,5,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,6,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 5"));
-    assert!(error.to_string().contains("migration 4"));
+    assert!(error.to_string().contains("version 6"));
+    assert!(error.to_string().contains("migration 5"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1264,6 +1265,7 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
         DROP TRIGGER access_update_revision;
         DROP TABLE access_notices;
         DROP TABLE access_asks;
+        DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=5;
         DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=4;
         DROP TRIGGER cingulate_pending_insert;
         DROP TRIGGER cingulate_pending_update;
@@ -1318,6 +1320,8 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         answered_at_ms: None,
         answered_choice_id: None,
         execution: None,
+        detached: false,
+        asker: None,
     };
     old.with_conn(|conn| {
         conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,expires_at_ms) VALUES (?1,?2,?3,'pending',50000)",params![legacy.elicitation_id,identity("direct","s").owner,serde_json::to_string(&legacy).unwrap()])?;

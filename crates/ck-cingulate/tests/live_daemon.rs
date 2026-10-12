@@ -365,6 +365,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent.answer",
             "consent.answers",
             "consent.await",
+            "consent.detach",
             "consent.get",
             "consent.list_pending",
             "consent.outcomes",

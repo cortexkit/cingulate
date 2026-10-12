@@ -15,8 +15,8 @@ use std::{
 use async_trait::async_trait;
 use cingulate_decode::{ConsentRequest, Refusal};
 use cingulate_store::{
-    storage_descriptor, AnswerOutcome, ConsentStore, ElicitationRecord, RequestIdentity, State,
-    StorageDescriptor, Subject,
+    storage_descriptor, AnswerOutcome, ConsentStore, ElicitationRecord, RequestIdentity,
+    ScopeIdentity, State, StorageDescriptor, Subject,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -37,7 +37,7 @@ use tokio::sync::{watch, Mutex};
 mod access;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 10] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 11] = [
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
     ("consent.await", ManagementOperationKind::Query),
@@ -45,6 +45,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 10] = [
     ("consent.ack", ManagementOperationKind::Mutate),
     ("consent.report_execution", ManagementOperationKind::Mutate),
     ("consent.withdraw", ManagementOperationKind::Mutate),
+    ("consent.detach", ManagementOperationKind::Mutate),
     ("consent.answer", ManagementOperationKind::Mutate),
     ("consent.list_pending", ManagementOperationKind::Query),
     ("consent.outcomes", ManagementOperationKind::Query),
@@ -516,6 +517,12 @@ impl Handler {
             self.wake(&record.elicitation_id);
             self.pointer(record, true).await;
         }
+        // A detached card's settlement queued its late-answer notice in the
+        // settling transaction. Send it off the request path, like the
+        // permission-ask notices; the maintenance tick retries failures.
+        if settlements.iter().any(|record| record.detached) {
+            self.spawn_notice_delivery();
+        }
     }
 
     async fn identity(
@@ -579,6 +586,11 @@ impl Handler {
             requester: stamp.label().into(),
             subject,
             resolved_name,
+            asker: stamp.scope.as_ref().map(|scope| ScopeIdentity {
+                scope_ref: scope.scope_ref.clone(),
+                scope_epoch: scope.scope_epoch,
+                agent_id: scope.attributes.agent_id.clone(),
+            }),
         })
     }
 
@@ -653,9 +665,11 @@ impl Handler {
         let id = match method {
             "consent.get" if stamp.operator_surface => Some(text(&params, "elicitationId")?),
             "consent.answer" => Some(text(&params, "elicitationId")?),
-            "consent.get" | "consent.await" | "consent.withdraw" | "consent.report_execution" => {
-                Some(text(&params, "elicitation_id")?)
-            }
+            "consent.get"
+            | "consent.await"
+            | "consent.withdraw"
+            | "consent.detach"
+            | "consent.report_execution" => Some(text(&params, "elicitation_id")?),
             _ => None,
         };
         let choice = if method == "consent.answer" {
@@ -673,7 +687,11 @@ impl Handler {
         // whether another owner has it, even when supplied params are malformed.
         if matches!(
             method,
-            "consent.get" | "consent.await" | "consent.withdraw" | "consent.report_execution"
+            "consent.get"
+                | "consent.await"
+                | "consent.withdraw"
+                | "consent.detach"
+                | "consent.report_execution"
         ) && !(method == "consent.get" && stamp.operator_surface)
         {
             let owner = self
@@ -709,6 +727,7 @@ impl Handler {
                 | "consent.list_pending"
                 | "consent.answer"
                 | "consent.withdraw"
+                | "consent.detach"
         ) {
             store.sweep(now).map_err(store_error)?
         } else {
@@ -762,6 +781,21 @@ impl Handler {
                         .map_err(store_error)?;
                     events.extend(mutation.settlements);
                     self.project(&mutation.value, false)
+                }
+                "consent.detach" => {
+                    let mutation = store
+                        .detach(&stamp.owner(), id.expect("detach id"), now)
+                        .map_err(store_error)?;
+                    events.extend(mutation.settlements);
+                    let mut value = self.project(&mutation.value, false);
+                    // Only the consent.detach reply carries `detached: true`; get,
+                    // await, answers, withdraw and outcomes never show it. It is
+                    // absent when the card settled before it was ever detached,
+                    // which means no late-answer notice will follow.
+                    if mutation.value.detached {
+                        value["detached"] = json!(true);
+                    }
+                    value
                 }
                 "consent.list_pending" => {
                     let after = params
