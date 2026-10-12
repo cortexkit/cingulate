@@ -179,3 +179,79 @@ attempts (surface, principal, time, answer, note, relayed identity, result),
 escalation note, final state and settlement time. Outbox rows retain delivery
 status, attempt count and last refusal. A late answer never overwrites an earlier
 outcome or its note. Standing grants remain entirely AFT's responsibility.
+
+## Late answers on generic consent cards
+
+A requester that raises a generic `consent` card while holding an agent's tool
+call usually waits on `consent.await` and returns the answer in that call. When
+it stops holding the call and returns "still waiting" to the agent instead, any
+later answer has to reach the agent through core. An answer that arrives while
+the requester still holds the call must not reach the agent a second time.
+The requester marks the moment it stops holding the call with `consent.detach`,
+and only settlements after that mark produce a notice.
+
+### `consent.detach {id}`
+
+Admitted only from the principal that raised the card, and only for kind
+`consent`. Other kinds refuse `elicitation_requester_refused`; an unknown id or a
+card raised by another principal answers with the existing not-found and owner
+refusals.
+
+- **Pending card:** detach commits, and the reply is the card record with
+  `detached: true`.
+- **Already settled card:** detach changes nothing and returns the settled
+  record. The requester then returns that answer in the held call, and no notice
+  is ever sent for the card.
+- **Repeated detach:** always returns the card's current record: still pending
+  with `detached: true`, or settled if it settled in between. It never undoes
+  the first detach.
+
+Detach and settlement are ordered in one store transaction, so exactly one of
+"settled while held" and "settled after detach" applies to every card. A
+requester calls detach exactly when it stops holding the call, and must handle
+the settled-record reply.
+
+### The `consent_answered` notice
+
+When a detached card settles, Cingulate sends core `session.notice` with
+purpose `consent_answered`. It is addressed to the agent session whose scope
+the subconscious daemon stamped on the route the requester used for
+`consent.request`. The body follows the `session.notice` wire described in
+"Notices and audit" above (`elicitation_id`, `purpose`, `asker`, `fields`).
+The `head` member, which only worker asks carry, is absent:
+
+```json
+{
+  "elicitation_id": "el_0000000000000042",
+  "purpose": "consent_answered",
+  "asker": {"scope_ref": "sc_head_alf", "scope_epoch": 3},
+  "fields": {
+    "requester": "cerebellum",
+    "outcome": "answered",
+    "choice_id": "allow_30m",
+    "choice_label": "Allow for 30 minutes",
+    "settled_at_ms": 1792000000000
+  }
+}
+```
+
+| `fields` key | Type and limit |
+|---|---|
+| `requester` | Module id of the raising principal, without the `reserved:` prefix: 1–64 ASCII characters. |
+| `outcome` | `answered` \| `expired` \| `withdrawn`. |
+| `choice_id` | The chosen option's `id`, 1–64 characters. Present only when `outcome` is `answered`. |
+| `choice_label` | The chosen option's `label`, 1–200 characters, as the operator saw it. Present only when `outcome` is `answered`. Core escapes it before showing it to the agent. |
+| `settled_at_ms` | Unsigned integer, Unix milliseconds. |
+
+The notice never carries `requester_ref`, the prompt, facts or the request
+body. A card that was never detached never produces this notice. Core
+deduplicates on `(elicitation_id, purpose)` and wakes the agent with the
+notice; that handling is core's change, made alongside this one. Delivery,
+retry and refusal handling are those of the other notices above:
+`unknown_session` or `session_not_live` records the settlement as `unclaimed`
+and never blocks it.
+
+The target bytes are pinned in
+[`test-vectors/consent-late-answer-v1/`](../../test-vectors/consent-late-answer-v1/README.md).
+Cingulate's implementation must produce them byte for byte, and core decodes
+them.
