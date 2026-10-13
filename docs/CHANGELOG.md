@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Allow the Plexus requester to create and manage its own generic `consent`
+  cards. Cingulate takes each card's requester and subject identity from the
+  daemon route stamp, not request params, and refuses other kinds. Add its
+  consent-request and non-consent-refusal examples to the v2 corpus.
+
 ## 0.3.0
 
 - Pin Cerebellum's generic-consent-only admission and owner-scoped requester

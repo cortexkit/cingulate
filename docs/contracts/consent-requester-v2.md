@@ -9,12 +9,13 @@ AFT uses durable request/get/await/withdraw and core receives notices.
 
 ## Generic consent and requester correlation
 
-`reserved:cerebellum` is admitted for `kind: "consent"` only, preserving the
-v1 generic-consent admission rule. Its seven card families use that generic body;
-it cannot request `flow_install`, `flow_decision`, `package`, `tool_permission`
-or `macos_permission`. A disallowed kind refuses `elicitation_requester_refused`.
+To preserve v1 behavior, the generic-consent rule admits `direct` and
+`reserved:cerebellum`, `reserved:plexus` and `reserved:entorhinal` for
+`kind: "consent"` only. These requesters use the generic consent body; none can
+request `flow_install`, `flow_decision`, `package`, `tool_permission` or
+`macos_permission`. A disallowed kind refuses `elicitation_requester_refused`.
 Requester and subject identity come only from the daemon's route stamp, never
-from body fields. A nonblank carried agent id is required for this requester
+from body fields. A nonblank carried agent id is required for reserved requesters
 except for the worker admission rule below.
 
 For `kind: "consent"` from any requester already admitted for that kind, a stamp
@@ -38,13 +39,13 @@ Generic worker cards retain the ordinary generic-consent state machine and
 fail-closed expiry. They ask the user directly; they do not first require an
 answer from the head, unlike worker permission asks.
 
-Cerebellum may call `consent.request`, `consent.await`, `consent.get`,
-`consent.answers`, `consent.ack`, `consent.withdraw` and
-`consent.report_execution`. Reads and mutations by id require ownership;
-answers and acknowledgments are scoped to cards raised by that principal under
-the existing v1 owner rules. This admission grants no phone/operator authority
-and no access to the core-only `consent.outcomes` feed.
-
+`reserved:cerebellum` and `reserved:plexus` may call `consent.request`,
+`consent.await`, `consent.get`, `consent.answers`, `consent.ack`,
+`consent.withdraw`, `consent.report_execution` and `consent.detach`. Get, await,
+report_execution, withdraw and detach require the raising owner. `consent.answers`
+returns only that owner's answers, and `consent.ack` acknowledges only that
+owner's answers. Neither requester can call phone-only `consent.answer` or
+`consent.list_pending`, nor read the core-only `consent.outcomes` feed.
 Generic `consent` params add one optional field:
 
 | Field | Rule |

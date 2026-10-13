@@ -96,6 +96,9 @@ fn stamped(module: &str, handle: u16) -> Stamp {
 fn cerebellum() -> Stamp {
     stamped("cerebellum", 1)
 }
+fn plexus() -> Stamp {
+    stamped("plexus", 3)
+}
 fn phone() -> Stamp {
     Stamp::from_bind(
         &RouteBindRequest::new(
@@ -346,6 +349,27 @@ async fn late_answer_reaches_the_stamped_session_once_in_pinned_key_order() {
     f.detach(&id).await;
     f.deliver().await;
     assert_eq!(f.sent().len(), 1);
+}
+
+#[tokio::test]
+async fn plexus_late_answer_notice_names_plexus_as_requester() {
+    let f = Fixture::new().await;
+    let id = f.ok(&plexus(), "consent.request", card()).await["elicitation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    f.ok(&plexus(), "consent.detach", json!({"elicitation_id":id}))
+        .await;
+    f.deliver().await;
+    f.clock.0.send_replace(1500);
+    assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
+    f.deliver().await;
+    assert_eq!(
+        f.sent(),
+        vec![format!(
+            r#"{{"elicitation_id":"{id}","purpose":"consent_answered","asker":{{"scope_ref":"sc_head_alf","scope_epoch":3}},"fields":{{"requester":"plexus","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":1500}}}}"#
+        )]
+    );
 }
 
 #[tokio::test]

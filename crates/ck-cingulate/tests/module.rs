@@ -2360,6 +2360,117 @@ fn cerebellum() -> Stamp {
     }
 }
 
+fn plexus() -> Stamp {
+    Stamp {
+        carried_agent_id: "agent-plexus".into(),
+        ..stamp("reserved:plexus")
+    }
+}
+
+#[tokio::test]
+async fn plexus_requester_lifecycle_and_stamped_identity() {
+    let f = Fixture::open(None).await;
+    let requester = plexus();
+    let mut request = body();
+    request["requester_ref"] = json!("plexus-call-1");
+    let id = f.request(&requester, request).await;
+    let card = ok(
+        &f.handler,
+        &requester,
+        "consent.get",
+        json!({"elicitation_id":id}),
+    )
+    .await;
+    assert_eq!(card["requester_label"], "reserved:plexus");
+    assert_eq!(card["subject"]["agent_id"], "agent-plexus");
+    assert_eq!(card["requester_ref"], "plexus-call-1");
+    assert_eq!(card["state"], "pending");
+    error(
+        &f.handler,
+        &requester,
+        "consent.outcomes",
+        json!({"since":0}),
+        "elicitation_requester_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn plexus_only_generic_consent() {
+    let f = Fixture::open(None).await;
+    for kind in [
+        "flow_install",
+        "flow_decision",
+        "package",
+        "tool_permission",
+        "macos_permission",
+    ] {
+        let request = if kind == "package" {
+            serde_json::from_str::<Value>(include_str!(
+                "../../../test-vectors/consent-package-card-v1/request.json"
+            ))
+            .unwrap()["params"]
+                .clone()
+        } else {
+            kind_body(kind)
+        };
+        assert!(f
+            .unchanged_error(
+                &plexus(),
+                "consent.request",
+                request,
+                "elicitation_requester_refused"
+            )
+            .await
+            .contains("reserved:plexus"));
+    }
+}
+
+#[tokio::test]
+async fn plexus_cannot_read_or_answer_another_requesters_card() {
+    let f = Fixture::open(None).await;
+    let id = f.request(&cerebellum(), body()).await;
+    for method in [
+        "consent.get",
+        "consent.await",
+        "consent.withdraw",
+        "consent.detach",
+        "consent.report_execution",
+    ] {
+        f.unchanged_error(
+            &plexus(),
+            method,
+            json!({"elicitation_id":id,"timeout_ms":0,"execution":"executed"}),
+            "elicitation_not_owner",
+        )
+        .await;
+    }
+    assert!(
+        ok(&f.handler, &plexus(), "consent.answers", json!({"since":0})).await["records"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    error(
+        &f.handler,
+        &plexus(),
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+        "elicitation_operator_required",
+    )
+    .await;
+    assert_eq!(
+        ok(
+            &f.handler,
+            &cerebellum(),
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await["state"],
+        "pending"
+    );
+}
+
 #[tokio::test]
 async fn cerebellum_requester_lifecycle_and_stamped_identity() {
     let f = Fixture::open(None).await;

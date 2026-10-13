@@ -51,6 +51,13 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 11] = [
     ("consent.outcomes", ManagementOperationKind::Query),
 ];
 
+const GENERIC_CONSENT_REQUESTERS: &[(&str, bool)] = &[
+    ("reserved:cerebellum", true),
+    ("reserved:plexus", true),
+    ("reserved:entorhinal", true),
+    ("direct", false),
+];
+
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder("cingulate", env!("CARGO_PKG_VERSION"))
         .capabilities(Some(CapabilityDeclarations {
@@ -128,10 +135,13 @@ impl Stamp {
         json!([self.label(), self.bind_session]).to_string()
     }
     fn allowed_kind(&self) -> Option<&'static [&'static str]> {
+        if GENERIC_CONSENT_REQUESTERS
+            .iter()
+            .any(|(principal, _)| *principal == self.label())
+        {
+            return Some(&["consent"]);
+        }
         match self.label() {
-            "reserved:cerebellum" | "reserved:plexus" | "reserved:entorhinal" | "direct" => {
-                Some(&["consent"])
-            }
             "reserved:prefrontal-core" => Some(&["flow_install", "package"]),
             "reserved:basal" => Some(&["flow_decision"]),
             "reserved:aft" => Some(&["tool_permission", "macos_permission"]),
@@ -536,10 +546,10 @@ impl Handler {
         {
             return Err(stamp.refuse());
         }
-        let carrier = matches!(
-            stamp.label(),
-            "reserved:cerebellum" | "reserved:plexus" | "reserved:entorhinal"
-        );
+        let carrier = GENERIC_CONSENT_REQUESTERS
+            .iter()
+            .find(|(principal, _)| *principal == stamp.label())
+            .is_some_and(|(_, carries_agent)| *carries_agent);
         let worker_head = if request.kind == "consent" && stamp.carried_agent_id.trim().is_empty() {
             match &stamp.scope {
                 Some(scope)
