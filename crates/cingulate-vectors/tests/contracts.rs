@@ -1,7 +1,6 @@
 //! Checks the contract corpora `danger-option-group-v1` and `permissions-v1`.
 //!
-//! Neither contract is implemented yet, so these tests check the vectors against
-//! themselves and against the contract's rules: canonical bytes, digests, and the
+//! These tests check the vectors against the contract's rules: canonical bytes, digests, and the
 //! cross-case invariants an implementation will be held to. The canonicalizer
 //! here is written independently of the generator in `examples/`, which relies
 //! on serde_json's sorted maps.
@@ -152,7 +151,7 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 22);
+    assert_eq!(cases(PERMISSIONS).len(), 32);
 }
 
 #[test]
@@ -357,10 +356,15 @@ fn grant_rows_follow_the_row_rules() {
         let mut holder_subjects = BTreeSet::new();
         for grant in &grants {
             let scope = grant["scope"].as_str().unwrap();
-            assert!(CEREBELLUM_SCOPES.contains(&scope), "{name}: scope {scope}");
-            let danger = matches!(scope, "whole_computer" | "all_sites");
-            assert_eq!(grant.get("group").is_some(), danger, "{name}: group");
-            if danger {
+            assert!(!scope.is_empty(), "{name}: scope token");
+            // Scope vocabularies and broad-grant group rules belong to each
+            // provider; only Cerebellum declares these four scopes here.
+            if grant["module"] == "cerebellum" {
+                assert!(CEREBELLUM_SCOPES.contains(&scope), "{name}: scope {scope}");
+                let danger = matches!(scope, "whole_computer" | "all_sites");
+                assert_eq!(grant.get("group").is_some(), danger, "{name}: group");
+            }
+            if grant.get("group").is_some() {
                 assert_eq!(grant["group"], "danger");
             }
             assert!(!grant["scope_label"].as_str().unwrap().is_empty());
@@ -494,8 +498,12 @@ fn revoke_replies_cover_every_outcome_and_admission() {
             principal == "reserved:cingulate" || principal == "direct"
         };
         if let Some(error) = case.get("error") {
-            assert!(!admitted);
-            assert_eq!(error["code"], "permissions_operator_required");
+            if error["code"] == "permissions_unavailable" {
+                assert!(is_aggregator && admitted);
+            } else {
+                assert!(!admitted);
+                assert_eq!(error["code"], "permissions_operator_required");
+            }
             continue;
         }
         assert!(admitted);

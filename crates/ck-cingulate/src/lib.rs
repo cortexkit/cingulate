@@ -36,8 +36,10 @@ use tokio::sync::{watch, Mutex};
 
 mod access;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
+mod permissions;
+pub use permissions::{PermissionsCallError, PermissionsRuntime};
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 11] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 13] = [
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
     ("consent.await", ManagementOperationKind::Query),
@@ -49,6 +51,8 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 11] = [
     ("consent.answer", ManagementOperationKind::Mutate),
     ("consent.list_pending", ManagementOperationKind::Query),
     ("consent.outcomes", ManagementOperationKind::Query),
+    ("permissions.list_all", ManagementOperationKind::Query),
+    ("permissions.revoke", ManagementOperationKind::Mutate),
 ];
 
 const GENERIC_CONSENT_REQUESTERS: &[(&str, bool)] = &[
@@ -92,6 +96,7 @@ pub struct Stamp {
     pub bind_session: String,
     pub carried_agent_id: String,
     pub operator_surface: bool,
+    pub sim_surface: bool,
     pub console_machine_id: Option<String>,
 }
 
@@ -125,6 +130,10 @@ impl Stamp {
         // fed-phone: harness prefix restricts that principal, not any other caller.
         stamp.operator_surface =
             stamp.label() == "reserved:callosum" && req.identity.harness.starts_with("fed-phone:");
+        // Simulators can read the permissions inventory, but cannot narrow grants
+        // or answer cards. Keep this separate from consent's phone authority.
+        stamp.sim_surface =
+            stamp.label() == "reserved:callosum" && req.identity.harness.starts_with("fed-sim:");
         stamp
     }
 
@@ -270,6 +279,7 @@ impl Drop for Registration {
 
 struct Inner {
     access_runtime: StdMutex<Arc<dyn AccessRuntime>>,
+    permissions_runtime: StdMutex<Arc<dyn PermissionsRuntime>>,
     notice_delivery: Mutex<()>,
     options: Options,
     store: Mutex<Option<ConsentStore>>,
@@ -331,6 +341,9 @@ impl Handler {
         Self {
             inner: Arc::new(Inner {
                 access_runtime: StdMutex::new(Arc::new(access::UnavailableAccessRuntime)),
+                permissions_runtime: StdMutex::new(Arc::new(
+                    permissions::UnavailablePermissionsRuntime,
+                )),
                 notice_delivery: Mutex::new(()),
                 options,
                 store: Mutex::new(None),
@@ -662,6 +675,9 @@ impl Handler {
                 "unknown_method",
                 format!("unknown method {method}"),
             ));
+        }
+        if let Some(reply) = self.permissions_dispatch(stamp, method, &params).await {
+            return reply;
         }
         self.available()?;
         if let Some(reply) = self.access_dispatch(stamp, method, &params).await {
@@ -1040,6 +1056,45 @@ impl ModuleHandler for Handler {
 mod tests {
     use super::*;
     use subc_protocol::{BindIdentity, RouteTarget};
+
+    #[test]
+    fn generic_consent_requesters_match_the_contract_operation_list() {
+        let contract = include_str!("../../../docs/contracts/consent-requester-v2.md");
+        let paragraph = contract
+            .split("\n\n")
+            .find(|p| p.contains("may call `consent.request`"))
+            .unwrap();
+        let documented: Vec<_> = paragraph
+            .split("may call")
+            .next()
+            .unwrap()
+            .split('`')
+            .filter(|name| name.starts_with("reserved:"))
+            .collect();
+        let implemented: Vec<_> = GENERIC_CONSENT_REQUESTERS
+            .iter()
+            .filter_map(|(name, requires_agent)| requires_agent.then_some(*name))
+            .collect();
+        assert_eq!(
+            documented,
+            [
+                "reserved:cerebellum",
+                "reserved:plexus",
+                "reserved:entorhinal"
+            ]
+        );
+        assert_eq!(implemented, documented);
+        for name in implemented {
+            assert_eq!(
+                Stamp {
+                    principal: Some(name.into()),
+                    ..Default::default()
+                }
+                .allowed_kind(),
+                Some(["consent"].as_slice())
+            );
+        }
+    }
 
     fn bind(principal: &str, harness: &str) -> RouteBindRequest {
         RouteBindRequest::new(

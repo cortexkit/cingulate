@@ -1,0 +1,39 @@
+{
+  "method": "permissions.list_all",
+  "now_ms": 1060000,
+  "reply": {
+    "modules": [
+      {
+        "grants": [
+          {
+            "agent_id": "agent-alf",
+            "granted_at_ms": 1000000,
+            "holder": {
+              "agent_id": "agent-alf",
+              "kind": "agent"
+            },
+            "id": "computer-1",
+            "module": "cerebellum",
+            "scope": "app",
+            "scope_label": "the app TextEdit",
+            "subject_label": "TextEdit"
+          }
+        ],
+        "module": "cerebellum",
+        "status": "ok"
+      },
+      {
+        "module": "z-hiring",
+        "status": "unreachable"
+      }
+    ],
+    "version": "97a8a0ddc5fa6b86472b42bc39c82c120ccb89dd2970c62b936f4671a3e6e1ef"
+  },
+  "request": {},
+  "route": {
+    "operator_surface": true,
+    "principal": "reserved:callosum",
+    "sim_surface": false
+  },
+  "tag": "permissions-v1"
+}

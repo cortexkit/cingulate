@@ -1,0 +1,18 @@
+{
+  "error": {
+    "code": "permissions_operator_required",
+    "message": "permissions operations need the operator: reserved:callosum on an operator surface, or direct"
+  },
+  "method": "permissions.revoke",
+  "now_ms": 1060000,
+  "request": {
+    "id": "hire-1",
+    "module": "z-hiring"
+  },
+  "route": {
+    "operator_surface": false,
+    "principal": "reserved:callosum",
+    "sim_surface": true
+  },
+  "tag": "permissions-v1"
+}

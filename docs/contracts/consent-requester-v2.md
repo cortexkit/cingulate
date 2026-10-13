@@ -39,12 +39,12 @@ Generic worker cards retain the ordinary generic-consent state machine and
 fail-closed expiry. They ask the user directly; they do not first require an
 answer from the head, unlike worker permission asks.
 
-`reserved:cerebellum` and `reserved:plexus` may call `consent.request`,
+`reserved:cerebellum`, `reserved:plexus` and `reserved:entorhinal` may call `consent.request`,
 `consent.await`, `consent.get`, `consent.answers`, `consent.ack`,
 `consent.withdraw`, `consent.report_execution` and `consent.detach`. Get, await,
 report_execution, withdraw and detach require the raising owner. `consent.answers`
 returns only that owner's answers, and `consent.ack` acknowledges only that
-owner's answers. Neither requester can call phone-only `consent.answer` or
+owner's answers. None of these requesters can call phone-only `consent.answer` or
 `consent.list_pending`, nor read the core-only `consent.outcomes` feed.
 Generic `consent` params add one optional field:
 

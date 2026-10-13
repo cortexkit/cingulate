@@ -8,9 +8,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (module, serving) =
         subc_client_rs::serve_from_env_with_handle(ck_cingulate::manifest(), handler.clone())
             .await?;
-    handler.set_access_runtime(std::sync::Arc::new(ck_cingulate::DaemonAccessRuntime::new(
-        module,
-    )));
+    let runtime = std::sync::Arc::new(ck_cingulate::DaemonAccessRuntime::new(module));
+    handler.set_access_runtime(runtime.clone());
+    handler.set_permissions_runtime(runtime);
     serving.await?;
     Ok(())
 }

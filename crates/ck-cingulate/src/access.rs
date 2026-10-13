@@ -62,7 +62,7 @@ impl AccessRuntime for UnavailableAccessRuntime {
 }
 pub struct DaemonAccessRuntime {
     module: ModuleHandle,
-    consumer: Mutex<Option<SubcConsumer>>,
+    consumer: Mutex<Option<Arc<SubcConsumer>>>,
 }
 impl DaemonAccessRuntime {
     pub fn new(module: ModuleHandle) -> Self {
@@ -70,6 +70,27 @@ impl DaemonAccessRuntime {
             module,
             consumer: Mutex::new(None),
         }
+    }
+
+    /// Use an already-connected consumer for the module's daemon. Embedders can
+    /// supply an isolated connection without changing process-wide discovery.
+    pub fn with_consumer(module: ModuleHandle, consumer: SubcConsumer) -> Self {
+        Self {
+            module,
+            consumer: Mutex::new(Some(Arc::new(consumer))),
+        }
+    }
+
+    pub(super) async fn consumer(&self) -> Result<Arc<SubcConsumer>, String> {
+        let mut consumer = self.consumer.lock().await;
+        if consumer.is_none() {
+            *consumer = Some(Arc::new(
+                SubcConsumer::connect_default(ConsumerOptions::default())
+                    .await
+                    .map_err(|error| error.to_string())?,
+            ));
+        }
+        Ok(consumer.as_ref().expect("connected consumer").clone())
     }
 }
 #[async_trait]
@@ -115,16 +136,11 @@ impl AccessRuntime for DaemonAccessRuntime {
         // would sort its keys, and the late-answer notice's key order is fixed
         // by the files in test-vectors/consent-late-answer-v1/.
         let request = format!(r#"{{"method":"session.notice","params":{body}}}"#);
-        let mut consumer = self.consumer.lock().await;
-        if consumer.is_none() {
-            match SubcConsumer::connect_default(ConsumerOptions::default()).await {
-                Ok(client) => *consumer = Some(client),
-                Err(e) => return NoticeResult::Transport(e.to_string()),
-            }
-        }
+        let consumer = match self.consumer().await {
+            Ok(client) => client,
+            Err(error) => return NoticeResult::Transport(error),
+        };
         let reply = consumer
-            .as_ref()
-            .expect("connected consumer")
             .call(
                 RouteTarget::ManagementSurface {
                     module_id: "prefrontal-core".into(),

@@ -487,6 +487,8 @@ async fn manifest_envelope_health_and_unknown_ops() {
         ("consent.answer", true),
         ("consent.list_pending", false),
         ("consent.outcomes", false),
+        ("permissions.list_all", false),
+        ("permissions.revoke", true),
     ];
     assert_eq!(operations.len(), expected.len());
     for (operation, (name, mutate)) in operations.iter().zip(expected) {
@@ -508,7 +510,11 @@ async fn manifest_envelope_health_and_unknown_ops() {
             &Stamp::default(),
             method,
             Value::Null,
-            "consent_unavailable",
+            if method.starts_with("permissions.") {
+                "permissions_operator_required"
+            } else {
+                "consent_unavailable"
+            },
         )
         .await;
     }

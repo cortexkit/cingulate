@@ -1,19 +1,31 @@
 #![forbid(unsafe_code)]
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use ck_cingulate::{Handler, Options};
+use async_trait::async_trait;
+use ck_cingulate::{DaemonAccessRuntime, Handler, Options};
 use cortexkit_test_support::{process_alive, ScratchDir};
 use serde_json::{json, Value};
 use subc_client_rs::{
-    serve_with_handle, CallError, CallOptions, ConsumerIdentity, ConsumerOptions, RouteHandle,
-    ScopeSelector, SubcConsumer,
+    serve_with_handle, BindDecision, CallError, CallOptions, ConsumerIdentity, ConsumerOptions,
+    HandlerOutcome, ModuleHandler, RequestCtx, RouteBindRequest, RouteHandle, ScopeSelector,
+    SubcConsumer,
 };
 use subc_daemon::{
     handle_connection, ControlHandler, Registry, Router, ServerAuth, SupervisorHandle,
 };
 use subc_protocol::{
-    manifest::ModuleManifest,
+    manifest::{
+        CapabilityDeclarations, Concurrency, ManagementOperation, ManagementOperationKind,
+        ModuleManifest, ProviderRole,
+    },
     scope::{ScopeAttributes, ScopeCarrier, ScopeKind, ScopeRecord},
     session::ModuleControlRequestFromModule,
     BindIdentity, Flags, Frame, FrameType, ModuleHelloBody, Principal, Priority, RouteTarget,
@@ -26,6 +38,7 @@ use subc_transport::{
 };
 use tokio::{
     net::{TcpListener, TcpStream},
+    sync::{watch, Notify},
     task::{JoinHandle, JoinSet},
 };
 
@@ -49,6 +62,7 @@ struct Fixture {
     consumer: SubcConsumer,
     owner: TcpStream,
     project: PathBuf,
+    connection_path: PathBuf,
     _scratch: ScratchDir,
 }
 
@@ -141,7 +155,7 @@ impl Fixture {
         assert!(process_alive(i32::try_from(published.pid).unwrap()));
 
         let supervisor = SupervisorHandle::new();
-        for id in [OWNER, "plexus", "stranger"] {
+        for id in [OWNER, "plexus", "stranger", "callosum"] {
             supervisor.set_spawn_nonce(id, format!("test-launch-{id}"));
         }
         supervisor.set_reserved_nonce(OWNER, format!("test-launch-{OWNER}"));
@@ -166,17 +180,32 @@ impl Fixture {
             }
         }))];
 
-        let (_, serve) = bounded(serve_with_handle(
+        let handler = Handler::new(Options {
+            data_home: data.to_str().unwrap().into(),
+            sweep_timer: false,
+            ..Options::default()
+        });
+        let (module, serve) = bounded(serve_with_handle(
             &connection_path,
             ck_cingulate::manifest(),
-            Handler::new(Options {
-                data_home: data.to_str().unwrap().into(),
-                sweep_timer: false,
-                ..Options::default()
-            }),
+            handler.clone(),
         ))
         .await
         .unwrap();
+        let runtime_consumer = bounded(SubcConsumer::connect(
+            &connection_path,
+            ConsumerOptions {
+                handshake_timeout: DEADLINE,
+                call_timeout: DEADLINE,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+        handler.set_permissions_runtime(Arc::new(DaemonAccessRuntime::with_consumer(
+            module,
+            runtime_consumer,
+        )));
         tasks.push(Task(tokio::spawn(async move {
             serve.await.unwrap();
         })));
@@ -214,6 +243,7 @@ impl Fixture {
             consumer,
             owner,
             project,
+            connection_path,
             _scratch: scratch,
         }
     }
@@ -325,6 +355,218 @@ fn refused(result: Result<Value, CallError>, code: &str) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct ProviderCounts {
+    binds: usize,
+    closes: usize,
+}
+
+struct PermissionsProvider {
+    counts: watch::Sender<ProviderCounts>,
+    hang: AtomicBool,
+    entered: Notify,
+}
+
+impl PermissionsProvider {
+    fn new() -> Self {
+        Self {
+            counts: watch::channel(ProviderCounts::default()).0,
+            hang: AtomicBool::new(false),
+            entered: Notify::new(),
+        }
+    }
+
+    async fn wait_for_baseline(&self, active: usize) {
+        let mut counts = self.counts.subscribe();
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = *counts.borrow_and_update();
+                if snapshot.binds - snapshot.closes == active {
+                    break;
+                }
+                counts.changed().await.unwrap();
+            }
+        })
+        .await;
+        assert!(
+            result.is_ok(),
+            "provider routes did not return to baseline {active}: {:?}",
+            *self.counts.borrow()
+        );
+    }
+}
+
+struct PermissionsProviderHandle(Arc<PermissionsProvider>);
+
+impl std::ops::Deref for PermissionsProviderHandle {
+    type Target = PermissionsProvider;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl ModuleHandler for PermissionsProviderHandle {
+    async fn handle(&self, ctx: RequestCtx, body: Vec<u8>) -> HandlerOutcome {
+        let request: Value = serde_json::from_slice(&body).unwrap();
+        match request["method"].as_str().unwrap() {
+            "permissions.list" => {
+                if self.hang.load(Ordering::Acquire) {
+                    self.entered.notify_one();
+                    ctx.cancelled().await;
+                }
+                HandlerOutcome::Response(
+                    serde_json::to_vec(&json!({"result":{"grants":[]}})).unwrap(),
+                )
+            }
+            "permissions.revoke" => HandlerOutcome::Error {
+                code: "grant_locked".into(),
+                message: "grant is locked".into(),
+            },
+            other => panic!("unexpected permissions provider method {other}"),
+        }
+    }
+
+    async fn on_bind(&self, _: &RouteBindRequest) -> BindDecision {
+        BindDecision::accept()
+    }
+
+    async fn on_bound(&self, _: &RouteHandle) {
+        self.counts.send_modify(|counts| counts.binds += 1);
+    }
+
+    async fn on_route_gone(&self, _: &RouteHandle) {
+        self.counts.send_modify(|counts| {
+            assert!(counts.closes < counts.binds);
+            counts.closes += 1;
+        });
+    }
+}
+
+impl Fixture {
+    async fn permissions_provider(&mut self) -> Arc<PermissionsProvider> {
+        let provider = Arc::new(PermissionsProvider::new());
+        let manifest = ModuleManifest::builder("permission-store", "0.1.0")
+            .capabilities(Some(CapabilityDeclarations {
+                provides: vec!["permissions/v1".into()],
+                requires: vec![],
+                must_never_reach: vec![],
+            }))
+            .provides(vec![ProviderRole::ManagementSurface {
+                operations: vec![
+                    ManagementOperation {
+                        name: "permissions.list".into(),
+                        kind: ManagementOperationKind::Query,
+                        description: None,
+                    },
+                    ManagementOperation {
+                        name: "permissions.revoke".into(),
+                        kind: ManagementOperationKind::Mutate,
+                        description: None,
+                    },
+                ],
+                config_schema: json!({}),
+                observability: vec![],
+                identity_scope: vec![],
+                concurrency: Concurrency::ModuleManaged,
+            }])
+            .build();
+        let (_, serving) = bounded(serve_with_handle(
+            &self.connection_path,
+            manifest,
+            PermissionsProviderHandle(provider.clone()),
+        ))
+        .await
+        .unwrap();
+        self.tasks.push(Task(tokio::spawn(async move {
+            serving.await.unwrap();
+        })));
+        provider
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_permissions_routes_return_to_baseline() {
+    let mut fixture = Fixture::start().await;
+    let provider = fixture.permissions_provider().await;
+    let baseline = *provider.counts.borrow();
+    let active = baseline.binds - baseline.closes;
+    let route = fixture.open(None, "local").await;
+    for _ in 0..20 {
+        let reply = fixture
+            .request(&route, "permissions.list_all", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            reply["modules"],
+            json!([{"module":"permission-store","status":"ok","grants":[]}])
+        );
+    }
+    assert_eq!(
+        fixture
+            .request(
+                &route,
+                "permissions.revoke",
+                json!({"module":"permission-store","id":"one"})
+            )
+            .await
+            .unwrap(),
+        json!({"outcome":"refused","code":"grant_locked"})
+    );
+    provider.wait_for_baseline(active).await;
+    let after = *provider.counts.borrow();
+    assert_eq!(after.binds - baseline.binds, 21);
+    assert_eq!(after.closes - baseline.closes, 21);
+    fixture.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_permissions_wait_does_not_block_consent_or_health() {
+    let mut fixture = Fixture::start().await;
+    let provider = fixture.permissions_provider().await;
+    provider.hang.store(true, Ordering::Release);
+    {
+        let route = fixture.open(Some("callosum"), "fed-phone:device").await;
+        let mut options = call_options(None);
+        options.timeout = Duration::from_secs(10);
+        let inventory = fixture.consumer.request(
+            &route,
+            serde_json::to_vec(&json!({"method":"permissions.list_all","params":{}})).unwrap(),
+            options,
+        );
+        tokio::pin!(inventory);
+        tokio::select! {
+            _ = bounded(provider.entered.notified()) => {}
+            result = &mut inventory => panic!("inventory completed before provider hung: {result:?}"),
+        }
+        let counts = *provider.counts.borrow();
+        assert_eq!(counts.binds - counts.closes, 1);
+        let prompt = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                fixture.request(&route, "consent.list_pending", json!({})),
+                fixture.request(&route, "health.check", json!({})),
+            )
+        })
+        .await
+        .expect("hung provider blocked consent or health");
+        assert!(prompt.0.unwrap()["records"].as_array().unwrap().is_empty());
+        assert_eq!(prompt.1.unwrap()["status"], "ok");
+        let bytes = tokio::time::timeout(Duration::from_secs(10), &mut inventory)
+            .await
+            .unwrap()
+            .unwrap();
+        let reply: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            reply["result"]["modules"],
+            json!([{"module":"permission-store","status":"unreachable"}])
+        );
+        provider.wait_for_baseline(0).await;
+        assert_eq!(provider.counts.borrow().binds, 1);
+        assert_eq!(provider.counts.borrow().closes, 1);
+    }
+    fixture.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn live_daemon_catalog_contains_consent_manifest() {
     use subc_protocol::manifest::{Concurrency, ProviderRole};
@@ -372,6 +614,8 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent.report_execution",
             "consent.request",
             "consent.withdraw",
+            "permissions.list_all",
+            "permissions.revoke",
         ]
     );
     let route = fixture.open(None, "local").await;

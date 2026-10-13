@@ -1,0 +1,18 @@
+{
+  "error": {
+    "code": "permissions_unavailable",
+    "message": "permissions catalog is unavailable"
+  },
+  "method": "permissions.revoke",
+  "now_ms": 1060000,
+  "request": {
+    "id": "hire-1",
+    "module": "z-hiring"
+  },
+  "route": {
+    "operator_surface": true,
+    "principal": "reserved:callosum",
+    "sim_surface": false
+  },
+  "tag": "permissions-v1"
+}

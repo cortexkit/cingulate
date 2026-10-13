@@ -1,6 +1,7 @@
 # permissions/v1 and the permissions page
 
-Status: contract, not yet implemented. Vectors:
+Status: Cingulate aggregator implemented in 0.5.0; provider operations are specified
+here but implemented by the grant-holding modules. Vectors:
 [`test-vectors/permissions-v1/`](../../test-vectors/permissions-v1/README.md).
 Consumers: Cerebellum (first provider), cingulate (aggregator), the phone and the
 desktop app (the permissions page), Callosum (expose profiles).
@@ -131,6 +132,11 @@ Cingulate forwards `permissions.revoke {id}` to `module` and replies with
 | `module_unreachable` | The provider could not be reached or faulted. |
 | `refused` with `code` | `not_a_provider` when `module` does not provide `permissions/v1`; otherwise the provider's error code. |
 
+`module_unreachable` covers both a provider that never received the revoke and
+one whose reply was lost, so the grant may or may not be revoked until the list
+is reloaded. Every provider Error frame maps to `refused` with its code unchanged;
+transport failures, lost replies and unreadable replies map to `module_unreachable`.
+
 Vectors: [`revoke-revoked`](../../test-vectors/permissions-v1/revoke-revoked.json),
 [`revoke-stopping`](../../test-vectors/permissions-v1/revoke-stopping.json),
 [`revoke-already-gone`](../../test-vectors/permissions-v1/revoke-already-gone.json),
@@ -160,6 +166,25 @@ route stamp, the same authority `consent.answer` uses today:
 
 The `direct` admission is not proof that a person acted; see "Known gaps" in
 [`docs/STATUS.md`](../STATUS.md).
+
+The daemon's Callosum harness prefixes are `fed-phone:` for the phone and
+`fed-sim:` for a simulator. Cingulate derives simulator admission separately
+from consent's phone-only operator-surface flag. Neither `fed-mac:` nor
+`fed-unknown:` admits either permissions operation; the prefixes grant nothing
+under a principal other than `reserved:callosum`.
+
+### Aggregator refusals
+
+| code | Meaning |
+|---|---|
+| `permissions_operator_required` | The route lacks the authority required for this operation. |
+| `permissions_unavailable` | The daemon's `catalog.list` failed or timed out; the complete provider inventory is unknown. This whole-request refusal is retryable, never an empty inventory. On revoke no provider request was sent, so retrying is safe, unlike `module_unreachable`. |
+
+The original contract-authored vectors remain byte-for-byte unchanged. Additive
+`served-*` vectors in the same corpus are captured from Cingulate's real handler
+with fake catalog entries and providers. Regenerate or check both sets with
+`cargo run -p cingulate-vectors --example generate_vectors --locked` (add
+`-- --check` to check without writing).
 
 ### Ambiguous drops
 

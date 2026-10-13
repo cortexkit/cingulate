@@ -1,13 +1,15 @@
 //! Writes the contract corpora `danger-option-group-v1` and `permissions-v1`.
 //!
-//! These vectors are written from the contracts in `docs/contracts/`, not from
-//! an implementation: neither contract is implemented yet, and an implementation
-//! must match these bytes rather than regenerate them.
+//! Original cases are written from the contracts in `docs/contracts/` and their
+//! bytes remain pinned. Additive `served-*` permissions cases are captured from
+//! the real aggregator handler with fake catalog entries and providers.
 //!
 //! Run from the workspace root:
 //!
 //! ```sh
+//! # Write the vectors.
 //! cargo run -p cingulate-vectors --example generate_vectors --locked
+//! # Check without writing.
 //! cargo run -p cingulate-vectors --example generate_vectors --locked -- --check
 //! ```
 //!
@@ -26,6 +28,9 @@ use std::{
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+
+#[path = "../tests/support/permissions.rs"]
+mod served_permissions;
 
 const DANGER: &str = "danger-option-group-v1";
 const PERMISSIONS: &str = "permissions-v1";
@@ -743,7 +748,8 @@ fn corpus_files(dir: &Path, cases: Vec<(&'static str, Value)>) -> BTreeMap<Strin
     files
 }
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
     let check = match std::env::args().nth(1).as_deref() {
         None => false,
         Some("--check") => true,
@@ -754,7 +760,9 @@ fn main() -> ExitCode {
     };
     let mut drift = Vec::new();
     let mut total = 0;
-    for (corpus, cases) in [(DANGER, danger_cases()), (PERMISSIONS, permissions_cases())] {
+    let mut permissions = permissions_cases();
+    permissions.extend(served_permissions::served_cases().await);
+    for (corpus, cases) in [(DANGER, danger_cases()), (PERMISSIONS, permissions)] {
         let dir = root().join(corpus);
         let count = cases.len();
         let files = corpus_files(&dir, cases);

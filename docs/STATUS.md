@@ -2,9 +2,10 @@
 
 Owner: SUBC (from ALF). Cingulate is the consent module: it serves `consent/v1`,
 stores consent cards and records their outcome. Design and review rulings:
-[design.md](design.md). Contracts written ahead of implementation:
-[danger option group](contracts/danger-option-group.md) and
-[permissions/v1](contracts/permissions-v1.md).
+[design.md](design.md). The [danger option group](contracts/danger-option-group.md)
+contract is written ahead of implementation. Cingulate serves the aggregator
+side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
+serve the capability itself.
 
 ## What v1 does
 
@@ -151,5 +152,6 @@ on the caller. It is not a v1 blocker, and it must not be read as a guarantee.
 - **`permissions.revoke`.** The [permissions/v1](contracts/permissions-v1.md)
   contract admits revoke from `direct`, both on providers and on cingulate. The
   same caveat applies: any local process can revoke. The worst case is a local
-  process revoking a grant, which only narrows authority. Not yet implemented, so
-  there is no admission code path to cite.
+  process revoking a grant, which only narrows authority. The aggregator's
+  admission is in `Handler::permissions` (`crates/ck-cingulate/src/permissions.rs`).
+  Its `direct` list admission has the same lack of proof that a person acted.

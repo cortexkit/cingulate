@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 (ck-cingulate, cingulate-vectors)
+
+- Serve the operator's permissions inventory by discovering `permissions/v1`
+  catalog capabilities and concurrently reading each provider. Preserve named
+  unreachable/unsupported gaps, sorted module ids, RFC 8785 SHA-256 versions and
+  conditional reads. A catalog outage refuses rather than claiming no grants.
+- Route revokes once to the grant's provider, preserve provider refusal codes,
+  and report lost replies as `module_unreachable` with an unknown revoke outcome.
+  Close each per-call provider route on completion or cancellation, without
+  sharing routes across calls. Real-daemon tests pin cleanup after repeated
+  reads and a refusal, and consent/health responsiveness during a provider timeout.
+  Admit phone mutations and phone/simulator queries from stamped Callosum routes,
+  plus the local `direct` route; leave consent admission phone-only.
+- Pin additive real-handler permissions vectors without changing existing vector
+  bytes, and align the generic-consent operation list with its three reserved
+  requesters, including Entorhinal.
+
 ## 0.4.0
 
 - Allow the Plexus requester to create and manage its own generic `consent`
