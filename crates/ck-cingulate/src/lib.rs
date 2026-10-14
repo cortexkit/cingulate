@@ -66,7 +66,11 @@ const GENERIC_CONSENT_REQUESTERS: &[(&str, bool)] = &[
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder("cingulate", env!("CARGO_PKG_VERSION"))
         .capabilities(Some(CapabilityDeclarations {
-            provides: vec!["consent/v1".into(), "agent-run-scopes/v1".into()],
+            provides: vec![
+                "consent/v1".into(),
+                "agent-run-scopes/v1".into(),
+                "consent-card-text/v1".into(),
+            ],
             requires: vec![],
             must_never_reach: vec![],
         }))

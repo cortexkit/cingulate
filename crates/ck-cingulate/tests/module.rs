@@ -464,7 +464,10 @@ async fn manifest_envelope_health_and_unknown_ops() {
     let manifest = ck_cingulate::manifest();
     assert_eq!(manifest.module_id, "cingulate");
     let capabilities = manifest.capabilities.unwrap();
-    assert_eq!(capabilities.provides, ["consent/v1", "agent-run-scopes/v1"]);
+    assert_eq!(
+        capabilities.provides,
+        ["consent/v1", "agent-run-scopes/v1", "consent-card-text/v1"]
+    );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
     let ProviderRole::ManagementSurface {
         operations,
@@ -615,7 +618,7 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
     assert!(stamp.carried_agent_id.is_empty());
     assert_eq!(
         ck_cingulate::manifest().capabilities.unwrap().provides,
-        ["consent/v1", "agent-run-scopes/v1"]
+        ["consent/v1", "agent-run-scopes/v1", "consent-card-text/v1"]
     );
 }
 
@@ -1615,26 +1618,32 @@ async fn dedup_content_replacements_retract_before_delivery() {
         "scope",
         "args_digest",
         "flow_install",
+        "source",
+        "dry_run_text",
         "binding",
         "at_console",
     ] {
         let f = Fixture::open(Some("m1")).await;
-        let owner = if key == "flow_install" {
+        let install = matches!(key, "flow_install" | "source" | "dry_run_text");
+        let owner = if install {
             stamp("reserved:prefrontal-core")
         } else {
             direct()
         };
-        let mut request = kind_body(if key == "flow_install" {
-            "flow_install"
-        } else {
-            "consent"
-        });
+        let mut request = kind_body(if install { "flow_install" } else { "consent" });
         request["dedup_key"] = json!("key");
+        if key == "source" {
+            request["source"] = json!({"language":"Cedar","text":"first source"});
+        } else if key == "dry_run_text" {
+            request["dry_run_text"] = json!({"summary":"First summary","would":[],"problems":[]});
+        }
         let id = f.request(&owner, request.clone()).await;
         f.clear();
         request[key] = match key {
             "args_digest" => json!("changed-digest"),
             "at_console" => json!("m1"),
+            "source" => json!({"language":"Cedar","text":"changed source"}),
+            "dry_run_text" => json!({"summary":"Changed summary","would":[],"problems":[]}),
             _ => json!({"changed":true}),
         };
         let next = f.request(&owner, request).await;
@@ -1648,6 +1657,55 @@ async fn dedup_content_replacements_retract_before_delivery() {
         );
         assert_eq!(f.answer(&id, "allow_once").await["code"], "conflict");
         assert_eq!(f.counts(), (2, 1));
+    }
+}
+
+#[tokio::test]
+async fn consent_card_text_is_stored_and_returned_verbatim_to_requesters() {
+    for kind in ["flow_install", "package"] {
+        let f = Fixture::open(None).await;
+        let owner = stamp("reserved:prefrontal-core");
+        let mut request = if kind == "flow_install" {
+            kind_body(kind)
+        } else {
+            serde_json::from_str::<Value>(include_str!(
+                "../../../test-vectors/consent-package-card-v1/request.json"
+            ))
+            .unwrap()["params"]
+                .clone()
+        };
+        let source = json!({"language":"Cedar","text":"Runs every morning."});
+        let dry_run_text = json!({
+            "summary":"Schedule one run",
+            "would":["Create a daily schedule"],
+            "problems":[]
+        });
+        request["source"] = source.clone();
+        request["dry_run_text"] = dry_run_text.clone();
+        let id = f.request(&owner, request).await;
+
+        let stored: String = f
+            .db()
+            .query_row(
+                "SELECT record_json FROM elicitation_records WHERE elicitation_id=?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let stored: Value = serde_json::from_str(&stored).unwrap();
+        assert_eq!(stored["request"]["source"], source);
+        assert_eq!(stored["request"]["dry_run_text"], dry_run_text);
+
+        let requester = ok(
+            &f.handler,
+            &owner,
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+        assert_eq!(requester["source"], source);
+        assert_eq!(requester["dry_run_text"], dry_run_text);
+        assert!(requester.get("dryRunText").is_none());
     }
 }
 

@@ -23,6 +23,14 @@ fn flow_install() -> Value {
     body
 }
 
+fn source() -> Value {
+    json!({"language":"Cedar","text":"every morning at 08:00"})
+}
+
+fn dry_run_text() -> Value {
+    json!({"summary":"Create one summary","would":["Schedule one run"],"problems":[]})
+}
+
 fn flow_decision() -> Value {
     let mut body = consent();
     body["kind"] = json!("flow_decision");
@@ -397,6 +405,8 @@ fn semantic_boundaries_and_optional_defaults() {
     assert!(minimal.options[0].detail.is_none());
     assert!(minimal.binding.is_none());
     assert!(minimal.at_console.is_none());
+    assert!(minimal.source.is_none());
+    assert!(minimal.dry_run_text.is_none());
 
     for expiry in [1, 86_400_000] {
         for urgency in ["low", "normal", "high"] {
@@ -548,6 +558,184 @@ fn package_manifest_must_be_json_encoded_string() {
         request,
         "package manifest_json must be JSON encoded as a string",
     );
+}
+
+#[test]
+fn source_and_dry_run_text_are_only_accepted_for_install_and_package_cards() {
+    for mut request in [flow_install(), package()] {
+        request["source"] = source();
+        request["dry_run_text"] = dry_run_text();
+        let decoded = ConsentRequest::decode(request.clone()).unwrap();
+        let stored = serde_json::to_value(decoded).unwrap();
+        assert_eq!(stored["source"], request["source"]);
+        assert_eq!(stored["dry_run_text"], request["dry_run_text"]);
+    }
+
+    for mut request in [consent(), flow_decision()] {
+        for (field, value) in [("source", source()), ("dry_run_text", dry_run_text())] {
+            request[field] = value;
+            let error = ConsentRequest::decode(request.clone()).unwrap_err();
+            assert_eq!(error.code, INVALID);
+            assert!(error.message.contains(field), "{}", error.message);
+            request.as_object_mut().unwrap().remove(field);
+        }
+    }
+
+    for field in ["source", "dry_run_text"] {
+        let mut unknown_kind = consent();
+        unknown_kind["kind"] = json!("unsupported");
+        unknown_kind[field] = if field == "source" {
+            source()
+        } else {
+            dry_run_text()
+        };
+        let error = ConsentRequest::decode(unknown_kind).unwrap_err();
+        assert_eq!(error.code, INVALID);
+        assert!(error.message.contains(field), "{}", error.message);
+    }
+}
+
+#[test]
+fn source_has_a_closed_shape_and_byte_bounded_nonblank_language() {
+    for mut request in [flow_install(), package()] {
+        request["source"] = json!({"language":"Rust","text":"fn run() {}","other":true});
+        serde_refusal(request, "source: language is limited to 32 bytes and both values must be nonblank strings: unknown field `other`");
+
+        let mut request = flow_install();
+        request["source"] = json!(null);
+        serde_refusal(request, "source:");
+
+        let mut request = flow_install();
+        request["source"] = json!({"language":"Rust"});
+        serde_refusal(request, "missing field `text`");
+
+        let mut request = flow_install();
+        request["source"] = json!({"language":42,"text":"code"});
+        serde_refusal(request, "invalid type: integer `42`");
+    }
+
+    let mut request = flow_install();
+    request["source"] = json!({"language":" ","text":"code"});
+    invalid(
+        request,
+        "source.language must be nonblank and at most 32 bytes",
+    );
+
+    let mut request = flow_install();
+    request["source"] = json!({"language":"é".repeat(17),"text":"code"});
+    invalid(
+        request,
+        "source.language must be nonblank and at most 32 bytes",
+    );
+
+    let mut request = flow_install();
+    request["source"] = json!({"language":"Rust","text":" \t"});
+    invalid(request, "source.text must be nonblank");
+
+    let mut request = flow_install();
+    request["source"] = json!({"language":"é".repeat(16),"text":"code"});
+    ConsentRequest::decode(request).unwrap();
+}
+
+#[test]
+fn dry_run_text_has_closed_shapes_bounded_lists_and_plain_text() {
+    for (field, value, error) in [
+        ("dry_run_text", json!(null), "dry_run_text:"),
+        (
+            "dry_run_text",
+            json!({"summary":"ok","would":[],"problems":[],"other":true}),
+            "dry_run_text: summary is limited to 300 bytes; each list is limited to 8 items of at most 200 bytes, with no ASCII controls: unknown field `other`",
+        ),
+        (
+            "dry_run_text",
+            json!({"summary":7,"would":[],"problems":[]}),
+            "invalid type: integer `7`",
+        ),
+        (
+            "dry_run_text",
+            json!({"summary":"ok","would":[]}),
+            "missing field `problems`",
+        ),
+    ] {
+        let mut request = flow_install();
+        request[field] = value;
+        serde_refusal(request, error);
+    }
+
+    for (summary, message) in [
+        (
+            " ".to_owned(),
+            "dry_run_text.summary must be nonblank and at most 300 bytes",
+        ),
+        (
+            "x".repeat(301),
+            "dry_run_text.summary must be nonblank and at most 300 bytes",
+        ),
+    ] {
+        let mut request = flow_install();
+        request["dry_run_text"] = dry_run_text();
+        request["dry_run_text"]["summary"] = json!(summary);
+        invalid(request, message);
+    }
+    for list in ["would", "problems"] {
+        let mut request = flow_install();
+        request["dry_run_text"] = dry_run_text();
+        request["dry_run_text"][list] = json!(vec!["x"; 9]);
+        invalid(
+            request,
+            &format!("dry_run_text.{list} must contain at most 8 items"),
+        );
+
+        let mut request = flow_install();
+        request["dry_run_text"] = dry_run_text();
+        request["dry_run_text"][list] = json!(["x".repeat(201)]);
+        invalid(
+            request,
+            &format!("dry_run_text.{list} items must be nonblank and at most 200 bytes"),
+        );
+
+        let mut request = flow_install();
+        request["dry_run_text"] = dry_run_text();
+        request["dry_run_text"][list] = json!(["  "]);
+        invalid(
+            request,
+            &format!("dry_run_text.{list} items must be nonblank and at most 200 bytes"),
+        );
+    }
+
+    let mut request = flow_install();
+    request["dry_run_text"] = dry_run_text();
+    request["dry_run_text"]["summary"] = json!("line\nbreak");
+    invalid(
+        request,
+        "dry_run_text.summary must not contain ASCII control characters",
+    );
+    let mut request = flow_install();
+    request["dry_run_text"] = dry_run_text();
+    request["dry_run_text"]["would"] = json!(["wake\u{7f}device"]);
+    invalid(
+        request,
+        "dry_run_text.would items must not contain ASCII control characters",
+    );
+    let mut request = flow_install();
+    request["dry_run_text"] = dry_run_text();
+    request["dry_run_text"]["problems"] = json!(["bad\u{1}text"]);
+    invalid(
+        request,
+        "dry_run_text.problems items must not contain ASCII control characters",
+    );
+
+    let mut request = flow_install();
+    request["dry_run_text"] = json!({
+        "summary":"x".repeat(300),
+        "would":vec!["x".repeat(200); 8],
+        "problems":vec!["y".repeat(200); 8]
+    });
+    ConsentRequest::decode(request).unwrap();
+
+    let mut request = flow_install();
+    request["dry_run_text"] = json!({"summary":"Ready","would":[],"problems":[]});
+    ConsentRequest::decode(request).unwrap();
 }
 
 #[test]

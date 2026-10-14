@@ -55,6 +55,21 @@ pub struct Package {
     pub manifest_json: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    pub language: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DryRunText {
+    pub summary: String,
+    pub would: Vec<String>,
+    pub problems: Vec<String>,
+}
+
 /// The request form stored after successful decoding.
 ///
 /// Flow bodies are opaque objects: the consent module checks their presence and
@@ -68,6 +83,18 @@ pub struct ConsentRequest {
     pub flow_install: Option<Map<String, Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_decision: Option<Map<String, Value>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_source"
+    )]
+    pub source: Option<Source>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_dry_run_text"
+    )]
+    pub dry_run_text: Option<DryRunText>,
     pub kind: String,
     pub title: String,
     pub prompt: String,
@@ -145,6 +172,34 @@ where
     Ok(value)
 }
 
+fn deserialize_source<'de, D>(deserializer: D) -> Result<Option<Source>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(|error| {
+            de::Error::custom(format!(
+                "source: language is limited to 32 bytes and both values must be nonblank strings: {error}"
+            ))
+        })
+}
+
+fn deserialize_dry_run_text<'de, D>(deserializer: D) -> Result<Option<DryRunText>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(|error| {
+            de::Error::custom(format!(
+                "dry_run_text: summary is limited to 300 bytes; each list is limited to 8 items of at most 200 bytes, with no ASCII controls: {error}"
+            ))
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     pub code: &'static str,
@@ -186,6 +241,31 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        if !matches!(self.kind.as_str(), "flow_install" | "package") {
+            if self.source.is_some() {
+                return Err(Refusal::invalid(
+                    "source is only valid for flow_install or package cards",
+                ));
+            }
+            if self.dry_run_text.is_some() {
+                return Err(Refusal::invalid(
+                    "dry_run_text is only valid for flow_install or package cards",
+                ));
+            }
+        }
+        if let Some(source) = &self.source {
+            if source.language.trim().is_empty() || source.language.len() > 32 {
+                return Err(Refusal::invalid(
+                    "source.language must be nonblank and at most 32 bytes",
+                ));
+            }
+            if source.text.trim().is_empty() {
+                return Err(Refusal::invalid("source.text must be nonblank"));
+            }
+        }
+        if let Some(dry_run_text) = &self.dry_run_text {
+            validate_dry_run_text(dry_run_text)?;
+        }
         if self.requester_ref.is_some() && self.kind != "consent" {
             return Err(Refusal::invalid("requester_ref requires consent kind"));
         }
@@ -365,4 +445,41 @@ impl ConsentRequest {
         }
         Ok(())
     }
+}
+
+fn validate_dry_run_text(dry_run_text: &DryRunText) -> Result<(), Refusal> {
+    let has_control = |value: &str| value.chars().any(|character| character.is_ascii_control());
+    if dry_run_text.summary.trim().is_empty() || dry_run_text.summary.len() > 300 {
+        return Err(Refusal::invalid(
+            "dry_run_text.summary must be nonblank and at most 300 bytes",
+        ));
+    }
+    if has_control(&dry_run_text.summary) {
+        return Err(Refusal::invalid(
+            "dry_run_text.summary must not contain ASCII control characters",
+        ));
+    }
+    for (field, items) in [
+        ("would", &dry_run_text.would),
+        ("problems", &dry_run_text.problems),
+    ] {
+        if items.len() > 8 {
+            return Err(Refusal::invalid(format!(
+                "dry_run_text.{field} must contain at most 8 items"
+            )));
+        }
+        for item in items {
+            if item.trim().is_empty() || item.len() > 200 {
+                return Err(Refusal::invalid(format!(
+                    "dry_run_text.{field} items must be nonblank and at most 200 bytes"
+                )));
+            }
+            if has_control(item) {
+                return Err(Refusal::invalid(format!(
+                    "dry_run_text.{field} items must not contain ASCII control characters"
+                )));
+            }
+        }
+    }
+    Ok(())
 }

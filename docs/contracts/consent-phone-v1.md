@@ -7,6 +7,9 @@ This contract describes the implemented approval-card interface. The phone calls
 exactly `consent.list_pending`, `consent.get`, and `consent.answer` through
 Callosum. Requests are JSON envelopes:
 
+The additive `source` and `dryRunText` card fields are specified in
+[consent-card-text-v1](consent-card-text-v1.md).
+
 ```json
 {"method":"consent.get","params":{"elicitationId":"el_1"}}
 ```

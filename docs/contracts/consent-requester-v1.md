@@ -10,7 +10,8 @@ wrap the result in `{result: ...}`. Refusals are transport errors with string
 [generated corpus](../../test-vectors/consent-requester-v1/README.md) pins actual
 request envelopes and untouched handler response bytes with a fixed clock and
 fresh temporary stores. The [phone contract](consent-phone-v1.md) describes the
-other side of these cards.
+other side of these cards. The optional `source` and `dry_run_text` fields and
+their requester readbacks are specified in [consent-card-text-v1](consent-card-text-v1.md).
 
 ## Identity and admission
 

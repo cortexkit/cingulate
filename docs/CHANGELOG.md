@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3 (ck-cingulate, cingulate-vectors)
+
+- Add the optional `source` and `dry_run_text` human-readable card fields for
+  installation and package approvals, with closed shape, size and plain-text
+  validation. Preserve them in requester and phone readbacks and advertise the
+  `consent-card-text/v1` capability; add real-handler served vectors.
+
 ## 0.5.2 (ck-cingulate, cingulate-vectors)
 
 - Allow `reserved:broca` to raise generic consent requests only; restrict its
