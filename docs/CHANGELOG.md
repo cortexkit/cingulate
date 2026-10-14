@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.5.3 (ck-cingulate, cingulate-vectors)
+## 0.5.4 (ck-cingulate), 0.5.3 (cingulate-vectors)
+
+- Make worker tool-authorization requests decodable on existing phone builds with
+  plain-text prompts, human option labels and facts. Group worker cards under the
+  supervising agent's identity and display name. Add the same descriptive fields
+  to informational macOS folder-permission cards without adding answer buttons.
+  Preserve requester projections and decline defaults; publish the served
+  `access-escalated-phone-*` fixtures for escalation and a phone's one-time grant
+  without changing existing requester or other corpus bytes.
+
+## 0.5.3 (ck-cingulate), 0.5.2 (cingulate-vectors)
 
 - Add the optional `source` and `dry_run_text` human-readable card fields for
   installation and package approvals, with closed shape, size and plain-text

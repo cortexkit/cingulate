@@ -3,7 +3,9 @@
 //! run off the request path so core outages never delay committing an answer.
 use super::*;
 use cingulate_decode::{validate_note, AccessRequest};
-use cingulate_store::{AccessAnswer, AccessIdentity, AccessMutation, AnswerAttempt, ScopeIdentity};
+use cingulate_store::{
+    AccessAnswer, AccessIdentity, AccessMutation, AccessRecord, AnswerAttempt, ScopeIdentity,
+};
 use subc_client_rs::{
     consumer::{CallError, CallOptions, ConsumerOptions, SubcConsumer},
     ModuleHandle,
@@ -276,6 +278,32 @@ impl Handler {
             head,
         })
     }
+    pub(super) async fn access_phone_label(&self, record: &AccessRecord) -> String {
+        let head = record
+            .identity
+            .head
+            .as_ref()
+            .unwrap_or(&record.identity.asker);
+        let agent_id = head.agent_id.as_deref().unwrap_or_default();
+        self.inner
+            .options
+            .resolver
+            .resolve(agent_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|agent| agent.name)
+            .unwrap_or_else(|| agent_id.to_owned())
+    }
+
+    async fn access_wire(&self, record: &AccessRecord, phone: bool, block: Option<i64>) -> Value {
+        let mut value = record.wire(phone, block);
+        if phone {
+            value["subject"]["label"] = json!(self.access_phone_label(record).await);
+        }
+        value
+    }
+
     pub(super) async fn access_dispatch(
         &self,
         stamp: &Stamp,
@@ -446,9 +474,13 @@ impl Handler {
                         if stamp.operator_surface && mutation.record.state == "pending:head" {
                             return Ok(json!({"ok":false,"code":"access_wrong_leg"}));
                         }
-                        let value = mutation
-                            .record
-                            .wire(stamp.operator_surface, self.block_until(id));
+                        let value = self
+                            .access_wire(
+                                &mutation.record,
+                                stamp.operator_surface,
+                                self.block_until(id),
+                            )
+                            .await;
                         if let Some(code) = &mutation.code {
                             Ok(json!({"ok":false,"code":code,"elicitation":value}))
                         } else {
@@ -508,7 +540,9 @@ impl Handler {
                                 self.await_access(id, integer(params, "timeout_ms")?.min(120_000))
                                     .await
                             }
-                            _ => Ok(record.wire(stamp.operator_surface, self.block_until(id))),
+                            _ => Ok(self
+                                .access_wire(&record, stamp.operator_surface, self.block_until(id))
+                                .await),
                         }
                     }
                     _ => Err(Refusal::new(

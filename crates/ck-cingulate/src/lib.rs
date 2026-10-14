@@ -765,6 +765,19 @@ impl Handler {
         } else {
             None
         };
+        let mut access_labels = HashMap::new();
+        if method == "consent.list_pending" {
+            // Resolve display names without holding the store lock, using the
+            // same agent resolver as generic worker consent subjects.
+            for record in self.with_store(|store| store.access_pending()).await? {
+                if record.state == "pending:user" {
+                    access_labels.insert(
+                        record.elicitation_id.clone(),
+                        self.access_phone_label(&record).await,
+                    );
+                }
+            }
+        }
         let guard = self.inner.store.lock().await;
         let store = guard
             .as_ref()
@@ -906,10 +919,12 @@ impl Handler {
                         if record.state == "pending:user" {
                             // Pending-list continuations need a common sort key. Place
                             // nonexpiring asks after expiring cards without adding a deadline.
-                            cards.push((
-                                (i64::MAX, record.elicitation_id.clone()),
-                                record.wire(true, blocks.get(&record.elicitation_id).copied()),
-                            ));
+                            let mut value =
+                                record.wire(true, blocks.get(&record.elicitation_id).copied());
+                            if let Some(label) = access_labels.get(&record.elicitation_id) {
+                                value["subject"]["label"] = json!(label);
+                            }
+                            cards.push(((i64::MAX, record.elicitation_id.clone()), value));
                         }
                     }
                     cards.sort_by(|a, b| a.0.cmp(&b.0));

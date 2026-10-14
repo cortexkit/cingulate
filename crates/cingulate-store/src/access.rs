@@ -118,6 +118,29 @@ impl AccessRecord {
             }
         }
         if phone {
+            let head = self.identity.head.as_ref().unwrap_or(&self.identity.asker);
+            let agent_id = head.agent_id.as_deref().unwrap_or_default();
+            let mut subject = json!({
+                "agentId": agent_id,
+                "headAgentId": agent_id,
+                "label": agent_id,
+            });
+            if self.identity.scope_kind == "worker" {
+                subject["viaWorker"] = json!(true);
+            }
+            object.insert("subject".into(), subject);
+            let (title, prompt, mut facts) = self.phone_description();
+            if let Some(note) = &self.escalation_note {
+                facts.push(json!({"label": "Lead agent's note", "value": note}));
+            }
+            object.insert("title".into(), json!(title));
+            object.insert("prompt".into(), json!(prompt));
+            object.insert("facts".into(), json!(facts));
+            object.insert("options".into(), json!(self.answers().iter().filter(|id| **id != "escalate").map(|id| json!({
+                "id": id,
+                "label": match *id { "allow_once" => "Allow once", "allow_scope" => "Allow for this task", _ => "Don't allow" },
+                "effect": match *id { "allow_once" | "allow_scope" => "grant", _ => "decline" },
+            })).collect::<Vec<_>>()));
             Value::Object(
                 object
                     .iter()
@@ -137,6 +160,71 @@ impl AccessRecord {
             )
         } else {
             value
+        }
+    }
+    fn phone_description(&self) -> (&'static str, String, Vec<Value>) {
+        match &self.request {
+            AccessRequest::ToolPermission {
+                operation,
+                paths,
+                command,
+                reason,
+                pattern,
+                ..
+            } => {
+                let actor = if self.identity.scope_kind == "worker" {
+                    "An AFT worker"
+                } else {
+                    "An AFT agent"
+                };
+                let prompt = if let Some(command) = command {
+                    format!("{actor} wants to run: {command}")
+                } else {
+                    let target = match paths.as_slice() {
+                        [] => "0 paths".to_owned(),
+                        [path] => format!("1 path: {path}"),
+                        _ => {
+                            let mut common = std::path::Path::new(&paths[0]).parent();
+                            while common.is_some_and(|prefix| {
+                                paths
+                                    .iter()
+                                    .any(|path| !std::path::Path::new(path).starts_with(prefix))
+                            }) {
+                                common = common.and_then(std::path::Path::parent);
+                            }
+                            match common {
+                                Some(prefix) => {
+                                    format!("{} paths under {}", paths.len(), prefix.display())
+                                }
+                                None => format!("{} paths: {}", paths.len(), paths.join(", ")),
+                            }
+                        }
+                    };
+                    format!("{actor} wants to {operation} {target}")
+                };
+                let mut facts = vec![json!({"label": "Operation", "value": operation})];
+                if !paths.is_empty() {
+                    facts.push(json!({"label": "Paths", "value": paths.join("\n")}));
+                }
+                if let Some(command) = command {
+                    facts.push(json!({"label": "Command", "value": command}));
+                }
+                facts.push(json!({"label": "Reason", "value": reason}));
+                facts.push(json!({"label": "Pattern", "value": pattern}));
+                ("Worker permission", prompt, facts)
+            }
+            AccessRequest::MacosPermission {
+                folder,
+                program,
+                steps,
+            } => (
+                "macOS permission",
+                format!("{program} needs macOS permission to access {folder}"),
+                vec![
+                    json!({"label": "Paths", "value": folder}),
+                    json!({"label": "Reason", "value": steps}),
+                ],
+            ),
         }
     }
     fn notice(&self, purpose: &str) -> Value {
@@ -182,6 +270,7 @@ impl AccessRecord {
         body
     }
 }
+
 #[derive(Debug, Clone)]
 pub struct AccessAnswer {
     pub surface: String,
@@ -425,5 +514,145 @@ impl ConsentStore {
                 .transpose()
                 .map(Option::flatten)
         })
+    }
+}
+
+#[cfg(test)]
+mod phone_tests {
+    use super::*;
+
+    fn record(request: Value) -> AccessRecord {
+        AccessRecord {
+            elicitation_id: "acc_test".into(),
+            request: AccessRequest::decode(request).unwrap(),
+            identity: AccessIdentity {
+                principal: "reserved:aft".into(),
+                asker: ScopeIdentity {
+                    scope_ref: "worker".into(),
+                    scope_epoch: 1,
+                    agent_id: None,
+                },
+                scope_kind: "worker".into(),
+                harness: "test".into(),
+                head: Some(ScopeIdentity {
+                    scope_ref: "head".into(),
+                    scope_epoch: 2,
+                    agent_id: Some("agent".into()),
+                }),
+            },
+            created_at_ms: 1,
+            state: "pending:head".into(),
+            surfaces: vec![],
+            attempts: vec![],
+            escalation_note: None,
+            outcome: None,
+            note: None,
+            answered_by: None,
+            settled_at_ms: None,
+            unclaimed: false,
+        }
+    }
+
+    fn tool(operation: &str, paths: Value, command: Option<&str>) -> AccessRecord {
+        record(
+            json!({"kind":"tool_permission", "call_key":"test", "tool":"test", "operation":operation, "paths":paths, "command":command, "reason":"Test permission", "args_hash":"hash", "pattern":"test", "head_policy":"allow"}),
+        )
+    }
+
+    #[test]
+    fn phone_write_prompt_uses_common_path_components_and_keeps_all_paths() {
+        let record = tool(
+            "write",
+            json!(["/common/prefix/a", "/common/prefix/b", "/common/prefix/c"]),
+            None,
+        );
+        let phone = record.wire(true, None);
+        assert_eq!(
+            phone["prompt"],
+            "An AFT worker wants to write 3 paths under /common/prefix"
+        );
+        assert_eq!(
+            phone["facts"][1]["value"],
+            "/common/prefix/a\n/common/prefix/b\n/common/prefix/c"
+        );
+        let disjoint = tool(
+            "read",
+            json!(["/common/abc/file", "/common/abd/file"]),
+            None,
+        );
+        assert_eq!(
+            disjoint.wire(true, None)["prompt"],
+            "An AFT worker wants to read 2 paths under /common"
+        );
+    }
+
+    #[test]
+    fn phone_exec_prompt_and_fact_preserve_the_entire_command() {
+        let command = format!("printf {}", "x".repeat(580));
+        let record = tool("exec", json!([]), Some(&command));
+        let phone = record.wire(true, None);
+        assert_eq!(
+            phone["prompt"],
+            format!("An AFT worker wants to run: {command}")
+        );
+        assert_eq!(
+            phone["facts"][1],
+            json!({"label":"Command", "value":command})
+        );
+        assert!(phone["facts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|fact| fact["value"].is_string()));
+        assert!(!phone["facts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fact| fact["label"] == "Paths"));
+    }
+
+    #[test]
+    fn phone_projection_does_not_change_core_choices_or_fields() {
+        let record = tool("read", json!(["/x/y"]), None);
+        let core = record.wire(false, Some(123));
+        assert_eq!(
+            core["options"],
+            json!([
+                {"id":"allow_once","label":"allow_once","effect":"grant"},
+                {"id":"allow_scope","label":"allow_scope","effect":"grant"},
+                {"id":"deny","label":"deny","effect":"decline"},
+                {"id":"escalate","label":"escalate","effect":"escalate"}
+            ])
+        );
+        let phone = record.wire(true, Some(123));
+        assert_eq!(phone["options"].as_array().unwrap().len(), 3);
+        assert_eq!(phone["blockUntilMs"], 123);
+        for key in ["prompt", "title", "subject", "facts"] {
+            assert!(core.get(key).is_none());
+        }
+        assert_eq!(core, record.wire(false, Some(123)));
+    }
+
+    #[test]
+    fn macos_phone_card_describes_its_request_without_grant_choices() {
+        let record = record(
+            json!({"kind":"macos_permission", "folder":"/protected", "program":"Terminal", "steps":"Open System Settings"}),
+        );
+        let phone = record.wire(true, None);
+        assert_eq!(
+            phone["prompt"],
+            "Terminal needs macOS permission to access /protected"
+        );
+        assert_eq!(phone["title"], "macOS permission");
+        assert_eq!(phone["subject"]["headAgentId"], "agent");
+        assert_eq!(phone["options"], json!([]));
+        assert!(phone.get("default").is_none());
+        assert_eq!(
+            phone["facts"],
+            json!([
+                {"label":"Paths","value":"/protected"},
+                {"label":"Reason","value":"Open System Settings"}
+            ])
+        );
     }
 }

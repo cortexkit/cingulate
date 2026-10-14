@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use cingulate_store::{Isolation, ScopeIdentity, StorageBackend, StorageDescriptor};
-use ck_cingulate::{AccessRuntime, Clock, Handler, NoticeResult, Options, ScopeLife, Stamp};
+use ck_cingulate::{
+    AccessRuntime, Clock, Handler, NoticeResult, Options, Resolver, ScopeLife, Stamp,
+    UnavailableResolver,
+};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
 use subc_client_rs::HandlerOutcome;
@@ -102,10 +105,14 @@ async fn capture(
     }
 }
 pub async fn generate() -> BTreeMap<String, Vec<u8>> {
+    generate_with_resolver(Arc::new(UnavailableResolver)).await
+}
+pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<String, Vec<u8>> {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cards.sqlite");
     let handler = Handler::new(Options {
         clock: Arc::new(FixedClock),
+        resolver,
         sweep_timer: false,
         data_home: dir.path().to_str().unwrap().into(),
         ..Default::default()
@@ -314,5 +321,55 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
         let (purpose, body) = row.unwrap();
         files.insert(format!("notice-{purpose}.json"), body.into_bytes());
     }
+    let req = json!({"kind":"tool_permission","call_key":"call-phone-once","tool":"read","operation":"read","paths":["/x/y"],"reason":"Inspect the requested path","args_hash":"hash-phone-once","pattern":"/x/y","head_policy":"allow"});
+    let id = capture(
+        &mut files,
+        &handler,
+        &worker,
+        "access-escalated-phone-open",
+        "consent.request",
+        req,
+    )
+    .await["elicitation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    capture(&mut files, &handler, &core, "access-escalated-phone-escalate", "consent.answer", json!({"elicitation_id": id, "answer": "escalate", "note": "Please approve this read", "answered_by": head()})).await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-list",
+        "consent.list_pending",
+        json!({}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-get",
+        "consent.get",
+        json!({"elicitationId": id}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-answer",
+        "consent.answer",
+        json!({"elicitationId": id, "choiceId": "allow_once"}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &worker,
+        "access-escalated-phone-readback",
+        "consent.get",
+        json!({"elicitation_id": id}),
+    )
+    .await;
     files
 }

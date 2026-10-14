@@ -1063,23 +1063,33 @@ async fn permission_phone_pages_and_request_bodies_obey_shared_byte_budgets() {
         req["pattern"] = json!("p".repeat(1_100_000));
         f.ask(&asker, req).await;
     }
-    let first = f.ok(&phone(), "consent.list_pending", json!({})).await;
-    assert_eq!(first["records"].as_array().unwrap().len(), 2);
-    assert!(serde_json::to_vec(&first).unwrap().len() < 3 * 1024 * 1024);
-    assert_eq!(first["continuation"]["expires_at_ms"], i64::MAX);
-    assert!(first["records"][0].get("expiresAtMs").is_none());
-    let second = f
-        .ok(
-            &phone(),
-            "consent.list_pending",
-            json!({"continuation":first["continuation"]}),
-        )
-        .await;
-    assert_eq!(second["records"].as_array().unwrap().len(), 2);
-    assert!(second.get("continuation").is_none());
-    assert!(serde_json::to_vec(&second).unwrap().len() < 3 * 1024 * 1024);
-    assert_ne!(
-        first["records"][0]["elicitationId"],
-        second["records"][0]["elicitationId"]
-    );
+    let mut params = json!({});
+    let mut seen = std::collections::HashSet::new();
+    for page_number in 0..4 {
+        let page = f.ok(&phone(), "consent.list_pending", params).await;
+        // Plain-text facts repeat the pattern, so these larger phone cards fit
+        // one per page without truncating the requested permission scope.
+        assert_eq!(page["records"].as_array().unwrap().len(), 1);
+        assert!(serde_json::to_vec(&page).unwrap().len() < 3 * 1024 * 1024);
+        let card = &page["records"][0];
+        assert!(card.get("expiresAtMs").is_none());
+        assert!(seen.insert(card["elicitationId"].as_str().unwrap().to_owned()));
+        assert_eq!(card["pattern"], "p".repeat(1_100_000));
+        assert_eq!(
+            card["facts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|fact| fact["label"] == "Pattern")
+                .unwrap()["value"],
+            "p".repeat(1_100_000)
+        );
+        if page_number == 3 {
+            assert!(page.get("continuation").is_none());
+        } else {
+            assert_eq!(page["continuation"]["expires_at_ms"], i64::MAX);
+        }
+        params = json!({"continuation": page["continuation"]});
+    }
+    assert_eq!(seen.len(), 4);
 }

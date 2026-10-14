@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs};
 #[tokio::test]
 async fn permission_served_vectors_regenerate_byte_for_byte() {
     let generated = access::generate().await;
-    assert_eq!(generated.len(), 40);
+    assert_eq!(generated.len(), 52);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(access::root().join(&name)).unwrap(),
@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "7799d7074c24a5089a1f20db9ae00f85c2d77784ff4ab539d021d3c2042b9547"
+        "c50e5c08762f048e116110ab081903c4486839111ec405dc63f161446643efaf"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -39,7 +39,134 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
         .filter(|name| name != "SHA256SUMS")
         .collect();
     assert_eq!(actual, listed);
-    assert_eq!(listed.len(), 41);
+    assert_eq!(listed.len(), 53);
+}
+
+fn served(files: &std::collections::BTreeMap<String, Vec<u8>>, name: &str) -> Value {
+    serde_json::from_slice(&files[&format!("access-escalated-phone-{name}-reply.json")]).unwrap()
+}
+
+fn decode_phone_card(card: &Value) -> Result<(), String> {
+    for field in ["prompt", "state", "kind"] {
+        if card[field].as_str().is_none_or(str::is_empty) {
+            return Err(format!("phone card requires {field}"));
+        }
+    }
+    if card["subject"]["label"].as_str().is_none_or(str::is_empty) {
+        return Err("phone card requires subject.label".into());
+    }
+    let options = card["options"]
+        .as_array()
+        .ok_or("phone card requires options")?;
+    if options.is_empty()
+        || options.iter().any(|option| {
+            ["id", "label"]
+                .iter()
+                .any(|key| option[key].as_str().is_none_or(str::is_empty))
+        })
+    {
+        return Err("phone card requires labeled options".into());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn access_escalated_phone_decodes_and_allow_once_settles() {
+    let files = access::generate().await;
+    let get = served(&files, "get");
+    let card = &get["result"];
+    let list = served(&files, "list");
+    let listed = list["result"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["elicitationId"] == card["elicitationId"])
+        .unwrap();
+    for card in [card, listed] {
+        decode_phone_card(card).expect("escalated tool permission must decode on shipped phones");
+        assert_eq!(card["prompt"], "An AFT worker wants to read 1 path: /x/y");
+        assert_eq!(card["title"], "Worker permission");
+        assert_eq!(card["state"], "pending:user");
+        assert_eq!(card["subject"]["label"], "agent");
+        assert_eq!(
+            card["options"],
+            serde_json::json!([
+                {"id":"allow_once","label":"Allow once","effect":"grant"},
+                {"id":"allow_scope","label":"Allow for this task","effect":"grant"},
+                {"id":"deny","label":"Don't allow","effect":"decline"}
+            ])
+        );
+        assert_eq!(
+            card["facts"],
+            serde_json::json!([
+                {"label":"Operation","value":"read"},
+                {"label":"Paths","value":"/x/y"},
+                {"label":"Reason","value":"Inspect the requested path"},
+                {"label":"Pattern","value":"/x/y"},
+                {"label":"Lead agent's note","value":"Please approve this read"}
+            ])
+        );
+        assert_eq!(card["default"], "deny");
+        assert_eq!(card["createdAtMs"], 1000);
+    }
+    let answer = served(&files, "answer");
+    assert_eq!(answer["result"]["ok"], true);
+    assert_eq!(answer["result"]["elicitation"]["state"], "settled");
+    assert_eq!(answer["result"]["elicitation"]["outcome"], "allow_once");
+    let readback = served(&files, "readback");
+    assert_eq!(readback["result"]["outcome"], "allow_once");
+    assert_eq!(readback["result"]["answered_by"], "user");
+    for key in ["prompt", "title", "subject", "facts"] {
+        assert!(
+            readback["result"].get(key).is_none(),
+            "phone-only field {key}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn access_escalated_phone_places_card_under_head_agent() {
+    let files = access::generate().await;
+    let get = served(&files, "get");
+    let list = served(&files, "list");
+    let listed = list["result"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["elicitationId"] == get["result"]["elicitationId"])
+        .unwrap();
+    for card in [&get["result"], listed] {
+        assert_eq!(card["subject"]["headAgentId"], "agent");
+        assert_eq!(card["subject"]["agentId"], "agent");
+        assert_eq!(card["subject"]["viaWorker"], true);
+        assert!(card["asker"].get("agent_id").is_none());
+    }
+}
+
+struct NamedResolver;
+#[async_trait::async_trait]
+impl ck_cingulate::Resolver for NamedResolver {
+    async fn resolve(&self, agent_id: &str) -> Result<Option<ck_cingulate::ResolvedAgent>, String> {
+        assert_eq!(agent_id, "agent");
+        Ok(Some(ck_cingulate::ResolvedAgent {
+            name: Some("ALF".into()),
+            retired: false,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn access_phone_subject_uses_generic_consent_name_resolver() {
+    let files = access::generate_with_resolver(std::sync::Arc::new(NamedResolver)).await;
+    assert_eq!(served(&files, "get")["result"]["subject"]["label"], "ALF");
+    assert_eq!(
+        served(&files, "answer")["result"]["elicitation"]["subject"]["label"],
+        "ALF"
+    );
+    let list = served(&files, "list");
+    for card in list["result"]["records"].as_array().unwrap() {
+        assert_eq!(card["subject"]["label"], "ALF");
+    }
 }
 #[test]
 fn pinned_scope_grant_names_the_worker_and_hidden_leg_has_no_card() {
