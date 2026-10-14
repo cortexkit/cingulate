@@ -129,6 +129,12 @@ impl AccessRecord {
                 subject["viaWorker"] = json!(true);
             }
             object.insert("subject".into(), subject);
+            // Shipped phones list and answer only cards whose state is exactly
+            // "pending"; every card a phone sees waits on its user, so the leg
+            // suffix tells it nothing and would hide the card.
+            if self.state == "pending:user" {
+                object.insert("state".into(), json!("pending"));
+            }
             let (title, prompt, mut facts) = self.phone_description();
             if let Some(note) = &self.escalation_note {
                 facts.push(json!({"label": "Lead agent's note", "value": note}));

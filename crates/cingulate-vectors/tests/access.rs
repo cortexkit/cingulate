@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "c50e5c08762f048e116110ab081903c4486839111ec405dc63f161446643efaf"
+        "ac1db6c995b01e64a1c53a35deb84cf412444422c9dd10e392e775441f7ad61c"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -86,7 +86,8 @@ async fn access_escalated_phone_decodes_and_allow_once_settles() {
         decode_phone_card(card).expect("escalated tool permission must decode on shipped phones");
         assert_eq!(card["prompt"], "An AFT worker wants to read 1 path: /x/y");
         assert_eq!(card["title"], "Worker permission");
-        assert_eq!(card["state"], "pending:user");
+        // Shipped phones keep only cards whose state is exactly "pending".
+        assert_eq!(card["state"], "pending");
         assert_eq!(card["subject"]["label"], "agent");
         assert_eq!(
             card["options"],

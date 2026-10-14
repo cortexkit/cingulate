@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.5 (ck-cingulate), 0.5.4 (cingulate-vectors)
+
+- Serve escalated permission asks to the phone with state `pending`. Shipped
+  phones keep and answer only cards whose state is exactly `pending`, so the
+  `pending:user` state hid them. The requester and core projections still report
+  `pending:user`.
+
 ## 0.5.4 (ck-cingulate), 0.5.3 (cingulate-vectors)
 
 - Make worker tool-authorization requests decodable on existing phone builds with
