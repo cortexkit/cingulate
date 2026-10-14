@@ -29,7 +29,7 @@ fn requester_sha256sums_cover_and_match_every_file() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "e4eb488651dbd1e3c3164644a4e4bc0ba3d39f81cb4f3e1f09cc7913564a3248"
+        "e3ff6aab15312cac56f59e95a86b3c5cb42d9eb0eef3ecdd3bff638970ee8ffa"
     );
     let mut names = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {

@@ -1144,11 +1144,7 @@ async fn answer_order_repeats_conflicts_and_expiry() {
         assert!(answer.get("alreadyAnswered").is_none());
         assert_eq!(answer["elicitation"]["state"], "expired");
         assert_eq!(answer["elicitation"]["answeredAtMs"], f.clock.now_ms());
-        if case == "flow_decision" {
-            assert_eq!(answer["elicitation"]["answeredChoiceId"], "deny");
-        } else {
-            assert!(answer["elicitation"].get("answeredChoiceId").is_none());
-        }
+        assert!(answer["elicitation"].get("answeredChoiceId").is_none());
         assert_eq!(
             f.payloads(),
             [

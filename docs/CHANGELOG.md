@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 (ck-cingulate)
+
+- Expire flow-decision cards without recording a selected choice, matching the
+  consent contract for every card kind.
+
 ## 0.5.0 (ck-cingulate, cingulate-vectors)
 
 - Serve the operator's permissions inventory by discovering `permissions/v1`

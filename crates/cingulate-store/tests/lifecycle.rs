@@ -435,7 +435,7 @@ fn concurrent_answer_and_withdraw_commit_exactly_one_terminal_state() {
 }
 
 #[test]
-fn expiry_precedes_choice_and_console_refusals_and_uses_the_exact_deadline() {
+fn expiry_never_records_a_choice_for_any_kind() {
     let scratch = Scratch::new();
     let (store, _) = scratch.open(100);
     let owner = identity("direct", "s");
@@ -464,7 +464,7 @@ fn expiry_precedes_choice_and_console_refusals_and_uses_the_exact_deadline() {
         panic!("default is not a repeat answer")
     };
     assert_eq!(expired.answered_at_ms, Some(108));
-    assert_eq!(expired.answered_choice_id.as_deref(), Some("decline"));
+    assert_eq!(expired.answered_choice_id, None);
     assert_settlement(&scratch, &expired, 2);
     let mut req = request();
     req.expires_in_ms = 1;
@@ -499,10 +499,7 @@ fn open_sweep_settles_downtime_expiry_exactly_once_for_all_kinds() {
     for record in &settlements {
         assert_eq!(record.state, State::Expired);
         assert_eq!(record.answered_at_ms, Some(60));
-        assert_eq!(
-            record.answered_choice_id,
-            (record.request.kind == "flow_decision").then(|| record.request.default.clone())
-        );
+        assert_eq!(record.answered_choice_id, None);
         assert_settlement(&scratch, record, 3);
     }
     assert!(store.pending().unwrap().is_empty());

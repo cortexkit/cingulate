@@ -786,8 +786,7 @@ fn terminal(
 }
 
 fn expire(conn: &Connection, record: &mut ElicitationRecord) -> Result<()> {
-    let choice = (record.request.kind == "flow_decision").then(|| record.request.default.clone());
-    terminal(conn, record, State::Expired, choice, record.expires_at_ms)
+    terminal(conn, record, State::Expired, None, record.expires_at_ms)
 }
 
 fn prune(conn: &Connection, now_ms: i64) -> Result<()> {
