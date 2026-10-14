@@ -10,7 +10,8 @@ AFT uses durable request/get/await/withdraw and core receives notices.
 ## Generic consent and requester correlation
 
 To preserve v1 behavior, the generic-consent rule admits `direct` and
-`reserved:cerebellum`, `reserved:plexus` and `reserved:entorhinal` for
+`reserved:cerebellum`, `reserved:plexus`, `reserved:broca` and
+`reserved:entorhinal` for
 `kind: "consent"` only. These requesters use the generic consent body; none can
 request `flow_install`, `flow_decision`, `package`, `tool_permission` or
 `macos_permission`. A disallowed kind refuses `elicitation_requester_refused`.
@@ -39,7 +40,8 @@ Generic worker cards retain the ordinary generic-consent state machine and
 fail-closed expiry. They ask the user directly; they do not first require an
 answer from the head, unlike worker permission asks.
 
-`reserved:cerebellum`, `reserved:plexus` and `reserved:entorhinal` may call `consent.request`,
+`reserved:cerebellum`, `reserved:plexus`, `reserved:broca` and
+`reserved:entorhinal` may call `consent.request`,
 `consent.await`, `consent.get`, `consent.answers`, `consent.ack`,
 `consent.withdraw`, `consent.report_execution` and `consent.detach`. Get, await,
 report_execution, withdraw and detach require the raising owner. `consent.answers`

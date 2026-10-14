@@ -2369,6 +2369,13 @@ fn plexus() -> Stamp {
     }
 }
 
+fn broca() -> Stamp {
+    Stamp {
+        carried_agent_id: "agent-broca".into(),
+        ..stamp("reserved:broca")
+    }
+}
+
 #[tokio::test]
 async fn plexus_requester_lifecycle_and_stamped_identity() {
     let f = Fixture::open(None).await;
@@ -2470,6 +2477,188 @@ async fn plexus_cannot_read_or_answer_another_requesters_card() {
         )
         .await["state"],
         "pending"
+    );
+}
+
+#[tokio::test]
+async fn broca_requester_lifecycle_and_stamped_identity() {
+    let f = Fixture::open(None).await;
+    let requester = broca();
+    let mut request = body();
+    request["requester_ref"] = json!("broca-call-1");
+    let id = f.request(&requester, request).await;
+    for method in ["consent.get", "consent.await"] {
+        let card = ok(
+            &f.handler,
+            &requester,
+            method,
+            json!({"elicitation_id":id,"timeout_ms":0}),
+        )
+        .await;
+        assert_eq!(card["requester_label"], "reserved:broca");
+        assert_eq!(card["subject"]["agent_id"], "agent-broca");
+        assert_eq!(card["requester_ref"], "broca-call-1");
+        assert_eq!(card["state"], "pending");
+    }
+    assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
+    let feed = ok(
+        &f.handler,
+        &requester,
+        "consent.answers",
+        json!({"since":0}),
+    )
+    .await;
+    assert_eq!(feed["records"].as_array().unwrap().len(), 1);
+    assert_eq!(feed["records"][0]["elicitation_id"], id);
+    assert_eq!(
+        ok(
+            &f.handler,
+            &requester,
+            "consent.report_execution",
+            json!({"elicitation_id":id,"execution":"executed"})
+        )
+        .await["execution"],
+        "executed"
+    );
+    assert_eq!(
+        ok(
+            &f.handler,
+            &requester,
+            "consent.ack",
+            json!({"cursor":feed["cursor"]})
+        )
+        .await,
+        json!({"ok":true})
+    );
+    assert!(ok(
+        &f.handler,
+        &requester,
+        "consent.answers",
+        json!({"since":0})
+    )
+    .await["records"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let pending = f.request(&requester, body()).await;
+    assert_eq!(
+        ok(
+            &f.handler,
+            &requester,
+            "consent.withdraw",
+            json!({"elicitation_id":pending})
+        )
+        .await["state"],
+        "withdrawn"
+    );
+}
+
+#[tokio::test]
+async fn broca_only_generic_consent() {
+    let f = Fixture::open(None).await;
+    for kind in [
+        "flow_install",
+        "flow_decision",
+        "package",
+        "tool_permission",
+        "macos_permission",
+    ] {
+        let request = if kind == "package" {
+            serde_json::from_str::<Value>(include_str!(
+                "../../../test-vectors/consent-package-card-v1/request.json"
+            ))
+            .unwrap()["params"]
+                .clone()
+        } else {
+            kind_body(kind)
+        };
+        assert!(f
+            .unchanged_error(
+                &broca(),
+                "consent.request",
+                request,
+                "elicitation_requester_refused"
+            )
+            .await
+            .contains("reserved:broca"));
+    }
+}
+
+#[tokio::test]
+async fn broca_cannot_read_or_act_on_another_requesters_card() {
+    let f = Fixture::open(None).await;
+    let id = f.request(&cerebellum(), body()).await;
+    for method in [
+        "consent.get",
+        "consent.await",
+        "consent.withdraw",
+        "consent.detach",
+        "consent.report_execution",
+    ] {
+        f.unchanged_error(
+            &broca(),
+            method,
+            json!({"elicitation_id":id,"timeout_ms":0,"execution":"executed"}),
+            "elicitation_not_owner",
+        )
+        .await;
+    }
+    assert!(
+        ok(&f.handler, &broca(), "consent.answers", json!({"since":0})).await["records"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    error(
+        &f.handler,
+        &broca(),
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+        "elicitation_operator_required",
+    )
+    .await;
+    f.answer(&id, "allow_once").await;
+    let owner_feed = ok(
+        &f.handler,
+        &cerebellum(),
+        "consent.answers",
+        json!({"since":0}),
+    )
+    .await;
+    assert_eq!(owner_feed["records"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        ok(
+            &f.handler,
+            &broca(),
+            "consent.ack",
+            json!({"cursor":owner_feed["cursor"]})
+        )
+        .await,
+        json!({"ok":true})
+    );
+    assert_eq!(
+        ok(
+            &f.handler,
+            &cerebellum(),
+            "consent.answers",
+            json!({"since":0})
+        )
+        .await["records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "Broca's acknowledgment cannot consume another requester's answer"
+    );
+    assert_eq!(
+        ok(
+            &f.handler,
+            &cerebellum(),
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await["state"],
+        "answered"
     );
 }
 

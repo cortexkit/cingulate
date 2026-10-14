@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 (ck-cingulate, cingulate-vectors)
+
+- Allow `reserved:broca` to raise generic consent requests only; restrict its
+  follow-up operations to the owner who raised each request. Add served vectors
+  for Broca requests and the refusal of a non-consent request.
+
 ## 0.5.1 (ck-cingulate)
 
 - Expire flow-decision cards without recording a selected choice, matching the

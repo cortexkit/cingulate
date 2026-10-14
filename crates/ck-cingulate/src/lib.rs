@@ -58,6 +58,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 13] = [
 const GENERIC_CONSENT_REQUESTERS: &[(&str, bool)] = &[
     ("reserved:cerebellum", true),
     ("reserved:plexus", true),
+    ("reserved:broca", true),
     ("reserved:entorhinal", true),
     ("direct", false),
 ];
@@ -1080,6 +1081,7 @@ mod tests {
             [
                 "reserved:cerebellum",
                 "reserved:plexus",
+                "reserved:broca",
                 "reserved:entorhinal"
             ]
         );

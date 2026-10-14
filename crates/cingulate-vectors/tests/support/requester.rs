@@ -367,6 +367,36 @@ pub async fn generate_v2() -> BTreeMap<String, Vec<u8>> {
         serde_json::to_vec(&refusal).unwrap(),
     );
 
+    let broca = Stamp {
+        carried_agent_id: "agent-alf".into(),
+        ..stamp("reserved:broca")
+    };
+    let fixture = Fixture::open(None).await;
+    record(
+        &mut files,
+        &fixture,
+        &broca,
+        "broca",
+        "consent.request",
+        crate::support::app_body(),
+    )
+    .await;
+    let fixture = Fixture::open(None).await;
+    let params = decision_body("grant_lost");
+    files.insert(
+        "broca-non-consent-request.json".into(),
+        serde_json::to_vec(&json!({"method":"consent.request","params":params})).unwrap(),
+    );
+    let refusal = fixture
+        .call(&broca, "consent.request", params)
+        .await
+        .unwrap_err();
+    assert_eq!(refusal["code"], "elicitation_requester_refused");
+    files.insert(
+        "broca-non-consent-refusal.json".into(),
+        serde_json::to_vec(&refusal).unwrap(),
+    );
+
     // consent.detach on a pending card, a repeat of it, a card that settled
     // before any detach, and a card raised by another principal.
     let fixture = Fixture::open(None).await;

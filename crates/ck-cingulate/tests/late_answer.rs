@@ -99,6 +99,9 @@ fn cerebellum() -> Stamp {
 fn plexus() -> Stamp {
     stamped("plexus", 3)
 }
+fn broca() -> Stamp {
+    stamped("broca", 4)
+}
 fn phone() -> Stamp {
     Stamp::from_bind(
         &RouteBindRequest::new(
@@ -368,6 +371,27 @@ async fn plexus_late_answer_notice_names_plexus_as_requester() {
         f.sent(),
         vec![format!(
             r#"{{"elicitation_id":"{id}","purpose":"consent_answered","asker":{{"scope_ref":"sc_head_alf","scope_epoch":3}},"fields":{{"requester":"plexus","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":1500}}}}"#
+        )]
+    );
+}
+
+#[tokio::test]
+async fn broca_late_answer_notice_names_broca_as_requester() {
+    let f = Fixture::new().await;
+    let id = f.ok(&broca(), "consent.request", card()).await["elicitation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    f.ok(&broca(), "consent.detach", json!({"elicitation_id":id}))
+        .await;
+    f.deliver().await;
+    f.clock.0.send_replace(1500);
+    assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
+    f.deliver().await;
+    assert_eq!(
+        f.sent(),
+        vec![format!(
+            r#"{{"elicitation_id":"{id}","purpose":"consent_answered","asker":{{"scope_ref":"sc_head_alf","scope_epoch":3}},"fields":{{"requester":"broca","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":1500}}}}"#
         )]
     );
 }
