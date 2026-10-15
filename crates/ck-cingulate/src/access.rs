@@ -260,6 +260,7 @@ impl Handler {
         }
         Ok(AccessIdentity {
             principal: stamp.label().into(),
+            scope_owner: Some(Stamp::from_principal(Some(&scope.owner)).label().into()),
             asker: ScopeIdentity {
                 scope_ref: scope.scope_ref.clone(),
                 scope_epoch: scope.scope_epoch,
@@ -508,7 +509,9 @@ impl Handler {
                                     "ask is not on the user surface",
                                 ));
                             }
-                        } else if stamp.label() != record.identity.principal {
+                        } else if stamp.label() != record.identity.principal
+                            && (method != "consent.withdraw" || !record.can_withdraw(stamp.label()))
+                        {
                             return Err(Refusal::new(
                                 "elicitation_not_owner",
                                 "ask has no matching principal",

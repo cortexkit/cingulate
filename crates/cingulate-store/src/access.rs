@@ -23,6 +23,9 @@ impl ScopeIdentity {
 pub struct AccessIdentity {
     pub principal: String,
     pub asker: ScopeIdentity,
+    /// The daemon-stamped asker scope owner; absent on older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_owner: Option<String>,
     pub scope_kind: String,
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,10 +56,19 @@ pub struct AccessRecord {
     pub outcome: Option<String>,
     pub note: Option<String>,
     pub answered_by: Option<String>,
+    /// Principal that withdrew the ask, stored for audit but omitted from wire projections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawn_by: Option<String>,
     pub settled_at_ms: Option<i64>,
     pub unclaimed: bool,
 }
 impl AccessRecord {
+    pub fn can_withdraw(&self, principal: &str) -> bool {
+        principal == self.identity.principal
+            || (principal == "reserved:prefrontal-core"
+                && self.identity.scope_owner.as_deref() == Some(principal)
+                && matches!(self.request, AccessRequest::ToolPermission { .. }))
+    }
     pub fn pending(&self) -> bool {
         self.state.starts_with("pending:")
     }
@@ -365,7 +377,7 @@ impl ConsentStore {
             };
             if let Some(id) = matched { return Ok(AccessMutation { record: load(tx, &id)?.expect("matched access row"), changed: false, code: None }); }
             let seq: i64 = tx.query_row("UPDATE cingulate_id_seq SET value=value+1 WHERE singleton=1 AND value<9223372036854775807 RETURNING value", [], |r| r.get(0))?;
-            let mut record = AccessRecord { elicitation_id: format!("acc_{seq}"), state: if identity.scope_kind == "worker" && !request.informational() { "pending:head" } else { "pending:user" }.into(), request, identity, created_at_ms: now, surfaces: vec![], attempts: vec![], escalation_note: None, outcome: None, note: None, answered_by: None, settled_at_ms: None, unclaimed: false };
+            let mut record = AccessRecord { elicitation_id: format!("acc_{seq}"), state: if identity.scope_kind == "worker" && !request.informational() { "pending:head" } else { "pending:user" }.into(), request, identity, created_at_ms: now, surfaces: vec![], attempts: vec![], escalation_note: None, outcome: None, note: None, answered_by: None, withdrawn_by: None, settled_at_ms: None, unclaimed: false };
             record.surfaces.push(json!({"surface":if record.state == "pending:head" { "head" } else { "user" },"at_ms":now,"answers":record.answers()}));
             let (folder, program) = match &record.request { AccessRequest::MacosPermission { folder, program, .. } => (Some(folder), Some(program)), _ => (None, None) };
             tx.execute("INSERT INTO access_asks(elicitation_id,principal,owner,call_key,folder,program,state,record_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![record.elicitation_id,record.identity.principal,serde_json::to_string(&record.identity.asker)?,record.request.call_key(),folder,program,record.state,serde_json::to_string(&record)?])?;
@@ -423,7 +435,7 @@ impl ConsentStore {
             let mut record = load(tx, id)?.ok_or_else(|| {
                 crate::refuse("elicitation_not_owner", "ask has no matching principal")
             })?;
-            if principal != record.identity.principal {
+            if !record.can_withdraw(principal) {
                 return Err(crate::refuse(
                     "elicitation_not_owner",
                     "ask has no matching principal",
@@ -431,6 +443,7 @@ impl ConsentStore {
             }
             let changed = record.pending();
             if changed {
+                record.withdrawn_by = Some(principal.into());
                 settle(tx, &mut record, "access_withdrawn", now)?;
             }
             Ok(AccessMutation {
@@ -533,6 +546,7 @@ mod phone_tests {
             request: AccessRequest::decode(request).unwrap(),
             identity: AccessIdentity {
                 principal: "reserved:aft".into(),
+                scope_owner: Some("reserved:prefrontal-core".into()),
                 asker: ScopeIdentity {
                     scope_ref: "worker".into(),
                     scope_epoch: 1,
@@ -554,6 +568,7 @@ mod phone_tests {
             outcome: None,
             note: None,
             answered_by: None,
+            withdrawn_by: None,
             settled_at_ms: None,
             unclaimed: false,
         }

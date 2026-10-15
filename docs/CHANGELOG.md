@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.7 (ck-cingulate), 0.5.7 (cingulate-vectors)
+
+- Let Prefrontal Core withdraw tool-permission asks whose recorded asker scope it
+  owns when a worker run finishes, fails or is cancelled. Audit the withdrawing
+  principal and add served owner, non-owner and already-settled withdrawal vectors
+  without changing existing corpus bytes.
+
 ## 0.5.6 (ck-cingulate), 0.5.6 (cingulate-vectors)
 
 - Add phone-only human names for Cingulate-admitted requester principals

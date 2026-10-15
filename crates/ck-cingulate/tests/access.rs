@@ -241,6 +241,24 @@ impl Fixture {
             .unwrap();
         serde_json::from_str(&raw).unwrap()
     }
+    fn set_scope_owner(&self, id: &str, owner: Option<&str>) {
+        let mut record = self.audit(id);
+        if let Some(owner) = owner {
+            record["identity"]["scope_owner"] = json!(owner);
+        } else {
+            record["identity"]
+                .as_object_mut()
+                .unwrap()
+                .remove("scope_owner");
+        }
+        rusqlite::Connection::open(&self.path)
+            .unwrap()
+            .execute(
+                "UPDATE access_asks SET record_json=?2 WHERE elicitation_id=?1",
+                rusqlite::params![id, serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -533,15 +551,19 @@ async fn first_answer_wins_and_losing_attempts_are_audited() {
     assert_eq!(record["surfaces"][0]["surface"], "user");
 }
 #[tokio::test]
-async fn only_raising_principal_can_withdraw() {
+async fn raiser_can_withdraw_from_another_session() {
     let f = Fixture::new(true).await;
     let id = f
         .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
         .await;
     assert_eq!(
-        f.call(&core(), "consent.withdraw", json!({"elicitation_id":id}))
-            .await
-            .unwrap_err(),
+        f.call(
+            &stamp("basal", ScopeKind::Head),
+            "consent.withdraw",
+            json!({"elicitation_id":id})
+        )
+        .await
+        .unwrap_err(),
         "elicitation_not_owner"
     );
     assert_eq!(f.get(&id).await["state"], "pending:head");
@@ -555,7 +577,9 @@ async fn only_raising_principal_can_withdraw() {
         .await["outcome"],
         "access_withdrawn"
     );
+    assert_eq!(f.audit(&id)["withdrawn_by"], "reserved:aft");
     assert_eq!(f.relay(&id, "allow_once").await["code"], "conflict");
+    let settled = f.audit(&id);
     assert_eq!(
         f.ok(
             &another_aft_session,
@@ -565,6 +589,180 @@ async fn only_raising_principal_can_withdraw() {
         .await["outcome"],
         "access_withdrawn"
     );
+    assert_eq!(f.audit(&id), settled);
+}
+#[tokio::test]
+async fn core_withdraw_records_principal_and_notice() {
+    for (kind, policy) in [(ScopeKind::Worker, Some("allow")), (ScopeKind::Head, None)] {
+        let f = Fixture::new(true).await;
+        let id = f.ask(&stamp("aft", kind), request(policy)).await;
+        let pending = f.audit(&id);
+        assert_eq!(
+            pending["identity"]["scope_owner"],
+            "reserved:prefrontal-core"
+        );
+        for method in ["consent.get", "consent.await", "consent.detach"] {
+            assert_eq!(
+                f.call(&core(), method, json!({"elicitation_id":id,"timeout_ms":0}))
+                    .await
+                    .unwrap_err(),
+                "elicitation_not_owner"
+            );
+        }
+        let reply = f
+            .ok(&core(), "consent.withdraw", json!({"elicitation_id":id}))
+            .await;
+        assert_eq!(reply["state"], "refused:access_withdrawn");
+        assert_eq!(reply["outcome"], "access_withdrawn");
+        let settled = f.audit(&id);
+        assert_eq!(settled["withdrawn_by"], "reserved:prefrontal-core");
+        assert_eq!(settled["answered_by"], Value::Null);
+        assert_eq!(settled["identity"], pending["identity"]);
+        assert_eq!(settled["settled_at_ms"], 1000);
+        f.deliver().await;
+        let db = rusqlite::Connection::open(&f.path).unwrap();
+        let body: String = db
+            .query_row(
+                "SELECT body_json FROM access_notices WHERE elicitation_id=?1 AND purpose='withdrawn'",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["purpose"], "withdrawn");
+        assert_eq!(body["elicitation_id"], id);
+        assert_eq!(body["fields"], json!({}));
+        assert_eq!(
+            body["asker"],
+            json!({
+                "scope_ref":pending["identity"]["asker"]["scope_ref"],
+                "scope_epoch":pending["identity"]["asker"]["scope_epoch"]
+            })
+        );
+        assert_eq!(
+            f.ok(&core(), "consent.withdraw", json!({"elicitation_id":id}))
+                .await,
+            reply
+        );
+        assert_eq!(f.audit(&id), settled);
+        let count: i64 = db.query_row(
+            "SELECT count(*) FROM access_notices WHERE elicitation_id=?1 AND purpose='withdrawn'",
+            [&id], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(count, 1);
+    }
+}
+#[tokio::test]
+async fn core_withdraw_respects_recorded_owner() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    // Creation admits only Core-owned scopes; model a stored foreign-owned ask.
+    f.set_scope_owner(&id, Some("reserved:basal"));
+    let before = f.audit(&id);
+    assert_eq!(
+        f.call(
+            &core(),
+            "consent.withdraw",
+            json!({
+                "elicitation_id":id,
+                "scope_owner":"reserved:prefrontal-core",
+                "asker":{"owner":"reserved:prefrontal-core"}
+            })
+        )
+        .await
+        .unwrap_err(),
+        "elicitation_not_owner"
+    );
+    assert_eq!(f.audit(&id), before);
+    assert_eq!(f.get(&id).await["state"], "pending:head");
+}
+#[tokio::test]
+async fn missing_stored_scope_owner_does_not_authorize_core() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    f.set_scope_owner(&id, None);
+    let before = f.audit(&id);
+    assert_eq!(
+        f.call(&core(), "consent.withdraw", json!({"elicitation_id":id}))
+            .await
+            .unwrap_err(),
+        "elicitation_not_owner"
+    );
+    assert_eq!(f.audit(&id), before);
+    f.ok(
+        &stamp("aft", ScopeKind::Head),
+        "consent.withdraw",
+        json!({"elicitation_id":id}),
+    )
+    .await;
+    assert_eq!(f.audit(&id)["withdrawn_by"], "reserved:aft");
+}
+#[tokio::test]
+async fn core_cannot_withdraw_macos_or_generic_consent() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(
+            &stamp("aft", ScopeKind::Head),
+            json!({
+                "kind":"macos_permission","folder":"/protected","program":"Terminal",
+                "steps":"Open System Settings"
+            }),
+        )
+        .await;
+    let before = f.audit(&id);
+    assert_eq!(
+        f.call(&core(), "consent.withdraw", json!({"elicitation_id":id}))
+            .await
+            .unwrap_err(),
+        "elicitation_not_owner"
+    );
+    assert_eq!(f.audit(&id), before);
+    let id = f.ask(&stamp("cerebellum", ScopeKind::Head), json!({
+            "kind":"consent","title":"Approve operation","prompt":"Proceed?",
+            "options":[{"id":"allow","label":"Allow","effect":"grant"},{"id":"deny","label":"Deny","effect":"decline"}],
+            "default":"deny","urgency":"normal","on_expiry":"deny",
+            "material_damage":false,"late_execution":"notify_only",
+            "target":{"kind":"operation","label":"operation"},
+            "expires_in_ms":60000,"args_digest":"hash-generic"
+    })).await;
+    assert_eq!(
+        f.call(&core(), "consent.withdraw", json!({"elicitation_id":id}))
+            .await
+            .unwrap_err(),
+        "elicitation_not_owner"
+    );
+    assert_eq!(
+        f.ok(
+            &stamp("cerebellum", ScopeKind::Head),
+            "consent.get",
+            json!({"elicitation_id":id})
+        )
+        .await["state"],
+        "pending"
+    );
+}
+#[tokio::test]
+async fn withdraw_of_answered_ask_returns_record_unchanged() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    f.relay(&id, "deny").await;
+    let before = f.audit(&id);
+    let reply = f.get(&id).await;
+    for caller in [core(), stamp("aft", ScopeKind::Head)] {
+        assert_eq!(
+            f.ok(&caller, "consent.withdraw", json!({"elicitation_id":id}))
+                .await,
+            reply
+        );
+        assert_eq!(f.audit(&id), before);
+    }
+    assert_eq!(before.get("withdrawn_by"), None);
 }
 #[tokio::test]
 async fn idempotent_call_key_survives_settlement_and_restart() {

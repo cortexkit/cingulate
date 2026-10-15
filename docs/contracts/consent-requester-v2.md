@@ -154,7 +154,10 @@ returns the current requester record when settled or at the caller's wait bound,
 is read-only and can be repeated. A returned pending state grants nothing.
 Cancelling/dropping a wait removes its transient registration and changes no row.
 
-`consent.withdraw` accepts the id only from the raising principal. It moves any
+`consent.withdraw` accepts the id from the raising principal, or, for `tool_permission`
+asks only, from `reserved:prefrontal-core` when it owns the recorded asker scope and
+the worker run is terminal (delivered, failed or cancelled), never while the worker
+is parked waiting on the ask. It moves any
 pending state to `refused:access_withdrawn`; a terminal record is returned
 unchanged. Withdrawal, answer and head loss are serialized store transactions.
 

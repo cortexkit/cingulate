@@ -1333,6 +1333,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
     assert_eq!(rows(&scratch.sql(), "elicitation_records"), before);
     let identity = cingulate_store::AccessIdentity {
         principal: "reserved:aft".into(),
+        scope_owner: Some("reserved:prefrontal-core".into()),
         asker: cingulate_store::ScopeIdentity {
             scope_ref: "head".into(),
             scope_epoch: 1,

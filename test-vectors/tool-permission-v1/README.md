@@ -11,7 +11,11 @@ Scenarios, in order: worker opening and head-leg get; refused phone head-leg
 answer; unheld head grant refusal; escalation with a note; phone get and pending
 list; user scope grant applying to the worker; losing late head answer; persistent
 call-key replay; read-only settled await; head's own user ask and immediate pending
-await; withdrawal; informational macOS opening, repeat and phone get. The five
+await; withdrawal; informational macOS opening, repeat and phone get; a pending
+worker ask refused to an unrelated withdrawer and then withdrawn by its scope
+owner, Prefrontal Core; and withdrawal of an already-answered ask, returned
+unchanged. `withdraw-bind-stamps.json` supplies the new scenarios' callers without
+changing the original identity fixture. The six
 `notice-*.json` files are actual durable outbox bodies, not hand-written proxies.
 
 Regenerate locally (this command writes source-controlled vectors):

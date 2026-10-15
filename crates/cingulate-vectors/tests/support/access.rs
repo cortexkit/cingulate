@@ -371,5 +371,62 @@ pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<Str
         json!({"elicitation_id": id}),
     )
     .await;
+    let unrelated = Stamp::from_principal(Some(&principal("basal")));
+    files.insert(
+        "withdraw-bind-stamps.json".into(),
+        serde_json::to_vec(&json!({
+            "scope-owner-withdraw":"reserved:prefrontal-core",
+            "non-owner-withdraw":"reserved:basal",
+            "settled-withdraw":"reserved:prefrontal-core",
+            "worker":{"principal":worker.principal,"scope":worker.scope,"harness":worker.harness}
+        }))
+        .unwrap(),
+    );
+    let pending_id = capture(
+        &mut files,
+        &handler,
+        &worker,
+        "owner-worker-open",
+        "consent.request",
+        json!({"kind":"tool_permission","call_key":"call-owner-withdraw","tool":"read","operation":"read","paths":["/tmp/worker"],"reason":"Inspect worker file","args_hash":"hash-owner-withdraw","pattern":"/tmp/worker","head_policy":"allow"}),
+    ).await["elicitation_id"].as_str().unwrap().to_owned();
+    capture(
+        &mut files,
+        &handler,
+        &unrelated,
+        "non-owner-withdraw",
+        "consent.withdraw",
+        json!({"elicitation_id":pending_id}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &core,
+        "scope-owner-withdraw",
+        "consent.withdraw",
+        json!({"elicitation_id":pending_id}),
+    )
+    .await;
+    let withdrawn_body: String = db
+        .query_row(
+            "SELECT body_json FROM access_notices WHERE elicitation_id=?1 AND purpose='withdrawn'",
+            [&pending_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    files.insert(
+        "notice-owner-withdrawn.json".into(),
+        withdrawn_body.into_bytes(),
+    );
+    capture(
+        &mut files,
+        &handler,
+        &core,
+        "settled-withdraw",
+        "consent.withdraw",
+        json!({"elicitation_id":id}),
+    )
+    .await;
     files
 }

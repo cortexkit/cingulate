@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs};
 #[tokio::test]
 async fn permission_served_vectors_regenerate_byte_for_byte() {
     let generated = access::generate().await;
-    assert_eq!(generated.len(), 52);
+    assert_eq!(generated.len(), 62);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(access::root().join(&name)).unwrap(),
@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "3ea60d982ebc5c0893ab6fb72795f7905b5386e5cfd1fbc5e1175a644cd69df5"
+        "39c773a57565fcfd70f2bc6143ad44f9189a8a892d03a91fca4ed166eb580273"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -39,7 +39,34 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
         .filter(|name| name != "SHA256SUMS")
         .collect();
     assert_eq!(actual, listed);
-    assert_eq!(listed.len(), 53);
+    assert_eq!(listed.len(), 63);
+}
+
+#[tokio::test]
+async fn owner_withdraw_vectors_pin_authorization_notice_and_settled_noop() {
+    let files = access::generate().await;
+    let value = |name: &str| -> Value { serde_json::from_slice(&files[name]).unwrap() };
+    let owner = value("scope-owner-withdraw-reply.json");
+    let record = &owner["result"];
+    assert_eq!(record["state"], "refused:access_withdrawn");
+    assert_eq!(record["outcome"], "access_withdrawn");
+    assert_eq!(record["requester_label"], "reserved:aft");
+    assert_eq!(
+        value("non-owner-withdraw-refusal.json")["code"],
+        "elicitation_not_owner"
+    );
+    assert_eq!(
+        value("notice-owner-withdrawn.json"),
+        serde_json::json!({
+            "elicitation_id":record["elicitation_id"],"purpose":"withdrawn",
+            "asker":{"scope_ref":"worker","scope_epoch":3},
+            "head":{"scope_ref":"head","scope_epoch":7},"fields":{}
+        })
+    );
+    assert_eq!(
+        value("settled-withdraw-reply.json")["result"],
+        value("access-escalated-phone-readback-reply.json")["result"]
+    );
 }
 
 fn served(files: &std::collections::BTreeMap<String, Vec<u8>>, name: &str) -> Value {
