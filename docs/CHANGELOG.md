@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5 (ck-cingulate), 0.5.5 (cingulate-vectors)
+
+- Add served phone vectors for Basal's three flow-decision approval cards.
+  Preserve the supplied request bytes and pin the phone-visible choices and labels.
+
 ## 0.5.5 (ck-cingulate), 0.5.4 (cingulate-vectors)
 
 - Serve escalated permission asks to the phone with state `pending`. Shipped
