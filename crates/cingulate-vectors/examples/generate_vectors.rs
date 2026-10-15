@@ -138,8 +138,8 @@ fn strip_danger(options: &Value) -> Value {
     )
 }
 
-/// The surface projection of the filed app card, as `ElicitationRecord::phone`
-/// builds it today, with `options` as given.
+/// Expected phone projection of ALF's TextEdit access card.
+/// `requesterName` is the admitted requester's human-readable display name.
 fn phone_record(options: Value) -> Value {
     json!({
         "elicitationId": "el_1",
@@ -160,7 +160,8 @@ fn phone_record(options: Value) -> Value {
         "target": {"kind": "app", "label": "TextEdit"},
         "expiresInMs": 60_000,
         "facts": [],
-        "requesterLabel": "reserved:cerebellum"
+        "requesterLabel": "reserved:cerebellum",
+        "requesterName": "Cerebellum"
     })
 }
 

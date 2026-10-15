@@ -55,13 +55,77 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 13] = [
     ("permissions.revoke", ManagementOperationKind::Mutate),
 ];
 
-const GENERIC_CONSENT_REQUESTERS: &[(&str, bool)] = &[
-    ("reserved:cerebellum", true),
-    ("reserved:plexus", true),
-    ("reserved:broca", true),
-    ("reserved:entorhinal", true),
-    ("direct", false),
+#[derive(Clone, Copy)]
+struct RequesterAdmission {
+    principal: &'static str,
+    requester_name: Option<&'static str>,
+    kinds: &'static [&'static str],
+    carries_agent: bool,
+}
+
+// Keep every requester admission beside its phone display name. `direct` is a
+// legacy generic-consent caller without a stable human identity, so it has no
+// display name and must never be shown as a raw principal.
+const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
+    RequesterAdmission {
+        principal: "reserved:cerebellum",
+        requester_name: Some("Cerebellum"),
+        kinds: &["consent"],
+        carries_agent: true,
+    },
+    RequesterAdmission {
+        principal: "reserved:plexus",
+        requester_name: Some("Plexus"),
+        kinds: &["consent"],
+        carries_agent: true,
+    },
+    RequesterAdmission {
+        principal: "reserved:broca",
+        requester_name: Some("Broca"),
+        kinds: &["consent"],
+        carries_agent: true,
+    },
+    RequesterAdmission {
+        principal: "reserved:entorhinal",
+        requester_name: Some("Entorhinal"),
+        kinds: &["consent"],
+        carries_agent: true,
+    },
+    RequesterAdmission {
+        principal: "direct",
+        requester_name: None,
+        kinds: &["consent"],
+        carries_agent: false,
+    },
+    RequesterAdmission {
+        principal: "reserved:basal",
+        requester_name: Some("Basal"),
+        kinds: &["flow_decision"],
+        carries_agent: false,
+    },
+    RequesterAdmission {
+        principal: "reserved:prefrontal-core",
+        requester_name: Some("Prefrontal"),
+        kinds: &["flow_install", "package"],
+        carries_agent: false,
+    },
+    RequesterAdmission {
+        principal: "reserved:aft",
+        requester_name: Some("AFT"),
+        kinds: &["tool_permission", "macos_permission"],
+        carries_agent: false,
+    },
 ];
+
+fn requester_admission(principal: &str) -> Option<&'static RequesterAdmission> {
+    REQUESTER_ADMISSIONS
+        .iter()
+        .find(|admission| admission.principal == principal)
+}
+
+fn requester_name(principal: &str) -> Option<&'static str> {
+    requester_admission(principal).and_then(|admission| admission.requester_name)
+}
 
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder("cingulate", env!("CARGO_PKG_VERSION"))
@@ -149,18 +213,11 @@ impl Stamp {
         json!([self.label(), self.bind_session]).to_string()
     }
     fn allowed_kind(&self) -> Option<&'static [&'static str]> {
-        if GENERIC_CONSENT_REQUESTERS
-            .iter()
-            .any(|(principal, _)| *principal == self.label())
-        {
-            return Some(&["consent"]);
-        }
-        match self.label() {
-            "reserved:prefrontal-core" => Some(&["flow_install", "package"]),
-            "reserved:basal" => Some(&["flow_decision"]),
-            "reserved:aft" => Some(&["tool_permission", "macos_permission"]),
-            _ => None,
-        }
+        requester_admission(self.label()).map(|admission| admission.kinds)
+    }
+    fn admits_kind(&self, kind: &str) -> bool {
+        self.allowed_kind()
+            .is_some_and(|kinds| kinds.contains(&kind))
     }
     fn refuse(&self) -> Refusal {
         Refusal::new(
@@ -510,7 +567,11 @@ impl Handler {
     fn project(&self, record: &ElicitationRecord, phone: bool) -> Value {
         let block = self.block_until(&record.elicitation_id);
         if phone {
-            record.phone(block)
+            let mut value = record.phone(block);
+            if let Some(name) = requester_name(&record.requester) {
+                value["requesterName"] = json!(name);
+            }
+            value
         } else {
             record.requester_wire(block)
         }
@@ -564,10 +625,8 @@ impl Handler {
         {
             return Err(stamp.refuse());
         }
-        let carrier = GENERIC_CONSENT_REQUESTERS
-            .iter()
-            .find(|(principal, _)| *principal == stamp.label())
-            .is_some_and(|(_, carries_agent)| *carries_agent);
+        let carrier =
+            requester_admission(stamp.label()).is_some_and(|admission| admission.carries_agent);
         let worker_head = if request.kind == "consent" && stamp.carried_agent_id.trim().is_empty() {
             match &stamp.scope {
                 Some(scope)
@@ -911,7 +970,11 @@ impl Handler {
                         .into_iter()
                         .map(|record| {
                             let key = (record.expires_at_ms, record.elicitation_id.clone());
-                            let value = record.phone(blocks.get(&record.elicitation_id).copied());
+                            let mut value =
+                                record.phone(blocks.get(&record.elicitation_id).copied());
+                            if let Some(name) = requester_name(&record.requester) {
+                                value["requesterName"] = json!(name);
+                            }
                             (key, value)
                         })
                         .collect();
@@ -923,6 +986,9 @@ impl Handler {
                                 record.wire(true, blocks.get(&record.elicitation_id).copied());
                             if let Some(label) = access_labels.get(&record.elicitation_id) {
                                 value["subject"]["label"] = json!(label);
+                            }
+                            if let Some(name) = requester_name(&record.identity.principal) {
+                                value["requesterName"] = json!(name);
                             }
                             cards.push(((i64::MAX, record.elicitation_id.clone()), value));
                         }
@@ -1078,6 +1144,53 @@ mod tests {
     use subc_protocol::{BindIdentity, RouteTarget};
 
     #[test]
+    fn every_admitted_requester_has_its_phone_display_name() {
+        let admissions: Vec<_> = REQUESTER_ADMISSIONS
+            .iter()
+            .map(|admission| {
+                (
+                    admission.principal,
+                    admission.requester_name,
+                    admission.kinds.to_vec(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            admissions,
+            [
+                ("reserved:cerebellum", Some("Cerebellum"), vec!["consent"]),
+                ("reserved:plexus", Some("Plexus"), vec!["consent"]),
+                ("reserved:broca", Some("Broca"), vec!["consent"]),
+                ("reserved:entorhinal", Some("Entorhinal"), vec!["consent"]),
+                ("direct", None, vec!["consent"]),
+                ("reserved:basal", Some("Basal"), vec!["flow_decision"]),
+                (
+                    "reserved:prefrontal-core",
+                    Some("Prefrontal"),
+                    vec!["flow_install", "package"]
+                ),
+                (
+                    "reserved:aft",
+                    Some("AFT"),
+                    vec!["tool_permission", "macos_permission"]
+                ),
+            ]
+        );
+        for admission in REQUESTER_ADMISSIONS {
+            if admission.principal == "direct" {
+                assert_eq!(requester_name(admission.principal), None);
+                continue;
+            }
+            assert!(
+                requester_name(admission.principal).is_some(),
+                "admitted principal {} lacks a phone display name",
+                admission.principal
+            );
+        }
+        assert_eq!(requester_name("unexpected"), None);
+    }
+
+    #[test]
     fn generic_consent_requesters_match_the_contract_operation_list() {
         let contract = include_str!("../../../docs/contracts/consent-requester-v2.md");
         let paragraph = contract
@@ -1091,9 +1204,12 @@ mod tests {
             .split('`')
             .filter(|name| name.starts_with("reserved:"))
             .collect();
-        let implemented: Vec<_> = GENERIC_CONSENT_REQUESTERS
+        let implemented: Vec<_> = REQUESTER_ADMISSIONS
             .iter()
-            .filter_map(|(name, requires_agent)| requires_agent.then_some(*name))
+            .filter(|admission| {
+                admission.kinds.contains(&"consent") && admission.principal != "direct"
+            })
+            .map(|admission| admission.principal)
             .collect();
         assert_eq!(
             documented,

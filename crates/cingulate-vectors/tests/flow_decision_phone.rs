@@ -177,7 +177,7 @@ fn flow_decision_phone_sha256sums_cover_every_file() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "026b466ad1d0f958cc64911113dca9ac28c4b099a959840b3833d7618e082dee"
+        "2453646c99c9e825217acada6a8f9813e72c3d10e00622b1d18ed9e831b50858"
     );
     let mut seen = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {

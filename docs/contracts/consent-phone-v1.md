@@ -81,6 +81,7 @@ nested payload keys are not recursively renamed.
 | `createdAtMs`, `expiresAtMs` | Integer Unix milliseconds. Dedup refresh may move expiry without changing id or creation time. |
 | `subject` | `{label: string, agentId?: string, headAgentId?: string}`. Missing agent fields are omitted, not null. |
 | `requesterLabel` | String requester label, e.g. `reserved:cerebellum`. Display data, not client-supplied identity. |
+| `requesterName` | Optional human-readable name for a requester principal Cingulate recognizes, such as `Cerebellum` or `Basal`. Omitted for `direct` and unknown principals; never use the raw principal as a fallback. `requesterLabel` remains the raw principal. |
 | `state` | `pending`, `answered`, `expired`, or `withdrawn`. |
 | `answeredAtMs` | Optional integer settlement time; omitted while pending. Expiry uses the card's deadline, not the later sweep time. |
 | `answeredChoiceId` | Optional string; present after an answer. Expired and withdrawn cards have no selected choice, even though expiry denies. |

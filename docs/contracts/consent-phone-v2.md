@@ -46,6 +46,9 @@ There is no `request` wrapper. Common permission fields:
 
 - `elicitationId` (`acc_` opaque id), `kind`, `createdAtMs`, `state`,
   `requesterLabel: "reserved:aft"`;
+- optional `requesterName`, the human-readable name of a recognized requester
+  principal (`AFT` for permission asks). It is omitted for `direct` or unknown
+  principals; the raw `requesterLabel` is unchanged and is never used as a fallback;
 - `asker: {scope_ref, scope_epoch, agent_id?}`, worker-only `head` of the same
   shape; these are daemon facts, not body identity;
 - `options` using v1 `{id,label,effect}`; labels are the answer ids and callers

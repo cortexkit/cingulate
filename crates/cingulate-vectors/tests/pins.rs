@@ -76,7 +76,7 @@ fn consent_manifest_hash_is_pinned() {
 fn danger_option_group_manifest_hash_is_pinned() {
     pin(
         "danger-option-group-v1",
-        "b12c50344340930b688ab2f4a1536960e079138d774958f10071ea05d22e2619",
+        "2f3fc873cb1d4d2f110f85a369b88efd753ed667fe7a6fe21ef9ec524fd8c171",
     );
 }
 

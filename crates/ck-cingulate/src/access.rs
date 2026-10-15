@@ -225,9 +225,6 @@ impl Handler {
         stamp: &Stamp,
         request: &AccessRequest,
     ) -> Result<AccessIdentity, Refusal> {
-        if stamp.label() != "reserved:aft" {
-            return Err(stamp.refuse());
-        }
         let scope = stamp.scope.as_ref().ok_or_else(|| {
             Refusal::new(
                 "access_not_alfonso",
@@ -300,6 +297,9 @@ impl Handler {
         let mut value = record.wire(phone, block);
         if phone {
             value["subject"]["label"] = json!(self.access_phone_label(record).await);
+            if let Some(name) = requester_name(&record.identity.principal) {
+                value["requesterName"] = json!(name);
+            }
         }
         value
     }
@@ -326,7 +326,11 @@ impl Handler {
         if method == "consent.request" && new_kind {
             return Some(
                 async {
-                    if stamp.label() != "reserved:aft" {
+                    let kind = params
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if !stamp.admits_kind(kind) {
                         return Err(stamp.refuse());
                     }
                     let scope = stamp.scope.as_ref().ok_or_else(|| {

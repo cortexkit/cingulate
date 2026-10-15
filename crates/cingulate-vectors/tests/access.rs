@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "ac1db6c995b01e64a1c53a35deb84cf412444422c9dd10e392e775441f7ad61c"
+        "3ea60d982ebc5c0893ab6fb72795f7905b5386e5cfd1fbc5e1175a644cd69df5"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -89,6 +89,8 @@ async fn access_escalated_phone_decodes_and_allow_once_settles() {
         // Shipped phones keep only cards whose state is exactly "pending".
         assert_eq!(card["state"], "pending");
         assert_eq!(card["subject"]["label"], "agent");
+        assert_eq!(card["requesterLabel"], "reserved:aft");
+        assert_eq!(card["requesterName"], "AFT");
         assert_eq!(
             card["options"],
             serde_json::json!([
@@ -114,6 +116,7 @@ async fn access_escalated_phone_decodes_and_allow_once_settles() {
     assert_eq!(answer["result"]["ok"], true);
     assert_eq!(answer["result"]["elicitation"]["state"], "settled");
     assert_eq!(answer["result"]["elicitation"]["outcome"], "allow_once");
+    assert_eq!(answer["result"]["elicitation"]["requesterName"], "AFT");
     let readback = served(&files, "readback");
     assert_eq!(readback["result"]["outcome"], "allow_once");
     assert_eq!(readback["result"]["answered_by"], "user");

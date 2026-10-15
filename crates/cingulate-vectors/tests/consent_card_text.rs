@@ -112,7 +112,7 @@ fn consent_card_text_sha256sums_cover_every_file() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "ac74238a79262de6b2641386e290e01d05bff7329555bb55c6e60f8c4655c43d"
+        "0d87d03f77ba3889357883ab88b1c5b036187eebc3db2f0d668eec49ea481c92"
     );
     let mut seen = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {

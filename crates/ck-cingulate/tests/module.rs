@@ -681,6 +681,7 @@ async fn request_settle_ack_and_withdraw_wire_contract() {
     )
     .await;
     assert_eq!(phone["requesterLabel"], "direct");
+    assert!(phone.get("requesterName").is_none());
     assert!(phone.get("binding").is_none() && phone.get("elicitation_id").is_none());
     assert_eq!(phone["elicitationId"], id);
     let owned = f.get(&id).await;
@@ -902,6 +903,7 @@ async fn allowlist_table_identity_and_order() {
                     json!({"elicitation_id":id}),
                 )
                 .await;
+                assert!(owner.get("requesterName").is_none());
                 assert_eq!(owner["subject"]["label"], expected_label);
                 if carried.is_empty() {
                     assert!(owner["subject"].get("agent_id").is_none());
@@ -922,15 +924,25 @@ async fn allowlist_table_identity_and_order() {
                     serde_json::from_str::<Value>(&stored).unwrap()["requester"],
                     label
                 );
+                let phone = ok(
+                    &f.handler,
+                    &operator(),
+                    "consent.get",
+                    json!({"elicitationId":id}),
+                )
+                .await;
+                assert_eq!(phone["requesterLabel"], label);
+                let expected_requester_name = match label {
+                    "reserved:cerebellum" => Some("Cerebellum"),
+                    "reserved:plexus" => Some("Plexus"),
+                    "reserved:entorhinal" => Some("Entorhinal"),
+                    "reserved:prefrontal-core" => Some("Prefrontal"),
+                    "reserved:basal" => Some("Basal"),
+                    _ => None,
+                };
                 assert_eq!(
-                    ok(
-                        &f.handler,
-                        &operator(),
-                        "consent.get",
-                        json!({"elicitationId":id})
-                    )
-                    .await["requesterLabel"],
-                    label
+                    phone.get("requesterName").and_then(Value::as_str),
+                    expected_requester_name
                 );
             }
         }

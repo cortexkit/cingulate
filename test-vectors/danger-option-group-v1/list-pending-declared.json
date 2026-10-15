@@ -46,6 +46,7 @@
         ],
         "prompt": "ALF wants to use TextEdit.",
         "requesterLabel": "reserved:cerebellum",
+        "requesterName": "Cerebellum",
         "scope": {
           "app": "com.apple.TextEdit"
         },

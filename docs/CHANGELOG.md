@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.6 (ck-cingulate), 0.5.6 (cingulate-vectors)
+
+- Add phone-only human names for Cingulate-admitted requester principals
+  (`reserved:basal`, `reserved:aft`, `reserved:plexus`, `reserved:cerebellum`,
+  `reserved:broca`, `reserved:entorhinal`, `reserved:prefrontal-core`); omit
+  `direct` and unknown ids. Preserve raw `requesterLabel` and requester/core
+  projection bytes. Regenerate affected phone vectors and pins.
+
 ## 0.5.5 (ck-cingulate), 0.5.5 (cingulate-vectors)
 
 - Add served phone vectors for Basal's three flow-decision approval cards.

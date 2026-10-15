@@ -53,7 +53,7 @@ fn phone_sha256sums_cover_and_match_every_file() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "b9e0f4169345550e3c057ae90295bb011e9b1a3c1d2db6c3830feb5ae7f665e6"
+        "30e4425d633ff6ea2ab2e1455ac83d2a6a2f47f6bc2f2ce744a8f600619d3b3f"
     );
     let mut seen = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
