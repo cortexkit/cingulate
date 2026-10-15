@@ -239,7 +239,7 @@ live), `access_head_gone`, `access_not_placed` (no surface can answer now),
 `access_withdrawn` (the call was cancelled), `access_declined` (with the note),
 `access_unavailable` (Cingulate unreachable, returned by AFT). A head answering an ask that is not
 its own worker's, or allowing one when `head_policy` is `not_held`, is refused to the relay and the
-ask stays pending.
+ask stays pending. The full code list and wire meanings are in the [tool-permission outcomes contract](../contracts/tool-permission-outcomes-v1.md).
 
 ## State machine
 

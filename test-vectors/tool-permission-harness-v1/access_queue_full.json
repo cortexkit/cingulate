@@ -1,0 +1,4 @@
+{
+  "code": "access_queue_full",
+  "message": "This session already has four waiting asks."
+}

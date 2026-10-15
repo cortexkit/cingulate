@@ -1,0 +1,27 @@
+{
+  "result": {
+    "answered_at_ms": 1000,
+    "args_hash": "hash",
+    "asker": {
+      "scope_epoch": 3,
+      "scope_ref": "worker"
+    },
+    "call_key": "harness-call-stale",
+    "created_at_ms": 900,
+    "default": "deny",
+    "elicitation_id": "acc_harness_stale",
+    "kind": "tool_permission",
+    "operation": "read",
+    "options": [],
+    "outcome": "access_stale",
+    "paths": [
+      "/tmp/file"
+    ],
+    "pattern": "/tmp/file",
+    "reason": "Inspect file",
+    "requester_label": "reserved:aft",
+    "state": "refused:access_stale",
+    "code": "access_stale",
+    "tool": "read"
+  }
+}
