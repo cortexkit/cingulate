@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.8 (ck-cingulate), 0.5.8 (cingulate-vectors)
+
+- Let the head that escalated a worker tool-permission ask deny it while the user
+  has not answered. Require the exact recorded escalator identity, never accept
+  a head grant after escalation, and retain first-settlement-wins, phone card
+  retraction and durable answer audit. Add served vectors without changing
+  existing scenario bytes.
+
 ## 0.5.7 (ck-cingulate), 0.5.7 (cingulate-vectors)
 
 - Let Prefrontal Core withdraw tool-permission asks whose recorded asker scope it

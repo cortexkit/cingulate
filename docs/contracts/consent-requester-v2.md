@@ -167,11 +167,23 @@ unchanged. Withdrawal, answer and head loss are serialized store transactions.
 Core answers from `reserved:prefrontal-core` using
 `{elicitation_id, answer, note?, answered_by: {agent_id, scope_ref, scope_epoch}}`.
 `answered_by` is closed and must exactly match the worker's stamped parent ref
-and epoch and its daemon-described agent. Only `pending:head` tool asks accept a
-relay. `allow_once` and `allow_scope` require `head_policy: "allow"`; `deny` and
+and epoch and its daemon-described agent. Normally only `pending:head` tool asks
+accept a relay. `allow_once` and `allow_scope` require `head_policy: "allow"`; `deny` and
 `escalate` do not. A refused relay records an attempt but leaves the ask pending.
 An optional note is one line, at most 160 characters. `escalate` changes the leg
 to `pending:user`, recording the note and newly offered user surface.
+
+While an escalated `tool_permission` ask remains `pending:user`, the head recorded
+in its accepted escalation attempt may relay `deny`, with the existing optional
+one-line, 160-character note. All three `answered_by` identity fields must match
+that escalator exactly; a different head gets `access_wrong_head`, and a record
+without a recorded escalator gets `access_wrong_leg`. Head grants and repeated
+escalation still get `access_wrong_leg`. This deny settles exactly like a user
+deny (`settled`, outcome `deny`, code `access_declined`, usual `settled` notice),
+but keeps `answered_by: "head"` and the ordered head escalation/denial attempts in
+the audit. It wakes awaiters and removes the phone card. The first user answer or
+head deny to settle wins in the same store transaction; the loser gets `conflict`.
+Generic consent and macOS cards do not gain a head-answer path.
 
 The user answers only through the v1 Callosum + `fed-phone:` phone bind rule,
 only in `pending:user`. No body field can enable that rule. The immediate store

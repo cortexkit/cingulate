@@ -428,5 +428,75 @@ pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<Str
         json!({"elicitation_id":id}),
     )
     .await;
+    let id = capture(
+        &mut files,
+        &handler,
+        &worker,
+        "escalator-open",
+        "consent.request",
+        json!({"kind":"tool_permission","call_key":"call-escalator-deny","tool":"read","operation":"read","paths":["/tmp/alternative"],"reason":"Inspect file","args_hash":"hash-escalator-deny","pattern":"/tmp/alternative","head_policy":"allow"}),
+    ).await["elicitation_id"].as_str().unwrap().to_owned();
+    capture(
+        &mut files, &handler, &core, "escalator-escalate", "consent.answer",
+        json!({"elicitation_id":id,"answer":"escalate","note":"Please decide","answered_by":head()}),
+    ).await;
+    for (name, answer) in [
+        ("escalator-allow-once", "allow_once"),
+        ("escalator-allow-scope", "allow_scope"),
+    ] {
+        capture(
+            &mut files,
+            &handler,
+            &core,
+            name,
+            "consent.answer",
+            json!({"elicitation_id":id,"answer":answer,"answered_by":head()}),
+        )
+        .await;
+    }
+    let mut other_head = head();
+    other_head.scope_ref = "other-head".into();
+    capture(
+        &mut files,
+        &handler,
+        &core,
+        "escalator-wrong-head",
+        "consent.answer",
+        json!({"elicitation_id":id,"answer":"deny","answered_by":other_head}),
+    )
+    .await;
+    capture(
+        &mut files, &handler, &core, "escalator-deny", "consent.answer",
+        json!({"elicitation_id":id,"answer":"deny","note":"Solved another way","answered_by":head()}),
+    ).await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "escalator-phone-pending",
+        "consent.list_pending",
+        json!({}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &worker,
+        "escalator-await",
+        "consent.await",
+        json!({"elicitation_id":id,"timeout_ms":0}),
+    )
+    .await;
+    let settled_body: String = db
+        .query_row(
+            "SELECT body_json FROM access_notices WHERE elicitation_id=?1 AND purpose='settled'",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    files.insert(
+        "notice-escalator-settled.json".into(),
+        settled_body.into_bytes(),
+    );
     files
 }

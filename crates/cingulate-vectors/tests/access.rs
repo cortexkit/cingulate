@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs};
 #[tokio::test]
 async fn permission_served_vectors_regenerate_byte_for_byte() {
     let generated = access::generate().await;
-    assert_eq!(generated.len(), 62);
+    assert_eq!(generated.len(), 79);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(access::root().join(&name)).unwrap(),
@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "39c773a57565fcfd70f2bc6143ad44f9189a8a892d03a91fca4ed166eb580273"
+        "ff742434343df6d5c03e5bc8bfdb4420c228106e45453eb775578189e7ae4fc4"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -39,7 +39,47 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
         .filter(|name| name != "SHA256SUMS")
         .collect();
     assert_eq!(actual, listed);
-    assert_eq!(listed.len(), 63);
+    assert_eq!(listed.len(), 80);
+}
+
+#[tokio::test]
+async fn escalator_vectors_pin_deny_only_and_phone_removal() {
+    let files = access::generate().await;
+    let value = |name: &str| -> Value { serde_json::from_slice(&files[name]).unwrap() };
+    for name in [
+        "escalator-allow-once-reply.json",
+        "escalator-allow-scope-reply.json",
+    ] {
+        let reply = value(name);
+        assert_eq!(reply["result"]["ok"], false);
+        assert_eq!(reply["result"]["code"], "access_wrong_leg");
+        assert_eq!(reply["result"]["elicitation"]["state"], "pending:user");
+    }
+    assert_eq!(
+        value("escalator-wrong-head-reply.json")["result"]["code"],
+        "access_wrong_head"
+    );
+    let deny = value("escalator-deny-reply.json");
+    assert_eq!(deny["result"]["ok"], true);
+    let record = &deny["result"]["elicitation"];
+    assert_eq!(record["state"], "settled");
+    assert_eq!(record["outcome"], "deny");
+    assert_eq!(record["code"], "access_declined");
+    assert_eq!(record["answered_by"], "head");
+    assert_eq!(record["note"], "Solved another way");
+    assert_eq!(value("escalator-await-reply.json")["result"], *record);
+    let pending = value("escalator-phone-pending-reply.json");
+    let pending = pending["result"]["records"].as_array().unwrap();
+    assert!(pending
+        .iter()
+        .all(|card| card["elicitationId"] != record["elicitation_id"]));
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["kind"], "macos_permission");
+    let notice = value("notice-escalator-settled.json");
+    assert_eq!(notice["elicitation_id"], record["elicitation_id"]);
+    assert_eq!(notice["purpose"], "settled");
+    assert_eq!(notice["fields"]["answered_by"], "head");
+    assert_eq!(notice["fields"]["outcome"], "deny");
 }
 
 #[tokio::test]

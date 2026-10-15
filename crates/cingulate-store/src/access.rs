@@ -72,6 +72,18 @@ impl AccessRecord {
     pub fn pending(&self) -> bool {
         self.state.starts_with("pending:")
     }
+    fn escalating_head(&self) -> Option<&ScopeIdentity> {
+        // The accepted escalation attempt durably records the verified head.
+        // A user-leg ask without that identity must not authorize a head answer.
+        self.attempts.iter().find_map(|attempt| {
+            (attempt.surface == "head"
+                && attempt.principal == "reserved:prefrontal-core"
+                && attempt.answer == "escalate"
+                && attempt.result == "accepted")
+                .then_some(attempt.answered_by.as_ref())
+                .flatten()
+        })
+    }
     pub fn answers(&self) -> Vec<&'static str> {
         if self.request.informational() || !self.pending() {
             return vec![];
@@ -406,7 +418,15 @@ impl ConsentStore {
             let code = if !record.pending() { Some("conflict") }
                 else if record.request.informational() { Some("elicitation_invalid_choice") }
                 else if answer.surface == "head" {
-                    if answer.principal != "reserved:prefrontal-core" || record.state != "pending:head" { Some("access_wrong_leg") }
+                    if answer.principal != "reserved:prefrontal-core" { Some("access_wrong_leg") }
+                    else if record.state == "pending:user" && answer.answer == "deny" && matches!(record.request, AccessRequest::ToolPermission { .. }) {
+                        match record.escalating_head() {
+                            Some(head) if answer.answered_by.as_ref() == Some(head) => None,
+                            Some(_) => Some("access_wrong_head"),
+                            None => Some("access_wrong_leg"),
+                        }
+                    }
+                    else if record.state != "pending:head" { Some("access_wrong_leg") }
                     else if answer.answered_by.as_ref() != record.identity.head.as_ref() { Some("access_wrong_head") }
                     else if matches!(answer.answer.as_str(), "allow_once" | "allow_scope") && record.request.head_policy() != Some("allow") { Some("access_head_not_held") }
                     else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None }

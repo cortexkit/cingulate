@@ -101,7 +101,7 @@ escalated ask, "for this task" included, applies to the worker's scope only, nev
   `reserved:prefrontal-core` with body `{elicitation_id, answer, note?, answered_by: {agent_id,
   scope_ref, scope_epoch}}`. Core fills `answered_by` from the calling head's own verified session,
   never from the prompt text, and refuses locally when that head is not the asking worker's
-  parent, so a wrong head gets a clear error at once. Cingulate accepts the relay only on a
+  parent, so a wrong head gets a clear error at once. Cingulate normally accepts the relay on a
   `tool_permission` card still in its head leg, only when `answered_by` matches the `parent` in
   the asking worker's stamp, and only with the answers the table allows for that `head_policy`.
   Core is already the authority that
@@ -113,6 +113,17 @@ escalated ask, "for this task" included, applies to the worker's scope only, nev
 
 The first answer to reach Cingulate's record wins (a compare-and-set in one store transaction).
 Cingulate then withdraws every other surface, and a late answer is refused with the settled answer.
+
+On a `tool_permission` ask escalated to `pending:user`, the escalating head may still
+relay `deny` with an optional note under the same limits, but never `allow_once`,
+`allow_scope` or another `escalate`. The relay's agent id, scope ref and epoch must
+exactly match the head recorded in the accepted escalation attempt; an older record
+without that identity authorizes no head answer. A successful deny settles with
+outcome `deny`, code `access_declined`, `answered_by: "head"` and the usual `settled`
+notice, wakes the worker and removes the phone card. The ordered escalation and
+denial attempts retain the relayed identity for audit. The user answer and head
+deny share one store transaction: whichever settles first wins and the loser gets
+`conflict`. Generic consent and informational macOS cards are unchanged.
 
 ## AFT's side of the record
 

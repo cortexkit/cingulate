@@ -83,6 +83,16 @@ Phone params remain `{elicitationId, choiceId, note?}`. `note` on permission ask
 is an optional single-line string of at most 160 characters. Unknown unrelated
 params do not create authority. Accepted user answers require `pending:user`.
 
+While an escalated `tool_permission` ask waits for the user, its recorded escalating
+head may deny it through the core relay, with an optional note under the existing
+limits, only when agent id, scope ref and epoch match the accepted escalation
+attempt. Missing escalator identity refuses conservatively; a head cannot grant
+after escalating. This settles as `deny` / `access_declined`, with `answeredBy: "head"`
+and the usual `settled` notice and ordered answer-attempt audit, wakes the
+worker and removes the card from pending lists. Whichever of the user answer and
+head deny settles first wins; the other gets the existing `conflict` reply. Generic
+consent and informational macOS cards are unchanged.
+
 | Attempt | Result |
 |---|---|
 | Valid user-leg tool answer | `{ok:true, alreadyAnswered:false, elicitation:Card}`. |

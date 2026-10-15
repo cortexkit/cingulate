@@ -1,0 +1,1 @@
+{"method":"consent.request","params":{"args_hash":"hash-escalator-deny","call_key":"call-escalator-deny","head_policy":"allow","kind":"tool_permission","operation":"read","paths":["/tmp/alternative"],"pattern":"/tmp/alternative","reason":"Inspect file","tool":"read"}}

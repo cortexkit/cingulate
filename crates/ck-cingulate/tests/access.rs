@@ -521,6 +521,321 @@ async fn escalation_carries_note_and_phone_rule_is_unchanged() {
     assert_eq!(f.get(&id).await["asker"]["scope_ref"], "Worker-session");
 }
 #[tokio::test]
+async fn escalated_head_deny_settles_wakes_worker_and_removes_phone_card() {
+    for policy in ["allow", "not_held"] {
+        let f = Fixture::new(true).await;
+        let asker = stamp("aft", ScopeKind::Worker);
+        let id = f.ask(&asker, request(Some(policy))).await;
+        assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+        assert_eq!(
+            f.ok(&phone(), "consent.list_pending", json!({})).await["records"][0]["elicitationId"],
+            id
+        );
+        let mut registered = f.hook.0.subscribe();
+        registered.borrow_and_update();
+        let h = f.handler.clone();
+        let wait_id = id.clone();
+        let waiting = tokio::spawn(async move {
+            h.handle_stamped(
+                &asker,
+                &serde_json::to_vec(&json!({
+                    "method":"consent.await",
+                    "params":{"elicitation_id":wait_id,"timeout_ms":5000}
+                }))
+                .unwrap(),
+            )
+            .await
+        });
+        registered.changed().await.unwrap();
+        let note = (policy == "allow").then_some("Solved another way");
+        let reply = f
+            .ok(
+                &core(),
+                "consent.answer",
+                json!({
+                    "elicitation_id":id,"answer":"deny","note":note,"answered_by":head()
+                }),
+            )
+            .await;
+        assert_eq!(reply["ok"], true);
+        let record = &reply["elicitation"];
+        assert_eq!(record["state"], "settled");
+        assert_eq!(record["outcome"], "deny");
+        assert_eq!(record["code"], "access_declined");
+        assert_eq!(record["answered_by"], "head");
+        assert_eq!(record["note"], json!(note));
+        let HandlerOutcome::Response(bytes) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), waiting)
+                .await
+                .unwrap()
+                .unwrap()
+        else {
+            panic!("await response required")
+        };
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap()["result"],
+            *record
+        );
+        assert_eq!(f.get(&id).await, *record);
+        assert_eq!(
+            f.ok(&phone(), "consent.list_pending", json!({})).await["records"],
+            json!([])
+        );
+        assert_eq!(
+            f.call(&phone(), "consent.get", json!({"elicitationId":id}))
+                .await
+                .unwrap_err(),
+            "elicitation_not_found"
+        );
+        assert_eq!(
+            f.phone_notices.0.lock().unwrap().last().unwrap()["kind"],
+            "retraction"
+        );
+        f.deliver().await;
+        let notices = f.runtime.notices.lock().unwrap();
+        let settled: Vec<_> = notices
+            .iter()
+            .filter(|notice| notice["purpose"] == "settled")
+            .collect();
+        assert_eq!(settled.len(), 1);
+        assert_eq!(
+            settled[0]["asker"],
+            json!({"scope_ref":"Worker-session","scope_epoch":3})
+        );
+        assert_eq!(settled[0]["fields"]["outcome"], "deny");
+        let audit = f.audit(&id);
+        assert_eq!(audit["attempts"].as_array().unwrap().len(), 2);
+        for (attempt, answer) in audit["attempts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(["escalate", "deny"])
+        {
+            assert_eq!(attempt["surface"], "head");
+            assert_eq!(attempt["principal"], "reserved:prefrontal-core");
+            assert_eq!(attempt["answered_by"], json!(head()));
+            assert_eq!(attempt["answer"], answer);
+            assert_eq!(attempt["result"], "accepted");
+        }
+    }
+}
+
+#[tokio::test]
+async fn escalated_head_cannot_allow_or_escalate_again() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+    for answer in ["allow_once", "allow_scope", "escalate"] {
+        let reply = f.relay(&id, answer).await;
+        assert_eq!(reply["ok"], false, "head answer {answer}");
+        assert_eq!(reply["code"], "access_wrong_leg");
+        assert_eq!(reply["elicitation"]["state"], "pending:user");
+    }
+    assert_eq!(f.audit(&id)["attempts"].as_array().unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn escalated_head_deny_requires_exact_recorded_escalator_and_valid_note() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+    for (key, value) in [
+        ("scope_ref", json!("other-head")),
+        ("scope_epoch", json!(8)),
+        ("agent_id", json!("other-agent")),
+    ] {
+        let mut by = json!(head());
+        by[key] = value;
+        let reply = f
+            .ok(
+                &core(),
+                "consent.answer",
+                json!({
+                    "elicitation_id":id,"answer":"deny","answered_by":by
+                }),
+            )
+            .await;
+        assert_eq!(reply["code"], "access_wrong_head");
+        assert_eq!(reply["elicitation"]["state"], "pending:user");
+    }
+    for note in ["x".repeat(161), "two\nlines".into()] {
+        assert_eq!(
+            f.call(
+                &core(),
+                "consent.answer",
+                json!({
+                    "elicitation_id":id,"answer":"deny","answered_by":head(),"note":note
+                })
+            )
+            .await
+            .unwrap_err(),
+            "elicitation_invalid_request"
+        );
+    }
+    assert_eq!(f.get(&id).await["state"], "pending:user");
+    let note = "x".repeat(160);
+    let reply = f
+        .ok(
+            &core(),
+            "consent.answer",
+            json!({
+                "elicitation_id":id,"answer":"deny","answered_by":head(),"note":note
+            }),
+        )
+        .await;
+    assert_eq!(reply["ok"], true);
+    assert_eq!(reply["elicitation"]["note"], note);
+}
+
+#[tokio::test]
+async fn user_leg_without_recorded_escalator_refuses_head_deny() {
+    let f = Fixture::new(true).await;
+    let own = f.ask(&stamp("aft", ScopeKind::Head), request(None)).await;
+    assert_eq!(f.relay(&own, "deny").await["code"], "access_wrong_leg");
+    let mut req = request(Some("allow"));
+    req["call_key"] = json!("legacy-escalation");
+    let id = f.ask(&stamp("aft", ScopeKind::Worker), req).await;
+    assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+    let mut legacy = f.audit(&id);
+    for attempts in [
+        json!([]),
+        json!([{
+            "surface":"head","principal":"reserved:prefrontal-core","at_ms":1000,
+            "answer":"escalate","note":null,"answered_by":null,"result":"accepted"
+        }]),
+        json!([{
+            "surface":"head","principal":"reserved:prefrontal-core","at_ms":1000,
+            "answer":"escalate","note":null,"answered_by":head(),"result":"access_wrong_head"
+        }]),
+    ] {
+        legacy["attempts"] = attempts;
+        rusqlite::Connection::open(&f.path)
+            .unwrap()
+            .execute(
+                "UPDATE access_asks SET record_json=?2 WHERE elicitation_id=?1",
+                rusqlite::params![id, serde_json::to_string(&legacy).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(f.relay(&id, "deny").await["code"], "access_wrong_leg");
+        assert_eq!(f.get(&id).await["state"], "pending:user");
+    }
+}
+
+#[tokio::test]
+async fn escalated_user_and_head_settlement_first_wins_in_both_orders() {
+    for head_first in [true, false] {
+        let f = Fixture::new(true).await;
+        let id = f
+            .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+            .await;
+        assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+        let operator = phone();
+        let user_answer = || {
+            f.ok(
+                &operator,
+                "consent.answer",
+                json!({
+                    "elicitationId":id,"choiceId":"allow_once","note":"User decision"
+                }),
+            )
+        };
+        let (winner, outcome, by, note) = if head_first {
+            (f.relay(&id, "deny").await, "deny", "head", Value::Null)
+        } else {
+            (
+                user_answer().await,
+                "allow_once",
+                "user",
+                json!("User decision"),
+            )
+        };
+        let committed = f.get(&id).await;
+        let loser = if head_first {
+            user_answer().await
+        } else {
+            f.relay(&id, "deny").await
+        };
+        assert_eq!(winner["ok"], true);
+        assert_eq!(loser["ok"], false);
+        assert_eq!(loser["code"], "conflict");
+        assert_eq!(
+            loser["elicitation"]["outcome"],
+            winner["elicitation"]["outcome"]
+        );
+        let record = f.get(&id).await;
+        assert_eq!(record, committed);
+        assert_eq!(record["outcome"], outcome);
+        assert_eq!(record["answered_by"], by);
+        assert_eq!(record["note"], note);
+        let audit = f.audit(&id);
+        assert_eq!(audit["attempts"].as_array().unwrap().len(), 3);
+        assert_eq!(audit["attempts"][1]["result"], "accepted");
+        assert_eq!(audit["attempts"][2]["result"], "conflict");
+        let db = rusqlite::Connection::open(&f.path).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM access_notices WHERE elicitation_id=?1 AND purpose='settled'",
+                [id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn concurrent_escalated_user_answer_and_head_deny_settle_once() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+    let operator = phone();
+    let (head, user) = tokio::join!(
+        f.relay(&id, "deny"),
+        f.ok(
+            &operator,
+            "consent.answer",
+            json!({"elicitationId":id,"choiceId":"allow_once"})
+        )
+    );
+    assert_ne!(head["ok"], user["ok"]);
+    let (winner, loser) = if head["ok"] == true {
+        (&head, &user)
+    } else {
+        (&user, &head)
+    };
+    assert_eq!(loser["code"], "conflict");
+    assert_eq!(
+        loser["elicitation"]["outcome"],
+        winner["elicitation"]["outcome"]
+    );
+    assert_eq!(
+        f.get(&id).await["outcome"],
+        winner["elicitation"]["outcome"]
+    );
+    let audit = f.audit(&id);
+    assert_eq!(audit["attempts"].as_array().unwrap().len(), 3);
+    assert_eq!(audit["attempts"][1]["result"], "accepted");
+    assert_eq!(audit["attempts"][2]["result"], "conflict");
+    let db = rusqlite::Connection::open(&f.path).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM access_notices WHERE elicitation_id=?1 AND purpose='settled'",
+            [id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn first_answer_wins_and_losing_attempts_are_audited() {
     let f = Fixture::new(true).await;
     let id = f.ask(&stamp("aft", ScopeKind::Head), request(None)).await;
