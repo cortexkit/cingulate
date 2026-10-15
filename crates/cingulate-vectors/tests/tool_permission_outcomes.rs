@@ -14,7 +14,25 @@ use support::corpus;
 struct CodeRow {
     code: String,
     emitters: BTreeSet<String>,
-    stage: String,
+    stages: BTreeSet<String>,
+}
+
+impl CodeRow {
+    /// Vector file stems this code needs, each with the stage whose shape it
+    /// holds. A two-stage code keeps `<code>` for the request-time refusal and
+    /// adds `<code>.outcome` for the `consent.await` outcome.
+    fn vector_stems(&self) -> BTreeMap<String, &'static str> {
+        let mut stems = BTreeMap::new();
+        if self.stages.contains("request") {
+            stems.insert(self.code.clone(), "request");
+            if self.stages.contains("outcome") {
+                stems.insert(format!("{}.outcome", self.code), "outcome");
+            }
+        } else {
+            stems.insert(self.code.clone(), "outcome");
+        }
+        stems
+    }
 }
 
 fn repository_root() -> PathBuf {
@@ -62,15 +80,21 @@ fn contract_rows() -> BTreeMap<String, CodeRow> {
             .split(',')
             .map(|emitter| emitter.trim().trim_matches('`').to_owned())
             .collect();
-        let stage = cells[3].trim_matches('`').to_owned();
-        assert!(stage == "outcome" || stage == "request", "{code}: {stage}");
+        let stages: BTreeSet<String> = cells[3]
+            .split(',')
+            .map(|stage| stage.trim().trim_matches('`').to_owned())
+            .collect();
+        assert!(!stages.is_empty(), "{code}: no stage");
+        for stage in &stages {
+            assert!(stage == "outcome" || stage == "request", "{code}: {stage}");
+        }
         assert!(
             rows.insert(
                 code.clone(),
                 CodeRow {
                     code: code.clone(),
                     emitters,
-                    stage,
+                    stages,
                 }
             )
             .is_none(),
@@ -78,6 +102,19 @@ fn contract_rows() -> BTreeMap<String, CodeRow> {
         );
     }
     rows
+}
+
+/// Every vector stem the contract requires, mapped to its code and stage.
+fn required_stems(rows: &BTreeMap<String, CodeRow>) -> BTreeMap<String, (String, &'static str)> {
+    let external = external_only_codes(rows);
+    rows.values()
+        .filter(|row| external.contains(&row.code))
+        .flat_map(|row| {
+            row.vector_stems()
+                .into_iter()
+                .map(|(stem, stage)| (stem, (row.code.clone(), stage)))
+        })
+        .collect()
 }
 
 fn external_only_codes(rows: &BTreeMap<String, CodeRow>) -> BTreeSet<String> {
@@ -112,27 +149,27 @@ fn sha256(bytes: &[u8]) -> String {
 #[test]
 fn contract_requires_vectors_for_non_cingulate_emitters() {
     let rows = contract_rows();
-    let expected = external_only_codes(&rows);
     let vectors = vector_files();
-    for code in expected {
+    for (stem, (code, stage)) in required_stems(&rows) {
         assert!(
-            vectors.contains_key(&code),
-            "missing vector for contract code {code}"
+            vectors.contains_key(&stem),
+            "missing {stage} vector {stem}.json for contract code {code}"
         );
     }
 }
 
 #[test]
 fn vector_filenames_and_json_codes_match_contract() {
-    let rows = contract_rows();
-    for (code, path) in vector_files() {
-        let row = rows
-            .get(&code)
-            .unwrap_or_else(|| panic!("vector filename {code}.json is not a contract code"));
+    let required = required_stems(&contract_rows());
+    for (stem, path) in vector_files() {
+        let (code, stage) = required.get(&stem).unwrap_or_else(|| {
+            panic!("vector filename {stem}.json is not a required contract vector")
+        });
+        let code = code.as_str();
         let bytes = fs::read(&path).unwrap();
         let value: Value = serde_json::from_slice(&bytes)
             .unwrap_or_else(|error| panic!("{} is not JSON: {error}", path.display()));
-        match row.stage.as_str() {
+        match *stage {
             "outcome" => {
                 assert_eq!(value["result"]["outcome"], code, "{}", path.display());
                 assert_eq!(value["result"]["code"], code, "{}", path.display());

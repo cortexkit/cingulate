@@ -4,6 +4,8 @@ This contract lists the terminal outcomes and request refusals for `tool_permiss
 
 Harness-only means a table row emitted by `thalamus-harness` or `aft`, but not by `cingulate`. Cingulate sends `session.notice` messages to the Prefrontal component (`reserved:prefrontal-core`), which waits for the ask's result and returns it to the requesting agent. A settled notice puts the outcome in `fields.outcome`. These messages never contain harness-only codes. Before adding such a code to them, update every component that reads `session.notice` so it recognizes the code. `access_withdrawn` also covers a cancelled call, provider withdrawal, or route close in the Thalamus harness. For both Cingulate and the Thalamus harness, `elicitation_invalid_request` is used for any request field that breaks the request limits.
 
+A code that can arise both ways lists both stages. Its vectors are `<code>.json` for the request-time refusal and `<code>.outcome.json` for the `consent.await` outcome; a code with one stage has only `<code>.json`, in that stage's shape.
+
 | code | when it happens (one line) | who emits it | when it arises |
 | --- | --- | --- | --- |
 | `allow_once` | The person chose to allow this invocation only. | `cingulate` | `outcome` |
@@ -11,7 +13,7 @@ Harness-only means a table row emitted by `thalamus-harness` or `aft`, but not b
 | `deny` | The person explicitly declined the ask. | `cingulate` | `outcome` |
 | `access_no_head` | A worker's ask is refused if it does not identify the session that started the worker, or if that session has ended. | `cingulate` | `request` |
 | `access_head_gone` | A pending head-side ask settles refused after its supervising head is confirmed gone. | `cingulate` | `outcome` |
-| `access_not_placed` | The harness cannot show the ask because there is no person or prompt surface, such as on a headless host; Cingulate's design reserves this meaning, but Cingulate does not emit it today. | `thalamus-harness` | `request` |
+| `access_not_placed` | The harness cannot show the ask because there is no person or prompt surface: refused at request time when the host is known up front not to ask, or settled from `consent.await` when that is found only later (no prompt surface attached, it detached mid-wait, or a host rule resolved the prompt without a person). Cingulate's design reserves this meaning, but Cingulate does not emit it today. | `thalamus-harness` | `request`, `outcome` |
 | `access_withdrawn` | The asker withdrew a pending ask. | `cingulate`, `thalamus-harness` | `outcome` |
 | `access_declined` | The person chose `deny`; this is the wire code for outcome `deny` and may carry the person's note. | `cingulate` | `outcome` |
 | `access_unavailable` | Cingulate cannot tell whether the parent session is available, or AFT cannot reach Cingulate. | `cingulate`, `aft` | `request` |
