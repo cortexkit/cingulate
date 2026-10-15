@@ -120,10 +120,10 @@ Cingulate then withdraws every other surface, and a late answer is refused with 
   or at the caller's wait bound. It reads only, so AFT may re-await at any time.
 - **Withdrawing:** when a held call ends without an answer (client cancelled, route closed, a run's
   scope ended, or the asker gone), AFT calls `consent.withdraw {elicitationId}`. The raising
-  principal may withdraw a card, or `reserved:prefrontal-core` may withdraw a `tool_permission`
-  ask whose recorded asker scope it owns only when the worker run is terminal (delivered,
-  failed or cancelled), never while the worker is parked waiting on the ask.
-  The record moves to `access_withdrawn`.
+  principal may withdraw a card, and `reserved:prefrontal-core` may withdraw a `tool_permission`
+  ask whose recorded asker scope it owns. Cingulate checks only that ownership. Prefrontal Core
+  withdraws only once a worker run is terminal (delivered, failed or cancelled), never while
+  the worker is parked waiting on the ask. The record moves to `access_withdrawn`.
 - **After an AFT restart:** AFT re-sends `consent.request` with the persisted `call_key`; the same
   `call_key` returns the same ask, and AFT awaits or withdraws it.
 
