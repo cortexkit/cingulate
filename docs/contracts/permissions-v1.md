@@ -77,9 +77,10 @@ Vectors: [`provider-revoke-revoked`](../../test-vectors/permissions-v1/provider-
 ### Provider admission
 
 Revoking is operator authority. A provider admits `permissions.list` and
-`permissions.revoke` only from `reserved:cingulate` and from the local operator's
-`direct` route, and refuses every other caller with
-`permissions_operator_required`
+`permissions.revoke` only from `reserved:cingulate`, and refuses every other
+caller, `direct` included, with `permissions_operator_required`. A `direct`
+route proves only that the caller runs as the operator's user account, which an
+agent's shell does too, so the operator reaches a provider through Cingulate
 ([`provider-revoke-refused-agent`](../../test-vectors/permissions-v1/provider-revoke-refused-agent.json)).
 An agent's own narrower self-revoke operations, where a provider has them, are
 separate operations and are not part of this capability.
