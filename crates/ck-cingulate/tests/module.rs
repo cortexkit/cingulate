@@ -466,7 +466,12 @@ async fn manifest_envelope_health_and_unknown_ops() {
     let capabilities = manifest.capabilities.unwrap();
     assert_eq!(
         capabilities.provides,
-        ["consent/v1", "agent-run-scopes/v1", "consent-card-text/v1"]
+        [
+            "consent/v1",
+            "agent-run-scopes/v1",
+            "consent-card-text/v1",
+            "consent-option-group/v1"
+        ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
     let ProviderRole::ManagementSurface {
@@ -618,7 +623,12 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
     assert!(stamp.carried_agent_id.is_empty());
     assert_eq!(
         ck_cingulate::manifest().capabilities.unwrap().provides,
-        ["consent/v1", "agent-run-scopes/v1", "consent-card-text/v1"]
+        [
+            "consent/v1",
+            "agent-run-scopes/v1",
+            "consent-card-text/v1",
+            "consent-option-group/v1"
+        ]
     );
 }
 

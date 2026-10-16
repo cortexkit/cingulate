@@ -4,7 +4,8 @@
 //! Usage: `cargo run -p cingulate-decode --example check_consent_request -- <file-or-dir>...`
 //!
 //! A file may hold the bare request params or the whole `{"method", "params"}`
-//! envelope. A directory is read one level deep, `*.json` files only. Envelopes
+//! envelope, or a contract case with `{"method", "request"}`. A directory is
+//! read one level deep, `*.json` files only. Envelopes
 //! whose method is not `consent.request`, and replies (a top-level `result`,
 //! `code` or `error`), are reported as skipped rather than decoded, so a vector
 //! directory that also holds replies and other operations can be passed as is.
@@ -74,10 +75,12 @@ fn check(file: &Path) -> String {
         Err(error) => return format!("unreadable: not JSON: {error}"),
     };
     let params = match value.get("method") {
-        Some(Value::String(method)) if method == "consent.request" => match value.get("params") {
-            Some(params) => params.clone(),
-            None => return "refused: envelope has no params".into(),
-        },
+        Some(Value::String(method)) if method == "consent.request" => {
+            match value.get("params").or_else(|| value.get("request")) {
+                Some(params) => params.clone(),
+                None => return "refused: envelope has no params".into(),
+            }
+        }
         Some(Value::String(method)) => return format!("skipped: method is {method}"),
         Some(_) => return "refused: method is not a string".into(),
         None if ["result", "code", "error"]

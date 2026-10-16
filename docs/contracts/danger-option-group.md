@@ -1,9 +1,15 @@
 # Danger option group on consent cards
 
-Status: contract for `consent/v1`, not yet implemented. Vectors:
+Status: live in `ck-cingulate` 0.6.0 (`cingulate-decode` 0.5.0) on `consent/v1`. Vectors:
 [`test-vectors/danger-option-group-v1/`](../../test-vectors/danger-option-group-v1/README.md).
 Consumers: Cerebellum (files cards with danger options), the phone app and other
 answering surfaces (declare the feature), cingulate (enforces it).
+
+Requesters discover support through the module manifest's `capabilities.provides`
+list: `consent-option-group/v1` advertises this contract, following the existing
+`consent-card-text/v1` capability pattern. The files under
+`test-vectors/danger-option-group-v1/` remain byte-for-byte unchanged to preserve
+their hashes; their README describes the pre-implementation status when written.
 
 The key words MUST, MUST NOT and MAY are normative.
 
@@ -79,6 +85,12 @@ Until the cutover the phone reaches these through core's legacy relay as
 `elicitation.list_pending`, `elicitation.get` and `elicitation.answer`; the same
 rule applies there. Feature names the receiver does not know are ignored.
 `clientFeatures` that is not an array of strings is `elicitation_invalid_request`.
+
+`consent.list_pending` returns a `revision` token that a surface can send back as
+`if_revision` to skip unchanged lists. This token differs depending on whether
+`option-group` was declared: a conditional poll after changing that declaration
+returns the newly visible options instead of reusing a cached list that hid or
+included the danger options.
 
 ```json
 {"elicitationId": "el_1", "clientFeatures": ["option-group"]}

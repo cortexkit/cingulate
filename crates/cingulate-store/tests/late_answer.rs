@@ -150,12 +150,14 @@ fn pinned_record(id: &str, state: State, choice: Option<&str>, at: i64) -> Elici
             label: "Allow for 30 minutes".into(),
             effect: "grant".into(),
             detail: None,
+            group: None,
         },
         ConsentOption {
             id: "deny".into(),
             label: "Not now".into(),
             effect: "decline".into(),
             detail: None,
+            group: None,
         },
     ];
     ElicitationRecord {

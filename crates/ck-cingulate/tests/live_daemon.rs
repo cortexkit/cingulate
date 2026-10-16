@@ -585,7 +585,12 @@ async fn live_daemon_catalog_contains_consent_manifest() {
     let capabilities = module.capabilities.as_ref().unwrap();
     assert_eq!(
         capabilities.provides,
-        ["consent/v1", "agent-run-scopes/v1", "consent-card-text/v1"]
+        [
+            "consent/v1",
+            "agent-run-scopes/v1",
+            "consent-card-text/v1",
+            "consent-option-group/v1"
+        ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
     assert_eq!(module.roles.len(), 1);

@@ -16,6 +16,72 @@ fn consent() -> Value {
     .unwrap()
 }
 
+#[test]
+fn danger_group_rules_preserve_refusal_precedence_and_decline_only_cards() {
+    let mut body = consent();
+    body["options"][1]["group"] = json!("danger");
+    body["on_expiry"] = json!("allow");
+    refusal(
+        body.clone(),
+        "elicitation_fail_closed_required",
+        FAIL_CLOSED,
+    );
+    body["on_expiry"] = json!("deny");
+    body["urgency"] = json!("invalid");
+    refusal(
+        body.clone(),
+        "elicitation_fail_closed_required",
+        "the default option cannot be in the danger group",
+    );
+    body["options"][1]["group"] = json!("caution");
+    serde_refusal(body, "unknown variant `caution`, expected `danger`");
+
+    let mut body = consent();
+    body["options"][0]["group"] = json!("danger");
+    body["urgency"] = json!("invalid");
+    invalid(
+        body.clone(),
+        "at least one grant option must be outside the danger group",
+    );
+    body["options"][0]["effect"] = json!("decline");
+    body["urgency"] = json!("normal");
+    ConsentRequest::decode(body).unwrap();
+}
+
+#[test]
+fn danger_options_remain_in_requested_schema_and_request_equality() {
+    let case: Value = serde_json::from_str(include_str!(
+        "../../../test-vectors/danger-option-group-v1/file-card.json"
+    ))
+    .unwrap();
+    let mut body = case["request"].clone();
+    body["requestedSchema"] = json!({"properties":{"decision":{"enum":[
+        "app_30m", "app_always", "deny", "computer_30m", "computer_always"
+    ]}}});
+    let full = ConsentRequest::decode(body.clone()).unwrap();
+    body["requestedSchema"]["properties"]["decision"]["enum"] =
+        json!(["app_30m", "app_always", "deny"]);
+    invalid(body.clone(), SCHEMA);
+    body.as_object_mut().unwrap().remove("requestedSchema");
+    body["options"][3].as_object_mut().unwrap().remove("group");
+    assert_ne!(full, ConsentRequest::decode(body).unwrap());
+}
+
+#[test]
+fn option_group_is_an_optional_closed_string_enum() {
+    for group in [
+        json!(null),
+        json!(false),
+        json!(1),
+        json!(["danger"]),
+        json!({"danger": null}),
+    ] {
+        let mut body = consent();
+        body["options"][0]["group"] = group;
+        serde_refusal(body, "expected a string");
+    }
+}
+
 fn flow_install() -> Value {
     let mut body = consent();
     body["kind"] = json!("flow_install");

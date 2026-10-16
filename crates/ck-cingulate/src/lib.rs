@@ -13,7 +13,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use cingulate_decode::{ConsentRequest, Refusal};
+use cingulate_decode::{ConsentRequest, OptionGroup, Refusal};
 use cingulate_store::{
     storage_descriptor, AnswerOutcome, ConsentStore, ElicitationRecord, RequestIdentity,
     ScopeIdentity, State, StorageDescriptor, Subject,
@@ -134,6 +134,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent/v1".into(),
                 "agent-run-scopes/v1".into(),
                 "consent-card-text/v1".into(),
+                "consent-option-group/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -370,6 +371,26 @@ type Reply = Result<Value, Refusal>;
 
 fn invalid(message: impl Into<String>) -> Refusal {
     Refusal::new("elicitation_invalid_request", message)
+}
+
+fn option_group_declared(params: &Value) -> Result<bool, Refusal> {
+    let Some(features) = params.get("clientFeatures") else {
+        return Ok(false);
+    };
+    let features = features
+        .as_array()
+        .filter(|features| features.iter().all(Value::is_string))
+        .ok_or_else(|| invalid("clientFeatures must be an array of strings"))?;
+    Ok(features.iter().any(|feature| feature == "option-group"))
+}
+
+fn surface_options(mut value: Value, option_group: bool) -> Value {
+    if !option_group {
+        if let Some(options) = value.get_mut("options").and_then(Value::as_array_mut) {
+            options.retain(|option| option.get("group").and_then(Value::as_str) != Some("danger"));
+        }
+    }
+    value
 }
 fn store_error(error: cingulate_store::Error) -> Refusal {
     Refusal::new(error.code(), error.to_string())
@@ -757,6 +778,13 @@ impl Handler {
             }
             _ => stamp.authorize_owner()?,
         }
+        let option_group = if matches!(method, "consent.answer" | "consent.list_pending")
+            || (method == "consent.get" && stamp.operator_surface)
+        {
+            option_group_declared(&params)?
+        } else {
+            false
+        };
         if method == "consent.request" {
             let request = ConsentRequest::decode(params)?;
             let identity = self.identity(stamp, &request).await?;
@@ -842,6 +870,25 @@ impl Handler {
             .as_ref()
             .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?;
         let now = self.inner.options.clock.now_ms();
+        if method == "consent.answer" && !option_group {
+            if let Some(record) = store
+                .get(id.expect("answer id"), now)
+                .map_err(store_error)?
+            {
+                let choice = choice.expect("choice");
+                if record
+                    .request
+                    .options
+                    .iter()
+                    .any(|option| option.id == choice && option.group == Some(OptionGroup::Danger))
+                {
+                    return Err(Refusal::new(
+                        "elicitation_option_group_required",
+                        format!("choice {choice} is in the danger option group; declare clientFeatures option-group"),
+                    ));
+                }
+            }
+        }
         let mut events = if matches!(
             method,
             "consent.get"
@@ -865,7 +912,7 @@ impl Handler {
                         .ok_or_else(|| {
                             Refusal::new("elicitation_not_found", "elicitation not found")
                         })?;
-                    self.project(&record, true)
+                    surface_options(self.project(&record, true), option_group)
                 }
                 "consent.get" => self.project(
                     &store
@@ -948,13 +995,19 @@ impl Handler {
                                 .map(|until| (id.clone(), until))
                         })
                         .collect();
-                    let revision = format!(
+                    let mut revision = format!(
                         "pending-v1:{}:{:x}",
                         store.pending_revision().map_err(store_error)?,
                         Sha256::digest(
                             serde_json::to_vec(&blocks).expect("deadline serialization")
                         )
                     );
+                    // Switching option-group support changes the visible options,
+                    // so a cached list with danger options hidden cannot stand in
+                    // for a fresh list that includes them (or vice versa).
+                    if option_group {
+                        revision.push_str(":option-group");
+                    }
                     if after.is_none()
                         && params.get("if_revision").and_then(Value::as_str) == Some(&revision)
                     {
@@ -975,7 +1028,7 @@ impl Handler {
                             if let Some(name) = requester_name(&record.requester) {
                                 value["requesterName"] = json!(name);
                             }
-                            (key, value)
+                            (key, surface_options(value, option_group))
                         })
                         .collect();
                     for record in store.access_pending().map_err(store_error)? {
@@ -1033,13 +1086,13 @@ impl Handler {
                     match mutation.value {
                         AnswerOutcome::NotFound => json!({"ok":false,"code":"not_found"}),
                         AnswerOutcome::Conflict(record) => {
-                            json!({"ok":false,"code":"conflict","elicitation":self.project(&record, true)})
+                            json!({"ok":false,"code":"conflict","elicitation":surface_options(self.project(&record, true), option_group)})
                         }
                         AnswerOutcome::Answered(record) => {
-                            json!({"ok":true,"alreadyAnswered":false,"elicitation":self.project(&record, true)})
+                            json!({"ok":true,"alreadyAnswered":false,"elicitation":surface_options(self.project(&record, true), option_group)})
                         }
                         AnswerOutcome::AlreadyAnswered(record) => {
-                            json!({"ok":true,"alreadyAnswered":true,"elicitation":self.project(&record, true)})
+                            json!({"ok":true,"alreadyAnswered":true,"elicitation":surface_options(self.project(&record, true), option_group)})
                         }
                     }
                 }

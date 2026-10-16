@@ -114,3 +114,27 @@ fn corpus_refused_bodies_match_verdicts() {
         );
     }
 }
+
+#[test]
+fn danger_option_group_requests_match_pinned_decoder_verdicts() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test-vectors/danger-option-group-v1");
+    for name in [
+        "file-card",
+        "refuse-danger-default",
+        "refuse-only-danger-grants",
+        "refuse-unknown-group",
+    ] {
+        let case: Value =
+            serde_json::from_slice(&fs::read(root.join(format!("{name}.json"))).unwrap()).unwrap();
+        let decoded = ConsentRequest::decode(case["request"].clone());
+        if let Some(expected) = case.get("error") {
+            let error = decoded.expect_err(name);
+            assert_eq!(error.code, expected["code"], "{name}");
+            assert_eq!(error.message, expected["message"], "{name}");
+        } else {
+            let stored = serde_json::to_value(decoded.expect(name)).unwrap();
+            assert_eq!(stored["options"], case["request"]["options"], "{name}");
+        }
+    }
+}

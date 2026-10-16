@@ -256,35 +256,12 @@ fn danger_answer_needs_the_declared_feature() {
     assert_eq!(options(&answered["reply"]["elicitation"]), &filed);
 }
 
-/// The undeclared replies are what today's handler already serves for the same
-/// card filed without its danger options, so the contract changes nothing else
-/// in the surface projection. Today's decoder refuses the `group` field itself,
-/// which is the behavior a requester sees from a cingulate without this feature.
+/// Undeclared surfaces see exactly the projection of a card filed without its
+/// danger options, including every field outside the option list.
 #[tokio::test]
-async fn undeclared_replies_match_todays_projection_of_the_card_without_danger_options() {
-    use ck_cingulate::Stamp;
-    use support::Fixture;
-
+async fn undeclared_replies_match_plain_card_projection_byte_for_byte() {
     let cases = cases(DANGER);
     let filed = cases["file-card"]["request"].clone();
-    let fixture = Fixture::open(None).await;
-    fixture.clock.set(1_000_000);
-    let cerebellum = Stamp {
-        principal: Some("reserved:cerebellum".into()),
-        bind_session: "cerebellum-consent".into(),
-        carried_agent_id: "agent-alf".into(),
-        ..Stamp::default()
-    };
-    let refused = fixture
-        .call(&cerebellum, "consent.request", filed.clone())
-        .await
-        .unwrap_err();
-    assert_eq!(refused["code"], "elicitation_invalid_request");
-    assert!(refused["message"]
-        .as_str()
-        .unwrap()
-        .contains("unknown field `group`"));
-
     let mut stripped = filed;
     let kept: Vec<Value> = options(&stripped)
         .iter()
@@ -292,39 +269,340 @@ async fn undeclared_replies_match_todays_projection_of_the_card_without_danger_o
         .cloned()
         .collect();
     stripped["options"] = Value::Array(kept);
-    let id = fixture.request(&cerebellum, stripped).await;
-    let phone = support::operator();
-    let rename = |mut value: Value, pointer: &str| {
-        let slot = value.pointer_mut(pointer).unwrap();
-        assert_eq!(slot.as_str(), Some(id.as_str()));
-        *slot = Value::String("el_1".into());
-        value
-    };
-    let mut listed = fixture
-        .ok(&phone, "consent.list_pending", serde_json::json!({}))
+    let (full, full_id) = danger_fixture(&cases).await;
+    let plain = support::Fixture::open(None).await;
+    plain.clock.set(1_000_000);
+    let plain_id = plain
+        .request(&danger_stamp(&cases["file-card"]), stripped)
         .await;
-    assert!(listed["revision"]
-        .as_str()
-        .is_some_and(|value| !value.is_empty()));
-    // danger-option-group-v1 pins replies from before conditional polling.
-    // Require but exclude only the added revision field from this comparison;
-    // consent-phone-v1 separately pins the complete reply including revision.
-    listed.as_object_mut().unwrap().remove("revision");
+    for name in ["list-pending-undeclared", "get-undeclared"] {
+        let full_reply = danger_call(&full, &full_id, &cases[name]).await.unwrap();
+        let plain_reply = danger_call(&plain, &plain_id, &cases[name]).await.unwrap();
+        let full_reply = danger_projection(full_reply, &full_id);
+        let plain_reply = danger_projection(plain_reply, &plain_id);
+        assert_eq!(jcs(&full_reply), jcs(&plain_reply), "{name}");
+        assert_eq!(jcs(&full_reply), jcs(&cases[name]["reply"]), "{name}");
+    }
+}
+
+fn danger_stamp(case: &Value) -> ck_cingulate::Stamp {
+    let route = &case["route"];
+    ck_cingulate::Stamp {
+        principal: route["principal"].as_str().map(str::to_owned),
+        carried_agent_id: route["carried_agent_id"]
+            .as_str()
+            .unwrap_or_default()
+            .into(),
+        operator_surface: route["operator_surface"].as_bool().unwrap_or(false),
+        bind_session: "danger-contract".into(),
+        ..Default::default()
+    }
+}
+
+fn rename_danger_id(value: &mut Value, from: &str, to: &str) {
+    match value {
+        Value::String(text) if text == from => *text = to.into(),
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(|v| rename_danger_id(v, from, to)),
+        Value::Object(values) => values
+            .values_mut()
+            .for_each(|v| rename_danger_id(v, from, to)),
+        _ => {}
+    }
+}
+
+fn danger_projection(mut reply: Value, id: &str) -> Value {
+    rename_danger_id(&mut reply, id, "el_1");
+    if let Some(records) = reply.get("records") {
+        assert!(records.is_array());
+        // The danger corpus predates the revision field used for conditional
+        // polling. Require it here, but exclude it from the older byte comparison;
+        // test-vectors/consent-phone-v1 separately fixes its complete wire bytes.
+        assert!(reply["revision"].as_str().is_some_and(|v| !v.is_empty()));
+        reply.as_object_mut().unwrap().remove("revision");
+    }
+    reply
+}
+
+async fn danger_call(fixture: &support::Fixture, id: &str, case: &Value) -> Result<Value, Value> {
+    let mut params = case["request"].clone();
+    rename_danger_id(&mut params, "el_1", id);
+    fixture
+        .call(
+            &danger_stamp(case),
+            case["method"].as_str().unwrap(),
+            params,
+        )
+        .await
+}
+
+fn assert_danger_case(name: &str, case: &Value, outcome: Result<Value, Value>, id: &str) {
+    let mut actual = case.clone();
+    match outcome {
+        Ok(reply) => actual["reply"] = danger_projection(reply, id),
+        Err(error) => actual["error"] = error,
+    }
     assert_eq!(
-        rename(listed, "/records/0/elicitationId"),
-        cases["list-pending-undeclared"]["reply"]
+        jcs(&actual),
+        fs::read_to_string(corpus(DANGER).join(format!("{name}.jcs"))).unwrap(),
+        "{name} handler bytes"
     );
-    let got = fixture
+}
+
+async fn danger_fixture(cases: &BTreeMap<String, Value>) -> (support::Fixture, String) {
+    let fixture = support::Fixture::open(None).await;
+    fixture.clock.set(1_000_000);
+    let filed = &cases["file-card"];
+    let reply = danger_call(&fixture, "el_1", filed).await.unwrap();
+    let id = reply["elicitation_id"].as_str().unwrap().to_owned();
+    assert_danger_case("file-card", filed, Ok(reply), &id);
+    assert_eq!(
+        serde_json::to_value(fixture.stored_record(&id).request).unwrap()["options"],
+        filed["request"]["options"]
+    );
+    (fixture, id)
+}
+
+#[tokio::test]
+async fn danger_filing_refusals_match_handler_byte_for_byte() {
+    let cases = cases(DANGER);
+    let fixture = support::Fixture::open(None).await;
+    fixture.clock.set(1_000_000);
+    for name in [
+        "refuse-danger-default",
+        "refuse-only-danger-grants",
+        "refuse-unknown-group",
+    ] {
+        let rows = fixture.rows();
+        let notices = fixture.payloads();
+        let outcome = danger_call(&fixture, "el_1", &cases[name]).await;
+        assert_danger_case(name, &cases[name], outcome, "el_1");
+        assert_eq!(fixture.rows(), rows, "{name} wrote records");
+        assert_eq!(fixture.payloads(), notices, "{name} notified");
+    }
+}
+
+#[tokio::test]
+async fn danger_surface_reads_match_handler_byte_for_byte() {
+    let cases = cases(DANGER);
+    let (fixture, id) = danger_fixture(&cases).await;
+    for name in [
+        "get-declared",
+        "get-undeclared",
+        "list-pending-declared",
+        "list-pending-undeclared",
+    ] {
+        let rows = fixture.rows();
+        let outcome = danger_call(&fixture, &id, &cases[name]).await;
+        assert_danger_case(name, &cases[name], outcome, &id);
+        assert_eq!(fixture.rows(), rows, "{name} wrote records");
+    }
+}
+
+#[tokio::test]
+async fn danger_answers_match_handler_byte_for_byte() {
+    let cases = cases(DANGER);
+    let (fixture, id) = danger_fixture(&cases).await;
+    fixture.clock.set(1_005_000);
+    let rows = fixture.rows();
+    let notices = fixture.payloads();
+    let refused = &cases["answer-danger-undeclared"];
+    assert_danger_case(
+        "answer-danger-undeclared",
+        refused,
+        danger_call(&fixture, &id, refused).await,
+        &id,
+    );
+    assert_eq!(fixture.rows(), rows);
+    assert_eq!(fixture.payloads(), notices);
+    let declared = &cases["answer-danger-declared"];
+    assert_danger_case(
+        "answer-danger-declared",
+        declared,
+        danger_call(&fixture, &id, declared).await,
+        &id,
+    );
+    let rows = fixture.rows();
+    let notices = fixture.payloads();
+    assert_danger_case(
+        "answer-danger-undeclared",
+        refused,
+        danger_call(&fixture, &id, refused).await,
+        &id,
+    );
+    assert_eq!(fixture.rows(), rows, "settled refusal wrote records");
+    assert_eq!(fixture.payloads(), notices, "settled refusal notified");
+}
+
+#[tokio::test]
+async fn danger_feature_declarations_are_typed_and_poll_revisions_are_projection_specific() {
+    use serde_json::json;
+
+    let cases = cases(DANGER);
+    let (fixture, id) = danger_fixture(&cases).await;
+    let phone = support::operator();
+    for features in [
+        json!(null),
+        json!("option-group"),
+        json!(["option-group", 1]),
+    ] {
+        for method in ["consent.get", "consent.list_pending", "consent.answer"] {
+            let rows = fixture.rows();
+            let notices = fixture.payloads();
+            let error = fixture
+                .call(
+                    &phone,
+                    method,
+                    json!({
+                        "elicitationId": id, "choiceId": "app_30m", "clientFeatures": features
+                    }),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error["code"], "elicitation_invalid_request", "{method}");
+            assert_eq!(fixture.rows(), rows);
+            assert_eq!(fixture.payloads(), notices);
+        }
+    }
+    let unknown = fixture
         .ok(
             &phone,
             "consent.get",
-            serde_json::json!({ "elicitationId": id }),
+            json!({
+                "elicitationId": id, "clientFeatures": ["future-feature"]
+            }),
+        )
+        .await;
+    assert_eq!(options(&unknown).len(), 3);
+    let plain = fixture.ok(&phone, "consent.list_pending", json!({})).await;
+    let declared = fixture.ok(&phone, "consent.list_pending", json!({
+        "clientFeatures": ["future-feature", "option-group"], "if_revision": plain["revision"]
+    })).await;
+    assert_eq!(options(&declared["records"][0]).len(), 5);
+    assert_ne!(plain["revision"], declared["revision"]);
+    let unchanged = fixture
+        .ok(
+            &phone,
+            "consent.list_pending",
+            json!({
+                "clientFeatures": ["option-group"], "if_revision": declared["revision"]
+            }),
         )
         .await;
     assert_eq!(
-        rename(got, "/elicitationId"),
-        cases["get-undeclared"]["reply"]
+        unchanged,
+        json!({"unchanged": true, "revision": declared["revision"]})
     );
+    let plain_again = fixture
+        .ok(
+            &phone,
+            "consent.list_pending",
+            json!({
+                "if_revision": declared["revision"]
+            }),
+        )
+        .await;
+    assert_eq!(plain_again, plain);
+}
+
+#[tokio::test]
+async fn danger_answer_refusal_precedes_expiry_and_console_checks_without_writes() {
+    let cases = cases(DANGER);
+    let fixture = support::Fixture::open(Some("local")).await;
+    fixture.clock.set(1_000_000);
+    let mut body = cases["file-card"]["request"].clone();
+    body["at_console"] = serde_json::json!("local");
+    let id = fixture
+        .request(&danger_stamp(&cases["file-card"]), body)
+        .await;
+    fixture.clock.set(1_060_001);
+    let rows = fixture.rows();
+    let notices = fixture.payloads();
+    let refused = &cases["answer-danger-undeclared"];
+    assert_danger_case(
+        "answer-danger-undeclared",
+        refused,
+        danger_call(&fixture, &id, refused).await,
+        &id,
+    );
+    assert_eq!(fixture.rows(), rows);
+    assert_eq!(fixture.payloads(), notices);
+}
+
+#[tokio::test]
+async fn danger_answer_readbacks_strip_options_but_keep_the_settled_choice() {
+    use serde_json::json;
+
+    let cases = cases(DANGER);
+    let (fixture, id) = danger_fixture(&cases).await;
+    fixture.clock.set(1_005_000);
+    danger_call(&fixture, &id, &cases["answer-danger-declared"])
+        .await
+        .unwrap();
+    let phone = support::operator();
+    let settled = fixture
+        .ok(&phone, "consent.get", json!({"elicitationId": id}))
+        .await;
+    assert_eq!(options(&settled).len(), 3);
+    assert_eq!(settled["answeredChoiceId"], "computer_30m");
+    let conflict = fixture
+        .ok(
+            &phone,
+            "consent.answer",
+            json!({
+                "elicitationId": id, "choiceId": "app_30m"
+            }),
+        )
+        .await;
+    assert_eq!(conflict["code"], "conflict");
+    assert_eq!(jcs(&conflict["elicitation"]), jcs(&settled));
+
+    let (fixture, id) = danger_fixture(&cases).await;
+    let answer = json!({"elicitationId": id, "choiceId": "app_30m"});
+    let first = fixture.ok(&phone, "consent.answer", answer.clone()).await;
+    assert_eq!(first["ok"], true);
+    assert_eq!(options(&first["elicitation"]).len(), 3);
+    let again = fixture.ok(&phone, "consent.answer", answer).await;
+    assert_eq!(again["alreadyAnswered"], true);
+    assert_eq!(jcs(&first["elicitation"]), jcs(&again["elicitation"]));
+}
+
+#[tokio::test]
+async fn danger_requester_reads_and_feeds_keep_all_filed_options() {
+    use serde_json::json;
+
+    let cases = cases(DANGER);
+    let (fixture, id) = danger_fixture(&cases).await;
+    let requester = danger_stamp(&cases["file-card"]);
+    let expected = &cases["file-card"]["request"]["options"];
+    for method in ["consent.get", "consent.await"] {
+        let reply = fixture
+            .ok(
+                &requester,
+                method,
+                json!({
+                    "elicitation_id": id, "timeout_ms": 0
+                }),
+            )
+            .await;
+        assert_eq!(&reply["options"], expected, "{method}");
+    }
+    fixture.clock.set(1_005_000);
+    danger_call(&fixture, &id, &cases["answer-danger-declared"])
+        .await
+        .unwrap();
+    for (stamp, method) in [
+        (requester, "consent.answers"),
+        (
+            support::stamp("reserved:prefrontal-core"),
+            "consent.outcomes",
+        ),
+    ] {
+        let reply = fixture.ok(&stamp, method, json!({"since": 0})).await;
+        assert_eq!(reply["records"].as_array().unwrap().len(), 1, "{method}");
+        assert_eq!(&reply["records"][0]["options"], expected, "{method}");
+    }
 }
 
 const CEREBELLUM_SCOPES: [&str; 4] = ["app", "whole_computer", "site", "all_sites"];

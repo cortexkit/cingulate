@@ -14,6 +14,12 @@ pub use access::{validate_note, AccessRequest};
 pub const MAX_EXPIRES_IN_MS: i64 = 86_400_000;
 pub const FLOW_DECISION_EFFECT: &str = "choose";
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionGroup {
+    Danger,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentOption {
@@ -22,6 +28,22 @@ pub struct ConsentOption {
     pub effect: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_option_group"
+    )]
+    pub group: Option<OptionGroup>,
+}
+
+fn deserialize_option_group<'de, D>(deserializer: D) -> Result<Option<OptionGroup>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let group = String::deserialize(deserializer)?;
+    serde_json::from_value(Value::String(group))
+        .map(Some)
+        .map_err(de::Error::custom)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -420,6 +442,22 @@ impl ConsentRequest {
             return Err(Refusal::new(
                 "elicitation_fail_closed_required",
                 "consent requires a decline default and on_expiry deny",
+            ));
+        }
+        if default.group == Some(OptionGroup::Danger) {
+            return Err(Refusal::new(
+                "elicitation_fail_closed_required",
+                "the default option cannot be in the danger group",
+            ));
+        }
+        if self.options.iter().any(|option| option.effect == "grant")
+            && !self
+                .options
+                .iter()
+                .any(|option| option.effect == "grant" && option.group != Some(OptionGroup::Danger))
+        {
+            return Err(Refusal::invalid(
+                "at least one grant option must be outside the danger group",
             ));
         }
         if !matches!(self.urgency.as_str(), "low" | "normal" | "high")
