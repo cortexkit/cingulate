@@ -2,7 +2,7 @@
 
 Version 2 includes the [v1 interface](consent-phone-v1.md) unchanged for existing
 kinds, plus `tool_permission` and `macos_permission`. It is a new version rather
-than claiming additive compatibility: these kinds have new states, no lifetime
+than claiming additive compatibility: these kinds have no lifetime
 fields, and late same-choice answers conflict. Clients pinned to v1 must not
 render unknown kinds as ordinary expiring approvals. The shared
 [served vectors](../../test-vectors/tool-permission-v1/README.md) pin both phone
@@ -17,11 +17,12 @@ remain unchanged.
 
 The existing operator rule is unchanged: `reserved:callosum` on a daemon-stamped
 harness starting `fed-phone:`. No body field establishes authority. Permission
-asks appear in `consent.list_pending` and phone `consent.get` **only** while in
-`pending:user`. A worker's `pending:head` ask is not phone-visible. Settled and
-withdrawn permission ids refuse `elicitation_not_found` on phone get; AFT retains
-the durable record. An answer reply still returns the committed terminal record
-for first-answer-wins recovery. Existing kinds retain v1 get retention behavior.
+asks appear in `consent.list_pending` **only** while in `pending:user`, projected
+as `state: "pending"`. Phone `consent.get` continues to serve a permission ask
+after settlement if its durable surface history includes the user leg. A worker's
+ask that never reached the user leg refuses `elicitation_not_found`, both before
+and after settlement. Removing a card from pending lists does not hide its final
+phone get projection. Existing kinds retain v1 get retention behavior.
 
 ## Generic consent raised by a worker
 
@@ -51,8 +52,8 @@ There is no `request` wrapper. Common permission fields:
   principals; the raw `requesterLabel` is unchanged and is never used as a fallback;
 - `asker: {scope_ref, scope_epoch, agent_id?}`, worker-only `head` of the same
   shape; these are daemon facts, not body identity;
-- `options` using v1 `{id,label,effect}`; labels are the answer ids and callers
-  must submit ids, not effects;
+- `options` using v1 `{id,label,effect}`; labels are human-readable and callers
+  must submit ids, not labels or effects;
 - `blockUntilMs` only while a requester wait is active; this is a wait bound, not
   expiry and never approval;
 - `escalationNote` on an escalated card, if the head supplied one.
@@ -102,11 +103,25 @@ consent and informational macOS cards are unchanged.
 | Unknown id | `{ok:false, code:"not_found"}`. |
 | Non-phone caller | Transport refusal `elicitation_operator_required` (except `reserved:prefrontal-core` relays, whose parent identity and leg are checked separately). |
 
-A terminal answer projection adds `outcome`, `answeredBy: "user" | "head"`,
-`answeredAtMs`, optional `note`. Explicit denial adds `code: "access_declined"`.
-Refused records carry their named `access_*` outcome and code and no answeredBy.
-States are `settled` or `refused:access_head_gone` / `refused:access_withdrawn`.
+A terminal phone projection keeps `outcome`, `answeredBy: "user" | "head"` when
+answered, `answeredAtMs`, and optional `note`. Explicit denial adds
+`code: "access_declined"`; refused records retain their named `access_*` outcome
+and code. For an ask that was presented to the user:
+
+- A user answer projects `state: "answered"`, with top-level `answeredChoiceId`
+  equal to the chosen option id (`allow_once`, `allow_scope`, or `deny`) and
+  `answeredAtMs`. The three options remain exactly as on the pending card:
+  `allow_once` / "Allow once", `allow_scope` / "Allow for this task", and
+  `deny` / "Don't allow", including their unchanged effects.
+- Any non-user ending, including worker or scope-owner withdrawal, head-scope
+  termination, or the escalating head's denial, projects `state: "withdrawn"`
+  without `answeredChoiceId`. Tool options remain present; informational macOS
+  cards keep their empty options. The projection does not attribute a head's
+  denial to the user.
+
+Permission asks have no timer or expiry-like settlement path, so they never
+project `expired`. These phone-only mappings do not change stored, requester,
+core, or head states or first-answer-wins. If an answer reply is lost, phone
+`consent.get` retrieves the same committed final card; it does not re-answer it.
 Never infer a grant from elapsed time, missing cards, a failed get, or a transport
-error. If an answer reply is lost, refresh the list; AFT and core can recover the
-durable final outcome. Phone get deliberately does not reveal a card off its
-user leg. V1 answer recovery/retention remains valid for the existing kinds only.
+error. V1 answer recovery/retention remains valid for the existing kinds.

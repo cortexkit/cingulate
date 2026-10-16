@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 (ck-cingulate)
+
+- Keep permission cards readable through phone `consent.get` after they have
+  been presented to the user.
+  Project user answers as `answered` with the selected choice and original
+  options; project other endings as `withdrawn` without a user choice. Pending,
+  requester, core and head projections and first-answer-wins are unchanged.
+
 ## 0.5.8 (ck-cingulate), 0.5.8 (cingulate-vectors)
 
 - Let the head that escalated a worker tool-permission ask deny it while the user

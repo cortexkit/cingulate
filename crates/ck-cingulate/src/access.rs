@@ -503,7 +503,7 @@ impl Handler {
                                 Refusal::new("elicitation_not_found", "ask not found")
                             })?;
                         if stamp.operator_surface {
-                            if method != "consent.get" || record.state != "pending:user" {
+                            if method != "consent.get" || !record.reached_user() {
                                 return Err(Refusal::new(
                                     "elicitation_not_found",
                                     "ask is not on the user surface",

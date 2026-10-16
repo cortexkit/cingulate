@@ -72,6 +72,11 @@ impl AccessRecord {
     pub fn pending(&self) -> bool {
         self.state.starts_with("pending:")
     }
+    pub fn reached_user(&self) -> bool {
+        self.surfaces
+            .iter()
+            .any(|surface| surface["surface"] == "user")
+    }
     fn escalating_head(&self) -> Option<&ScopeIdentity> {
         // The accepted escalation attempt durably records the verified head.
         // A user-leg ask without that identity must not authorize a head answer.
@@ -158,6 +163,18 @@ impl AccessRecord {
             // suffix tells it nothing and would hide the card.
             if self.state == "pending:user" {
                 object.insert("state".into(), json!("pending"));
+            } else if !self.pending() && self.reached_user() {
+                // Only a user answer selects a phone choice. A head denial or
+                // withdrawal closes the card without attributing a choice to the user.
+                let state = if self.answered_by.as_deref() == Some("user") {
+                    if let Some(outcome) = &self.outcome {
+                        object.insert("answered_choice_id".into(), json!(outcome));
+                    }
+                    "answered"
+                } else {
+                    "withdrawn"
+                };
+                object.insert("state".into(), json!(state));
             }
             let (title, prompt, mut facts) = self.phone_description();
             if let Some(note) = &self.escalation_note {
@@ -166,7 +183,14 @@ impl AccessRecord {
             object.insert("title".into(), json!(title));
             object.insert("prompt".into(), json!(prompt));
             object.insert("facts".into(), json!(facts));
-            object.insert("options".into(), json!(self.answers().iter().filter(|id| **id != "escalate").map(|id| json!({
+            // Keep the user leg's choices after settlement so phones can name
+            // the selected option without making the settled ask answerable again.
+            let answers = if self.reached_user() && !self.request.informational() {
+                vec!["allow_once", "allow_scope", "deny"]
+            } else {
+                self.answers()
+            };
+            object.insert("options".into(), json!(answers.iter().filter(|id| **id != "escalate").map(|id| json!({
                 "id": id,
                 "label": match *id { "allow_once" => "Allow once", "allow_scope" => "Allow for this task", _ => "Don't allow" },
                 "effect": match *id { "allow_once" | "allow_scope" => "grant", _ => "decline" },

@@ -371,6 +371,15 @@ pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<Str
         json!({"elicitation_id": id}),
     )
     .await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-get-after-answer",
+        "consent.get",
+        json!({"elicitationId": id}),
+    )
+    .await;
     let unrelated = Stamp::from_principal(Some(&principal("basal")));
     files.insert(
         "withdraw-bind-stamps.json".into(),
@@ -498,5 +507,58 @@ pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<Str
         "notice-escalator-settled.json".into(),
         settled_body.into_bytes(),
     );
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-get-after-head-deny",
+        "consent.get",
+        json!({"elicitationId": id}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-get-never-escalated",
+        "consent.get",
+        json!({"elicitationId": pending_id}),
+    )
+    .await;
+    let id = capture(
+        &mut files,
+        &handler,
+        &worker,
+        "access-escalated-phone-withdraw-open",
+        "consent.request",
+        json!({"kind":"tool_permission","call_key":"call-phone-withdraw","tool":"read","operation":"read","paths":["/x/y"],"reason":"Inspect the requested path","args_hash":"hash-phone-withdraw","pattern":"/x/y","head_policy":"allow"}),
+    ).await["elicitation_id"].as_str().unwrap().to_owned();
+    capture(
+        &mut files,
+        &handler,
+        &core,
+        "access-escalated-phone-withdraw-escalate",
+        "consent.answer",
+        json!({"elicitation_id":id,"answer":"escalate","answered_by":head()}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &worker,
+        "access-escalated-phone-worker-withdraw",
+        "consent.withdraw",
+        json!({"elicitation_id": id}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "access-escalated-phone-get-after-worker-withdraw",
+        "consent.get",
+        json!({"elicitationId": id}),
+    )
+    .await;
     files
 }

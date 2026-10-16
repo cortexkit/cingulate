@@ -521,6 +521,125 @@ async fn escalation_carries_note_and_phone_rule_is_unchanged() {
     assert_eq!(f.get(&id).await["asker"]["scope_ref"], "Worker-session");
 }
 #[tokio::test]
+async fn escalated_phone_answers_keep_choices_and_remain_readable() {
+    let options = json!([
+        {"id":"allow_once","label":"Allow once","effect":"grant"},
+        {"id":"allow_scope","label":"Allow for this task","effect":"grant"},
+        {"id":"deny","label":"Don't allow","effect":"decline"}
+    ]);
+    for choice in ["allow_once", "allow_scope", "deny"] {
+        let f = Fixture::new(true).await;
+        let id = f
+            .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+            .await;
+        assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+        let pending = f
+            .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await;
+        assert_eq!(pending["state"], "pending");
+        assert_eq!(pending["options"], options);
+        let answer = f
+            .ok(
+                &phone(),
+                "consent.answer",
+                json!({"elicitationId":id,"choiceId":choice}),
+            )
+            .await;
+        assert_eq!(answer["ok"], true);
+        let card = &answer["elicitation"];
+        assert_eq!(card["state"], "answered");
+        assert_eq!(card["answeredChoiceId"], choice);
+        assert_eq!(card["answeredAtMs"], 1000);
+        assert_eq!(card["options"], options);
+        assert_eq!(card["subject"], pending["subject"]);
+        assert_eq!(card["requesterName"], pending["requesterName"]);
+        assert_eq!(
+            f.ok(&phone(), "consent.get", json!({"elicitationId":id}))
+                .await,
+            *card
+        );
+        assert_eq!(
+            f.ok(&phone(), "consent.list_pending", json!({})).await["records"],
+            json!([])
+        );
+        let audit = f.audit(&id);
+        let loser = f
+            .ok(
+                &phone(),
+                "consent.answer",
+                json!({"elicitationId":id,"choiceId":"allow_once"}),
+            )
+            .await;
+        assert_eq!(loser["ok"], false);
+        assert_eq!(loser["code"], "conflict");
+        assert_eq!(loser["elicitation"], *card);
+        assert_eq!(f.audit(&id)["state"], "settled");
+        assert_eq!(f.audit(&id)["outcome"], audit["outcome"]);
+        let requester = f.get(&id).await;
+        assert_eq!(requester["state"], "settled");
+        assert_eq!(requester["options"], json!([]));
+        assert!(requester.get("answered_choice_id").is_none());
+    }
+}
+
+#[tokio::test]
+async fn escalated_phone_non_user_endings_are_readable_without_a_choice() {
+    for ending in ["worker-withdraw", "core-withdraw", "head-deny"] {
+        let f = Fixture::new(true).await;
+        let worker = stamp("aft", ScopeKind::Worker);
+        let id = f.ask(&worker, request(Some("allow"))).await;
+        assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+        let pending = f
+            .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await;
+        if ending == "head-deny" {
+            assert_eq!(f.relay(&id, "deny").await["ok"], true);
+        } else {
+            let owner = if ending == "core-withdraw" {
+                core()
+            } else {
+                worker
+            };
+            f.ok(&owner, "consent.withdraw", json!({"elicitation_id":id}))
+                .await;
+        }
+        let audit = f.audit(&id);
+        let card = f
+            .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await;
+        assert_eq!(card["state"], "withdrawn", "{ending}");
+        assert_eq!(card["options"], pending["options"]);
+        assert_eq!(card["options"].as_array().unwrap().len(), 3);
+        assert!(card.get("answeredChoiceId").is_none());
+        assert_eq!(card["subject"], pending["subject"]);
+        assert_eq!(card["requesterName"], pending["requesterName"]);
+        assert_eq!(f.audit(&id), audit, "phone get must be read-only");
+        assert_eq!(
+            f.ok(&phone(), "consent.list_pending", json!({})).await["records"],
+            json!([])
+        );
+    }
+}
+
+#[tokio::test]
+async fn informational_phone_card_stays_readable_after_withdrawal() {
+    let f = Fixture::new(true).await;
+    let worker = stamp("aft", ScopeKind::Worker);
+    let id = f
+        .ask(&worker, json!({"kind":"macos_permission","folder":"/protected","program":"Terminal","steps":"Open System Settings"}))
+        .await;
+    f.ok(&worker, "consent.withdraw", json!({"elicitation_id":id}))
+        .await;
+    let card = f
+        .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+        .await;
+    assert_eq!(card["state"], "withdrawn");
+    assert_eq!(card["options"], json!([]));
+    assert!(card.get("answeredChoiceId").is_none());
+    assert!(card.get("expiresAtMs").is_none());
+}
+
+#[tokio::test]
 async fn escalated_head_deny_settles_wakes_worker_and_removes_phone_card() {
     for policy in ["allow", "not_held"] {
         let f = Fixture::new(true).await;
@@ -582,10 +701,9 @@ async fn escalated_head_deny_settles_wakes_worker_and_removes_phone_card() {
             json!([])
         );
         assert_eq!(
-            f.call(&phone(), "consent.get", json!({"elicitationId":id}))
-                .await
-                .unwrap_err(),
-            "elicitation_not_found"
+            f.ok(&phone(), "consent.get", json!({"elicitationId":id}))
+                .await["state"],
+            "withdrawn"
         );
         assert_eq!(
             f.phone_notices.0.lock().unwrap().last().unwrap()["kind"],
@@ -1530,14 +1648,26 @@ async fn concurrent_answers_compare_and_set_one_settlement() {
 }
 
 #[tokio::test]
-async fn head_leg_never_pushes_to_phone_and_terminal_get_is_hidden() {
+async fn head_leg_stays_hidden_and_user_leg_retracts_without_hiding_record() {
     let f = Fixture::new(true).await;
     let id = f
         .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
         .await;
     assert!(f.phone_notices.0.lock().unwrap().is_empty());
+    assert_eq!(
+        f.call(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await
+            .unwrap_err(),
+        "elicitation_not_found"
+    );
     f.relay(&id, "deny").await;
     assert!(f.phone_notices.0.lock().unwrap().is_empty());
+    assert_eq!(
+        f.call(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await
+            .unwrap_err(),
+        "elicitation_not_found"
+    );
     let mut req = request(Some("allow"));
     req["call_key"] = json!("escalated-call");
     let id = f.ask(&stamp("aft", ScopeKind::Worker), req).await;
@@ -1551,10 +1681,9 @@ async fn head_leg_never_pushes_to_phone_and_terminal_get_is_hidden() {
     .await;
     assert_eq!(f.phone_notices.0.lock().unwrap()[1]["kind"], "retraction");
     assert_eq!(
-        f.call(&phone(), "consent.get", json!({"elicitationId":id}))
-            .await
-            .unwrap_err(),
-        "elicitation_not_found"
+        f.ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await["state"],
+        "answered"
     );
 }
 

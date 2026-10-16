@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs};
 #[tokio::test]
 async fn permission_served_vectors_regenerate_byte_for_byte() {
     let generated = access::generate().await;
-    assert_eq!(generated.len(), 79);
+    assert_eq!(generated.len(), 93);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(access::root().join(&name)).unwrap(),
@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "ff742434343df6d5c03e5bc8bfdb4420c228106e45453eb775578189e7ae4fc4"
+        "ffccf81a7dbba87eab9656af4969b68d478437565dc40c119e17b1a303698a3e"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -39,7 +39,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
         .filter(|name| name != "SHA256SUMS")
         .collect();
     assert_eq!(actual, listed);
-    assert_eq!(listed.len(), 80);
+    assert_eq!(listed.len(), 94);
 }
 
 #[tokio::test]
@@ -181,7 +181,13 @@ async fn access_escalated_phone_decodes_and_allow_once_settles() {
     }
     let answer = served(&files, "answer");
     assert_eq!(answer["result"]["ok"], true);
-    assert_eq!(answer["result"]["elicitation"]["state"], "settled");
+    let answered = &answer["result"]["elicitation"];
+    assert_eq!(answered["state"], "answered");
+    assert_eq!(answered["answeredChoiceId"], "allow_once");
+    assert_eq!(answered["answeredAtMs"], 1000);
+    assert_eq!(answered["options"], card["options"]);
+    decode_phone_card(answered).expect("answered phone card keeps labeled choices");
+    assert_eq!(served(&files, "get-after-answer")["result"], *answered);
     assert_eq!(answer["result"]["elicitation"]["outcome"], "allow_once");
     assert_eq!(answer["result"]["elicitation"]["requesterName"], "AFT");
     let readback = served(&files, "readback");
@@ -193,6 +199,25 @@ async fn access_escalated_phone_decodes_and_allow_once_settles() {
             "phone-only field {key}"
         );
     }
+}
+
+#[tokio::test]
+async fn access_escalated_phone_terminal_gets_preserve_visibility_and_choices() {
+    let files = access::generate().await;
+    let pending = served(&files, "get");
+    for ending in ["worker-withdraw", "head-deny"] {
+        let reply = served(&files, &format!("get-after-{ending}"));
+        let card = &reply["result"];
+        assert_eq!(card["state"], "withdrawn");
+        assert_eq!(card["options"], pending["result"]["options"]);
+        assert!(card.get("answeredChoiceId").is_none());
+        assert_eq!(card["requesterName"], "AFT");
+        assert_eq!(card["subject"], pending["result"]["subject"]);
+    }
+    let hidden: Value =
+        serde_json::from_slice(&files["access-escalated-phone-get-never-escalated-refusal.json"])
+            .unwrap();
+    assert_eq!(hidden["code"], "elicitation_not_found");
 }
 
 #[tokio::test]
