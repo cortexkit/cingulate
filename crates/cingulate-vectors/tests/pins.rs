@@ -69,6 +69,19 @@ fn requester_manifest_hash_is_pinned() {
 }
 
 #[test]
+fn consent_phone_settled_manifest_hash_is_pinned() {
+    pin(
+        "consent-phone-settled-v1",
+        "e4e3e90421f5a470636d74ca69c0b0bbad7f878c78ef7f5d7f5164280a2202c9",
+    );
+}
+
+#[test]
+fn consent_phone_settled_manifest_covers_exact_bytes() {
+    coverage("consent-phone-settled-v1", 10);
+}
+
+#[test]
 fn consent_manifest_hash_is_pinned() {
     pin(
         "consent-records-v1",

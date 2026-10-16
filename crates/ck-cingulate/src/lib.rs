@@ -907,7 +907,7 @@ impl Handler {
             Ok(match method {
                 "consent.get" if stamp.operator_surface => {
                     let record = store
-                        .get(id.expect("get id"), now)
+                        .get_phone(id.expect("get id"), now)
                         .map_err(store_error)?
                         .ok_or_else(|| {
                             Refusal::new("elicitation_not_found", "elicitation not found")

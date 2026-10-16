@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 (ck-cingulate)
+
+- Keep settled generic consent cards readable through phone `consent.get` after
+  requester acknowledgment until the existing 24-hour retention prune. Keep
+  requester get, answer feeds, pending lists, and pruning behavior unchanged, and
+  continue to refuse phone answers on settled cards with `conflict`.
+
 ## 0.6.1 (ck-cingulate)
 
 - Keep permission cards readable through phone `consent.get` after they have

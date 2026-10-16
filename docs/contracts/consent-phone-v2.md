@@ -22,7 +22,9 @@ as `state: "pending"`. Phone `consent.get` continues to serve a permission ask
 after settlement if its durable surface history includes the user leg. A worker's
 ask that never reached the user leg refuses `elicitation_not_found`, both before
 and after settlement. Removing a card from pending lists does not hide its final
-phone get projection. Existing kinds retain v1 get retention behavior.
+phone get projection. Existing generic consent kinds follow the v1 rule: phone get
+continues to return a settled card after requester acknowledgment until the
+24-hour retention prune removes its payload.
 
 ## Generic consent raised by a worker
 

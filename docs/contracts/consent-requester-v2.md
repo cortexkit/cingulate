@@ -59,7 +59,10 @@ neither identity nor display text. It is stored durably and returned as
 `requester_ref` in requester `consent.get`, `consent.await`, `consent.answers`
 and the core outcome feed, as well as requester mutation readbacks. When absent,
 the field is omitted. Phone `consent.list_pending`, `consent.get` and answer
-readbacks never include it, in either snake_case or camelCase.
+readbacks never include it, in either snake_case or camelCase. Acknowledgment
+still controls requester reads only; phone get returns settled generic cards until
+their payloads are pruned 24 hours after settlement, as specified by the phone
+contracts.
 
 It has no uniqueness or deduplication meaning: two cards may share the same
 reference. Only `dedup_key` selects a pending card to refresh. Changing or removing

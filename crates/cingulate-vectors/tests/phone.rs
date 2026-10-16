@@ -220,7 +220,7 @@ async fn phone_answer_lifecycle_results_and_unknown_choice_are_distinct() {
 }
 
 #[tokio::test]
-async fn phone_get_expired_withdrawn_acknowledged_and_retention_boundary() {
+async fn phone_get_retains_acknowledged_settlements_until_retention_boundary() {
     let fixture = Fixture::open(None).await;
     let core = stamp("reserved:prefrontal-core");
     let mut request = phone::package_body();
@@ -237,6 +237,7 @@ async fn phone_get_expired_withdrawn_acknowledged_and_retention_boundary() {
         )
         .await;
     fixture.clock.set(NOW + 60_000);
+    let mut settled_cards = Vec::new();
     for (id, state, at) in [
         (&expired, "expired", NOW + 60_000),
         (&withdrawn, "withdrawn", ANSWERED),
@@ -261,6 +262,7 @@ async fn phone_get_expired_withdrawn_acknowledged_and_retention_boundary() {
                 .await,
             json!({"ok":false,"code":"conflict","elicitation":card})
         );
+        settled_cards.push((id.clone(), card));
     }
     let feed = fixture
         .ok(&core, "consent.answers", json!({"since":0}))
@@ -268,23 +270,28 @@ async fn phone_get_expired_withdrawn_acknowledged_and_retention_boundary() {
     fixture
         .ok(&core, "consent.ack", json!({"cursor":feed["cursor"]}))
         .await;
-    phone_error(
-        &fixture,
-        "consent.get",
-        json!({"elicitationId":withdrawn}),
-        "elicitation_not_found",
-    )
-    .await;
-    assert_eq!(
-        fixture
-            .ok(
-                &phone::phone_stamp(),
-                "consent.answer",
-                json!({"elicitationId":withdrawn,"choiceId":"allow"})
-            )
-            .await["code"],
-        "conflict"
-    );
+    for (id, card) in settled_cards {
+        assert_eq!(
+            fixture
+                .ok(
+                    &phone::phone_stamp(),
+                    "consent.get",
+                    json!({"elicitationId":id})
+                )
+                .await,
+            card
+        );
+        assert_eq!(
+            fixture
+                .ok(
+                    &phone::phone_stamp(),
+                    "consent.answer",
+                    json!({"elicitationId":id,"choiceId":"allow"})
+                )
+                .await,
+            json!({"ok":false,"code":"conflict","elicitation":card})
+        );
+    }
     fixture
         .clock
         .set(NOW + 60_000 + cingulate_store::RETENTION_MS);

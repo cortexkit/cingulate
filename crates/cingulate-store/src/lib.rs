@@ -350,6 +350,12 @@ impl ConsentStore {
         self.read(|conn| visible(conn, id, now_ms))
     }
 
+    /// Read a retained phone card even after the requester acknowledges it.
+    /// Requester `get` and `get_owned` reads still hide acknowledged records.
+    pub fn get_phone(&self, id: &str, now_ms: i64) -> Result<Option<ElicitationRecord>> {
+        self.read(|conn| Ok(load(conn, id)?.filter(|record| retained(record, now_ms))))
+    }
+
     pub fn get_owned(&self, owner: &str, id: &str, now_ms: i64) -> Result<ElicitationRecord> {
         self.read(|conn| owned(conn, owner, id, now_ms))
     }

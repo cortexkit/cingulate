@@ -163,20 +163,22 @@ Refusals (in addition to shared transport/storage failures below):
 |---|---|---|---|
 | `elicitationId` | String | Yes | Send exactly this spelling. `elicitation_id` does not satisfy it; if both exist, only camelCase is read. Empty strings are accepted syntactically and normally not found. |
 
-Success result is the full `Card`, not `{elicitation: Card}`. An expired or
-withdrawn retained card returns that full card with its terminal `state` and
-`answeredAtMs`; it does not return null or automatically disappear on settlement.
-Unknown ids return the typed refusal `elicitation_not_found`, **never null**.
+Success result is the full `Card`, not `{elicitation: Card}`. An answered card
+includes its selected `answeredChoiceId` and original options and labels. An
+expired or withdrawn retained card returns that full card with its terminal
+`state` and `answeredAtMs`; settlement does not make it disappear. Unknown ids
+return the typed refusal `elicitation_not_found`, **never null**.
 
-Settled cards are readable only while unacknowledged by the requester and less
-than 24 hours old since settlement. Acknowledged or no-longer-retained cards also
-refuse `elicitation_not_found`; the phone cannot distinguish them from an unknown
-id. Do not assume a card remains available for an entire polling session.
+Phone `consent.get` keeps settled cards readable whether or not the requester has
+acknowledged them. It returns the card until the existing 24-hour retention period
+ends and pruning removes its payload. The phone cannot distinguish a pruned card
+from an unknown id. Requester-side get and answer-feed visibility still follow the
+acknowledgment rules in the requester contract.
 
 | Code | When |
 |---|---|
 | `elicitation_invalid_request` | Missing or non-string `elicitationId` on a phone route. |
-| `elicitation_not_found` | Unknown, acknowledged, pruned or no-longer-retained id. |
+| `elicitation_not_found` | Unknown, pruned or no-longer-retained id. |
 | `elicitation_requester_refused` | Non-phone route whose principal cannot use the requester interface (including non-phone Callosum). |
 | `elicitation_not_owner` | Only on the separate requester get interface: id does not belong to its route owner. Not a phone-route refusal. |
 
@@ -199,9 +201,9 @@ choice validation and the answering-machine check.
 | Withdrawn | `{ok: false, code: "conflict", elicitation: Card}` with `state: "withdrawn"`, no selected choice. |
 | Unknown or outside settlement retention | `{ok: false, code: "not_found"}`; no `elicitation`, no `alreadyAnswered`. |
 
-Acknowledgment hides a settled card from get but does not by itself hide it from
-answer's retained-record check; answer may still return already-answered or
-conflict until retention ends. Never infer a grant from get's not-found refusal.
+Acknowledgment does not hide a card from phone get or from answer's retained-record
+check. A settled card still returns `conflict` from answer after acknowledgment,
+until retention ends. Never infer a grant from get's not-found refusal.
 
 | Refusal code | When |
 |---|---|

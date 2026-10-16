@@ -166,9 +166,11 @@ records retain their script and manifest bodies. Optional unanswered fields are
 omitted, not null.
 
 Unknown / another owner's id refuses `elicitation_not_owner`; an owned but
-acknowledged or no-longer-retained id refuses `elicitation_not_found`. Get sweeps
-expiry before serving an owned record. Answered, expired and withdrawn records
-remain readable until acknowledged or 24 hours after settlement.
+acknowledged or no-longer-retained id refuses `elicitation_not_found` on requester
+get. Get sweeps expiry before serving an owned record. Requester get and the
+answer feed stop exposing a settlement after acknowledgment; the phone's separate
+`consent.get` continues to return a settled card until its payload is pruned 24
+hours after settlement.
 
 ## `consent.answers`: read the owner's settlement feed
 
@@ -199,10 +201,11 @@ Required param: `cursor`, a nonnegative signed-64-bit integer. Success:
 `{ok: true}`. Acknowledgment is cumulative for this owner through that cursor,
 including withdrawals even though answers omits them. It hides those settled
 records from requester get/await and future answers; it does not affect pending
-cards or another owner's records, or undo an answer. Rows are physically pruned
-only after retention. A future cursor is accepted, but does not pre-acknowledge
-settlements created later. Send only a cursor whose page(s) you processed: an
-arbitrary high cursor can discard unread existing answers.
+cards or another owner's records, or undo an answer. It does not hide the card from
+phone `consent.get`, which remains available until the 24-hour retention prune.
+Rows are physically pruned only after retention. A future cursor is accepted, but
+does not pre-acknowledge settlements created later. Send only a cursor whose
+page(s) you processed: an arbitrary high cursor can discard unread existing answers.
 
 ## `consent.await`: wait without granting on timeout
 
