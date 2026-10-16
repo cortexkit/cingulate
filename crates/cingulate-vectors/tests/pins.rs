@@ -1,6 +1,10 @@
 mod support;
 
-use std::{collections::BTreeSet, fs};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Component, Path},
+};
 
 use sha2::{Digest, Sha256};
 use support::{corpus, REQUESTER_ORDER};
@@ -96,6 +100,62 @@ fn danger_option_group_manifest_covers_exact_bytes() {
 #[test]
 fn permissions_manifest_covers_exact_bytes() {
     coverage("permissions-v1", 97);
+}
+
+#[test]
+fn cerebellum_agent_permission_manifest_hash_is_pinned() {
+    pin(
+        "cerebellum-agent-permission-v1",
+        "6ca3525683919dc6453ea257eef56cc43993df621ae03793fc666b4389a2d9b0",
+    );
+}
+
+fn collect_corpus_files(root: &Path, directory: &Path, files: &mut BTreeSet<String>) {
+    for entry in fs::read_dir(directory).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if entry.file_type().unwrap().is_dir() {
+            collect_corpus_files(root, &path, files);
+        } else {
+            assert!(entry.file_type().unwrap().is_file());
+            files.insert(
+                path.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+}
+
+#[test]
+fn cerebellum_agent_permission_manifest_covers_exact_bytes() {
+    let root = corpus("cerebellum-agent-permission-v1");
+    let manifest = fs::read_to_string(root.join("SHA256SUMS")).unwrap();
+    let mut listed = BTreeSet::new();
+    for line in manifest.lines().filter(|line| !line.is_empty()) {
+        let (digest, path) = line.split_once("  ").unwrap();
+        let relative = Path::new(path);
+        assert!(relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_))));
+        assert_ne!(path, "SHA256SUMS");
+        assert!(listed.insert(path.to_owned()), "duplicate path {path}");
+        assert_eq!(
+            sha256(&fs::read(root.join(relative)).unwrap()),
+            digest,
+            "cerebellum-agent-permission-v1/{path}"
+        );
+    }
+
+    let mut actual = BTreeSet::new();
+    collect_corpus_files(&root, &root, &mut actual);
+    actual.remove("SHA256SUMS");
+    assert_eq!(listed.len(), 15);
+    assert_eq!(
+        actual, listed,
+        "manifest must cover every file except itself"
+    );
 }
 
 #[test]
