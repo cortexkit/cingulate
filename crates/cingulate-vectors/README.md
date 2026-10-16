@@ -12,6 +12,9 @@ scenario advances it, and the sweep timer is disabled.
   `consent.*`, and excludes `elicitation_unavailable`, which cingulate never emits.
 - `consent.rs` pins cingulate's additive fields and the console refusal without
   removing anything from the parsed reply or pointer.
+- `consent_outcomes_refs.rs` regenerates core outcome vectors through the real
+  handler, including requester correlation, single-use grants, and settlement-time
+  detach status.
 - `pins.rs` pins each SHA256SUMS and verifies complete file coverage and bytes.
 - `contracts.rs` checks the two contract corpora, `danger-option-group-v1` and
   `permissions-v1`, which are written from `docs/contracts/` before any
@@ -23,6 +26,8 @@ workspace root with
 `cargo run -p cingulate-vectors --example generate_vectors --locked -- --check`;
 run it without `--check` to rewrite them after a deliberate contract change,
 then update the manifest pins in `pins.rs`.
+The core outcomes vectors use
+`cargo run -p cingulate-vectors --example generate_consent_outcomes_refs_vectors --locked -- --check`.
 
 Comparisons remove only `requesterLabel` and `atConsole` from upstream phone
 projections, or `requester_label` from upstream requester records. Opaque nested

@@ -48,16 +48,18 @@ report_execution, withdraw and detach require the raising owner. `consent.answer
 returns only that owner's answers, and `consent.ack` acknowledges only that
 owner's answers. None of these requesters can call phone-only `consent.answer` or
 `consent.list_pending`, nor read the core-only `consent.outcomes` feed.
-Generic `consent` params add one optional field:
+Generic `consent` params add two optional top-level fields:
 
 | Field | Rule |
 |---|---|
 | `requester_ref` | Opaque string of 1–128 printable ASCII characters (bytes `0x20`–`0x7e`), returned unchanged. If present, null, non-string, empty, overlong, control and non-ASCII values refuse `elicitation_invalid_request` with `requester_ref` in the message. Other kinds cannot carry it. |
+| `single_use` | Optional boolean accepted only for `kind: "consent"`; null and every non-boolean value refuse `elicitation_invalid_request` with `single_use` in the message. Absence means false. Providers must check `catalog.list` for `consent-single-use/v1` before sending it. |
 
 The reference correlates an originating call with a later answer; it supplies
 neither identity nor display text. It is stored durably and returned as
 `requester_ref` in requester `consent.get`, `consent.await`, `consent.answers`
-and the core outcome feed, as well as requester mutation readbacks. When absent,
+and the core `consent.outcomes` feed, as well as requester mutation readbacks.
+There it is an opaque correlation key exactly as stored on the card. When absent,
 the field is omitted. Phone `consent.list_pending`, `consent.get` and answer
 readbacks never include it, in either snake_case or camelCase. Acknowledgment
 still controls requester reads only; phone get returns settled generic cards until
@@ -68,6 +70,18 @@ It has no uniqueness or deduplication meaning: two cards may share the same
 reference. Only `dedup_key` selects a pending card to refresh. Changing or removing
 `requester_ref` on an otherwise matching dedup refresh retains the card id and
 updates the stored reference; it does not withdraw and replace the card.
+
+`single_use` is stored with the card and returned on requester reads when supplied.
+The core outcome feed includes it only when true. It is never added to a phone
+projection, so existing phone card bytes are unchanged.
+
+An outcome record includes `late: true` only when `consent.detach` committed before
+the card settled. Settlement captures the stored detach state in the same store
+transaction that records the outcome; a later clock reading does not affect it. A
+dedup refresh clears detachment, so an answer to the re-raised card is not late.
+Core may interpret an absent `late` as “settled while the raiser waited” only when
+`catalog.list` advertises `consent-outcomes-late/v1`. Without that capability,
+absence means the status was not reported.
 
 The [generic-consent v2 served vectors](../../test-vectors/consent-requester-v2/README.md)
 cover requests with and without a reference, worker admission and liveness

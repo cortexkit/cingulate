@@ -1319,6 +1319,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         answered_choice_id: None,
         execution: None,
         detached: false,
+        late: false,
         asker: None,
     };
     old.with_conn(|conn| {

@@ -172,6 +172,7 @@ fn pinned_record(id: &str, state: State, choice: Option<&str>, at: i64) -> Elici
         execution: None,
         requester: "reserved:cerebellum".into(),
         detached: true,
+        late: true,
         asker: Some(asker()),
     }
 }

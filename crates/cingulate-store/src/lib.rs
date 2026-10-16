@@ -309,6 +309,7 @@ impl ConsentStore {
                 answered_choice_id: None,
                 execution: None,
                 detached: false,
+                late: false,
                 asker: identity.asker.clone(),
             };
             tx.execute(
@@ -619,11 +620,11 @@ impl ConsentStore {
                 let value = match raw.filter(|_| now_ms.saturating_sub(at) < RETENTION_MS) {
                     Some(raw) => {
                         let record: ElicitationRecord = serde_json::from_str(&raw)?;
-                        let mut value = record.requester_wire(None);
                         if owner.is_none() {
-                            value.as_object_mut().expect("requester record object").remove("binding");
+                            record.outcome_wire()
+                        } else {
+                            record.requester_wire(None)
                         }
-                        value
                     }
                     None => json!({"elicitation_id":id,"state":"expired","settled_at":at}),
                 };
@@ -770,6 +771,7 @@ fn terminal(
     record.state = state;
     record.answered_choice_id = choice;
     record.answered_at_ms = Some(at);
+    record.late = record.detached;
     save(conn, record)?;
     conn.execute(
         "INSERT INTO elicitation_answers(elicitation_id,owner,settled_at_ms) \

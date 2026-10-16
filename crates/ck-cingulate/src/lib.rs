@@ -135,6 +135,8 @@ pub fn manifest() -> ModuleManifest {
                 "agent-run-scopes/v1".into(),
                 "consent-card-text/v1".into(),
                 "consent-option-group/v1".into(),
+                "consent-single-use/v1".into(),
+                "consent-outcomes-late/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],

@@ -60,6 +60,10 @@ pub struct ElicitationRecord {
     /// no phone or feed projection shows it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub detached: bool,
+    /// Persist whether the card settled after its requester detached so later
+    /// outcome reads do not infer that timing from a clock or old request history.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub late: bool,
     /// The agent session stamped on the requesting route, kept only to address
     /// a late-answer notice. No projection shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -67,9 +71,9 @@ pub struct ElicitationRecord {
 }
 
 impl ElicitationRecord {
-    /// Build the flat camelCase JSON shown on the phone. Omit `binding` and
-    /// `requester_ref`: private requester metadata must not become card text.
-    /// Nested opaque JSON is copied verbatim.
+    /// Build the flat camelCase card JSON. Hide the requester principal,
+    /// `binding`, `requester_ref`, and `single_use`; these values are not card text.
+    /// Nested JSON values are copied verbatim.
     pub fn phone(&self, block_until: Option<i64>) -> Value {
         let mut value = serde_json::to_value(self).expect("record serialization");
         let object = value.as_object_mut().expect("record object");
@@ -77,12 +81,13 @@ impl ElicitationRecord {
         object.remove("requester");
         object.remove("detached");
         object.remove("asker");
+        object.remove("late");
         for (key, value) in serde_json::to_value(&self.request)
             .expect("request serialization")
             .as_object()
             .expect("request object")
         {
-            if key != "binding" && key != "requester_ref" {
+            if key != "binding" && key != "requester_ref" && key != "single_use" {
                 object.insert(camel(key), value.clone());
             }
         }
@@ -98,14 +103,40 @@ impl ElicitationRecord {
     /// Only record and subject keys change spelling; scope, preview, bindings
     /// and typed card payloads are not recursively renamed.
     pub fn requester_wire(&self, block_until: Option<i64>) -> Value {
-        let mut value = self.phone(block_until);
-        value["subject"] = snake_object(value["subject"].take());
-        let mut value = snake_object(value);
-        if let Some(reference) = &self.request.requester_ref {
-            value["requester_ref"] = json!(reference);
+        let mut value = self.requester_base_wire(block_until, true);
+        if let Some(single_use) = self.request.single_use {
+            value["single_use"] = json!(single_use);
         }
         if let Some(binding) = &self.request.binding {
             value["binding"] = binding.clone();
+        }
+        value
+    }
+
+    /// Build a `consent.outcomes` record for prefrontal-core. Include
+    /// `requester_ref` unchanged and expose `single_use` and `late` only when true.
+    pub fn outcome_wire(&self) -> Value {
+        let mut value = self.requester_base_wire(None, false);
+        if let Some(reference) = &self.request.requester_ref {
+            value["requester_ref"] = json!(reference);
+        }
+        if self.request.single_use == Some(true) {
+            value["single_use"] = json!(true);
+        }
+        if self.late {
+            value["late"] = json!(true);
+        }
+        value
+    }
+
+    fn requester_base_wire(&self, block_until: Option<i64>, include_requester_ref: bool) -> Value {
+        let mut value = self.phone(block_until);
+        value["subject"] = snake_object(value["subject"].take());
+        let mut value = snake_object(value);
+        if include_requester_ref {
+            if let Some(reference) = &self.request.requester_ref {
+                value["requester_ref"] = json!(reference);
+            }
         }
         value
     }

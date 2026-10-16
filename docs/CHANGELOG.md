@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.1 (ck-cingulate)
+
+- Add optional `single_use` to generic consent requests and advertise
+  `consent-single-use/v1`; providers must check the running module's
+  `catalog.list` capabilities before sending the field because older Cingulate
+  versions reject unknown request fields.
+- Include `requester_ref` on core `consent.outcomes` records and advertise
+  `consent-outcomes-late/v1` for outcomes that report `late: true` when settlement
+  follows a committed detach. Keep `requester_ref`, `single_use` and `late` off
+  phone projections and add dedicated served vectors; existing vector sets remain
+  byte-identical.
+
 ## 0.7.0 (ck-cingulate)
 
 - Keep settled generic consent cards readable through phone `consent.get` after

@@ -125,13 +125,21 @@ pub struct ConsentRequest {
     pub urgency: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_key: Option<String>,
-    /// Correlates requester replies without becoming card text or a dedup key.
+    /// Correlates a request with its later outcome record for prefrontal-core,
+    /// without becoming card text or a deduplication key.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_requester_ref"
     )]
     pub requester_ref: Option<String>,
+    /// Marks consent grants that are valid for one use only.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_single_use"
+    )]
+    pub single_use: Option<bool>,
     pub on_expiry: String,
     pub material_damage: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,6 +189,16 @@ where
                 "requester_ref must be a string of 1 to 128 printable ASCII characters",
             )
         })
+}
+
+fn deserialize_single_use<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Value::deserialize(deserializer)?
+        .as_bool()
+        .map(Some)
+        .ok_or_else(|| de::Error::custom("single_use must be a boolean"))
 }
 
 fn deserialize_at_console<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -290,6 +308,9 @@ impl ConsentRequest {
         }
         if self.requester_ref.is_some() && self.kind != "consent" {
             return Err(Refusal::invalid("requester_ref requires consent kind"));
+        }
+        if self.single_use.is_some() && self.kind != "consent" {
+            return Err(Refusal::invalid("single_use requires consent kind"));
         }
         if self.kind == "package" {
             let package = self

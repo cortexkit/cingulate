@@ -25,7 +25,7 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | `consent.withdraw` | mutate | The owner settles its own pending card. |
 | `consent.answer` | mutate | Operator surfaces only (`operator`, `lib.rs:279-288`). |
 | `consent.list_pending` | query | Operator surfaces only. |
-| `consent.outcomes` | query | `reserved:prefrontal-core` only (`lib.rs:588-592`). |
+| `consent.outcomes` | query | `reserved:prefrontal-core` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |
 
 Identity comes only from the daemon's route stamp (`Stamp`, `lib.rs:73-123`);
 no request field names a requester or subject. The owner of a card is the pair

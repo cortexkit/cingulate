@@ -470,7 +470,9 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent/v1",
             "agent-run-scopes/v1",
             "consent-card-text/v1",
-            "consent-option-group/v1"
+            "consent-option-group/v1",
+            "consent-single-use/v1",
+            "consent-outcomes-late/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
@@ -627,7 +629,9 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent/v1",
             "agent-run-scopes/v1",
             "consent-card-text/v1",
-            "consent-option-group/v1"
+            "consent-option-group/v1",
+            "consent-single-use/v1",
+            "consent-outcomes-late/v1"
         ]
     );
 }

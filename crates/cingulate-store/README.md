@@ -37,8 +37,10 @@ unchanged, and migration 2 seeds the persistent `el_` id counter.
   (`elicitation_not_found`). `owner` remains readable until its row is pruned.
 - `answers` is owner-scoped and omits withdrawals. Restrict `outcomes` to
   `reserved:prefrontal-core` in the module. Both return the global persisted
-  high-water, even if no matching rows remain. Outcomes omit binding. `ack` is
-  cumulative and owner-scoped, including withdrawals.
+  high-water, even if no matching rows remain. Outcomes omit binding and retain
+  the card's `requester_ref`; they include `single_use` and `late` only when true.
+  `late` is captured from the stored detach state in the settlement transaction.
+  `ack` is cumulative and owner-scoped, including withdrawals.
 - `ElicitationRecord::phone` and `requester_wire` build the wire projections.
   Supply the greatest registered await deadline as `block_until`; projection
   clamps it to the current expiry and omits it on terminal cards. The module
