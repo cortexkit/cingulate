@@ -136,11 +136,12 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "cingulate-decode",
  "cingulate-store",
+ "cortexkit-lease",
  "cortexkit-test-support",
  "rusqlite",
  "serde",
@@ -154,6 +155,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

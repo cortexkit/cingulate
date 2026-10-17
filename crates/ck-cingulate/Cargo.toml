@@ -1,12 +1,13 @@
 [package]
 name = "ck-cingulate"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
 cingulate-decode = { path = "../cingulate-decode" }
 cingulate-store = { path = "../cingulate-store" }
+cortexkit-lease = "=0.1.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
@@ -22,3 +23,4 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 subc-daemon = { version = "=0.33.0", features = ["test-support"] }
 subc-transport = "=0.11.0"
 tempfile = "3"
+tracing-subscriber = "0.3"

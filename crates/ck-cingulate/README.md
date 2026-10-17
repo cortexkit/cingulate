@@ -95,6 +95,24 @@ process spawning or process-global XDG changes are needed. Every operation has a
 bounded deadline and the fixture cancels and awaits its serving tasks on teardown.
 The separate in-process handler tests continue to prove handler concurrency.
 
+## Engram backup catalog
+
+Engram backs up a module only when its data folder holds `engram-catalog.json`.
+The module writes its own catalog from the store descriptor on every start, so
+the file lands beside `store.db` (the parent of the descriptor's SQLite path)
+and a fresh machine needs no hand step before its first backup. The catalog
+names one portable `whole-db` entry: Engram snapshots the live database through
+the SQLite backup API, which already covers the `-wal` and `-shm` sidecars and
+the writer lease, so those are not separate entries.
+
+The bytes are deterministic; an identical file is left untouched so its mtime
+does not churn on every start. A different or missing file is replaced
+atomically through a same-folder owner-only (0600) temp file and a rename. A
+failed write is a warning naming the path and the error: a module that refused
+to serve over a backup descriptor would be worse than a missed backup.
+`tests/engram.rs` covers the created bytes and mode, the second start, a stale
+file and an unwritable location.
+
 ## Verification
 
 From the workspace root, run the repository worker guide's format, lint, tests

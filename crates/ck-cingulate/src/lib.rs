@@ -36,9 +36,14 @@ use tokio::sync::{watch, Mutex};
 
 mod access;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
+pub mod engram;
 mod execution;
 mod permissions;
 pub use permissions::{PermissionsCallError, PermissionsRuntime};
+
+/// The module id the subc daemon registers. The backup catalog records the same
+/// id, so Engram backs up the store of the module that actually wrote it.
+pub const MODULE_ID: &str = "cingulate";
 
 pub const OPERATIONS: [(&str, ManagementOperationKind); 13] = [
     ("consent.request", ManagementOperationKind::Mutate),
@@ -129,7 +134,7 @@ fn requester_name(principal: &str) -> Option<&'static str> {
 }
 
 pub fn manifest() -> ModuleManifest {
-    ModuleManifest::builder("cingulate", env!("CARGO_PKG_VERSION"))
+    ModuleManifest::builder(MODULE_ID, env!("CARGO_PKG_VERSION"))
         .capabilities(Some(CapabilityDeclarations {
             provides: vec![
                 "consent/v1".into(),
@@ -476,6 +481,9 @@ impl Handler {
                 return;
             }
         };
+        // Write the backup catalog before the store opens, so a first start on
+        // a fresh machine has it even if the store is briefly held elsewhere.
+        engram::bootstrap_catalog(&descriptor);
         match self.try_open(&descriptor).await {
             Ok(()) => {}
             Err(error) if error.is_lease_held() => {

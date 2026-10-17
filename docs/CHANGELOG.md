@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 (ck-cingulate)
+
+- Write `engram-catalog.json` into the module's data folder on every start, so
+  Engram backs up `cingulate/store.db` on a fresh machine without a hand step.
+  The bytes are deterministic, an identical file is left untouched, replacement
+  is atomic and owner-only (0600), and a failed write warns with the path and
+  error without stopping the module from serving.
+
 ## 0.9.0 (ck-cingulate)
 
 - Accept execution reports after requester acknowledgment while the answered card
