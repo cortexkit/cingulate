@@ -219,6 +219,9 @@ including withdrawals even though answers omits them. It hides those settled
 records from requester get/await and future answers; it does not affect pending
 cards or another owner's records, or undo an answer. It does not hide the card from
 phone `consent.get`, which remains available until the 24-hour retention prune.
+Ack as soon as the answer is durably saved; reporting the effect may happen later.
+`consent.report_execution` still accepts an acknowledged answered card while its
+record is retained. Ack neither reports execution nor extends retention.
 Rows are physically pruned only after retention. A future cursor is accepted, but
 does not pre-acknowledge settlements created later. Send only a cursor whose
 page(s) you processed: an arbitrary high cursor can discard unread existing answers.
@@ -240,9 +243,9 @@ wait removes its registration. Same owner/not-found refusals as requester get.
 ## `consent.report_execution`
 
 Required params: string `elicitation_id` and string `execution`, one of
-`executed`, `approved_not_executed`, `outcome_unknown`. Success is the updated
-full requester record with `execution`. This only reports a requester outcome:
-the module does not execute anything, and adds no new answer-log row/cursor.
+`executed`, `approved_not_executed`, `outcome_unknown`. Success is the full
+requester record with the stored `execution`. The module does not execute
+anything, and reporting adds no new answer-log row/cursor.
 
 **Flow decisions cannot report execution**, even if answered:
 `elicitation_invalid_execution`. That code also covers an unsupported execution
@@ -250,6 +253,13 @@ string. For other kinds, the card must already be answered or the refusal is
 `elicitation_store_error`. The implementation requires answered state, not a
 particular grant effect; requesters remain responsible for acting only on an
 appropriate explicit answer. Ownership and retention checks still apply.
+Unlike get, await and answers, reporting is allowed after acknowledgment while
+the answered record is retained (24 hours after settlement). After an acknowledged
+record is physically pruned, reporting refuses `elicitation_not_owner`, the same
+uniform refusal as an unknown id because the stored owner is gone. A requester
+which already acked that card treats this as **too late, drop it**, not a reason
+to retry or repeat the effect. If an owner tombstone still exists after retention,
+reporting refuses `elicitation_not_found`. Owner checks are unchanged.
 
 Optional `reason` is accepted **only** with `execution: "approved_not_executed"`.
 It is an open-set code of 1–64 bytes matching `^[a-z][a-z0-9_]{0,63}$`; null,
@@ -258,9 +268,28 @@ non-strings, malformed codes, or a reason with any other execution value refuse
 `session_ended`, `target_gone`, `grant_store_unavailable` and
 `refused_at_dispatch`. Cingulate stores any well-formed code, including unknown
 ones, with the execution report. Requester reads use `execution_reason`; phone
-reads use `executionReason`. Both omit it when absent. Each new report replaces
-the execution and reason together, so reporting without a reason clears any
-previous reason. `execution` and `execution_reason` report what the requester says happened; they never authorize running anything.
+reads use `executionReason`. Both omit it when absent. Each valid requester report
+replaces execution and reason together in one store transaction, so reporting
+without a reason clears any previous reason. This includes replacing an earlier
+requester report (for example, `outcome_unknown` followed by `executed`) or
+Cingulate's session-ended backstop: the requester knows what actually happened,
+whereas the backstop only infers non-execution from session liveness.
+
+On the maintenance cadence, Cingulate itself records
+`execution: "approved_not_executed"`, `execution_reason: "session_ended"` for a
+retained, answered card of kind `consent` with no execution report whose recorded
+asker scope has definitely ended. The asker is the scope stamped at
+`consent.request` (a worker's own scope, not its parent). Liveness follows the
+permission-ask `scope.describe` rules: an ended scope, a replaced epoch, or a
+definitively non-live scope counts; unknown, unsynced or unreachable liveness
+does not. Cards without a recorded scope are left alone. Passes are bounded and
+uncertain lookups use the existing bounded exponential maintenance backoff.
+Acknowledgment does not exclude a retained card. Pending cards, `flow_decision`
+cards and permission asks are not backstopped. The backstop atomically rechecks
+that no report exists and never overwrites any report. A requester report always
+replaces the backstop, including when the two race. These fields describe a recorded
+outcome, not permission to execute anything. Served examples are pinned in
+[consent-session-ended-v1](../../test-vectors/consent-session-ended-v1/README.md).
 
 ## Updating or withdrawing an open card
 

@@ -546,7 +546,7 @@ impl ConsentStore {
             let retry = result == "transport";
             let missing = matches!(result, "unknown_session" | "session_not_live");
             let status = if retry { "pending" } else if result == "ok" { "delivered" } else if missing && matches!(notice.purpose.as_str(), "settled" | crate::LATE_ANSWER_PURPOSE) { "unclaimed" } else { "refused" };
-            let backoff = (250_i64.saturating_mul(1_i64 << notice.attempts.min(8))).min(60_000);
+            let backoff = crate::maintenance_backoff_ms(notice.attempts.clamp(0, 8) as u32);
             tx.execute("UPDATE access_notices SET status=?3,attempts=attempts+1,retry_at_ms=?4,last_error=?5 WHERE elicitation_id=?1 AND purpose=?2 AND status='pending'", params![notice.elicitation_id,notice.purpose,status,now.saturating_add(backoff),if result == "ok" { None } else { Some(result) }])?;
             let Some(mut record) = load(tx, &notice.elicitation_id)? else { return Ok(None); };
             if missing && notice.purpose == "head_ask" && record.state == "pending:head" {

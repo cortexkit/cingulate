@@ -38,6 +38,11 @@ struct RelayIdentity {
 #[async_trait]
 pub trait AccessRuntime: Send + Sync {
     async fn describe(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String>;
+    /// Describe the requesting session itself, which may be a worker scope.
+    /// Permission supervision instead requires its parent to be a ScopeKind::Head.
+    async fn describe_asker(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String> {
+        self.describe(scope).await
+    }
     async fn notice(&self, body: Value) -> NoticeResult;
     /// Send a body already serialized as JSON. The delivery loop calls this
     /// with the queued bytes so pinned key order reaches core unchanged; the
@@ -94,10 +99,11 @@ impl DaemonAccessRuntime {
         }
         Ok(consumer.as_ref().expect("connected consumer").clone())
     }
-}
-#[async_trait]
-impl AccessRuntime for DaemonAccessRuntime {
-    async fn describe(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String> {
+    async fn describe_scope(
+        &self,
+        scope: &ScopeIdentity,
+        require_head: bool,
+    ) -> Result<ScopeLife, String> {
         let reply = self
             .module
             .scope_describe(
@@ -111,7 +117,9 @@ impl AccessRuntime for DaemonAccessRuntime {
         match reply.status {
             ScopeStatus::Live => {
                 let stamp = reply.scope.ok_or("scope.describe omitted live stamp")?;
-                if stamp.scope_epoch != scope.scope_epoch || stamp.kind != ScopeKind::Head {
+                if stamp.scope_epoch != scope.scope_epoch
+                    || (require_head && stamp.kind != ScopeKind::Head)
+                {
                     return Ok(ScopeLife::Gone);
                 }
                 Ok(ScopeLife::Live(ScopeIdentity {
@@ -126,6 +134,15 @@ impl AccessRuntime for DaemonAccessRuntime {
             }
             ScopeStatus::NotLive => Ok(ScopeLife::Unknown),
         }
+    }
+}
+#[async_trait]
+impl AccessRuntime for DaemonAccessRuntime {
+    async fn describe(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String> {
+        self.describe_scope(scope, true).await
+    }
+    async fn describe_asker(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String> {
+        self.describe_scope(scope, false).await
     }
     async fn notice(&self, body: Value) -> NoticeResult {
         self.notice_json(&body.to_string()).await
@@ -186,7 +203,7 @@ impl Handler {
             .lock()
             .expect("access runtime lock") = runtime;
     }
-    fn access_runtime(&self) -> Arc<dyn AccessRuntime> {
+    pub(super) fn access_runtime(&self) -> Arc<dyn AccessRuntime> {
         self.inner
             .access_runtime
             .lock()

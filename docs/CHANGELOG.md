@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0 (ck-cingulate)
+
+- Accept execution reports after requester acknowledgment while the answered card
+  is retained; requester get, await and answers still hide acknowledged cards.
+- Backstop retained, answered generic consent cards without a report when their
+  stamped asker session has definitely ended. Record `approved_not_executed` with
+  reason `session_ended`, using bounded maintenance passes and conservative scope
+  liveness. Unknown, unsynced and unreachable scopes are left alone.
+- Preserve requester report replacement, including clearing an omitted reason.
+  The backstop never overwrites any report; a requester report always replaces
+  the backstop, including when they race.
+- Pin requester and phone backstop projections in `consent-session-ended-v1`
+  without changing existing corpus bytes. No store schema change.
+
 ## 0.8.0 (ck-cingulate)
 
 - Make `expires_in_ms` optional and advertise `consent-no-expiry/v1`. Without a

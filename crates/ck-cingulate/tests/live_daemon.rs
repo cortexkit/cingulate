@@ -10,7 +10,8 @@ use std::{
 };
 
 use async_trait::async_trait;
-use ck_cingulate::{DaemonAccessRuntime, Handler, Options};
+use cingulate_store::ScopeIdentity;
+use ck_cingulate::{AccessRuntime, DaemonAccessRuntime, Handler, Options, ScopeLife};
 use cortexkit_test_support::{process_alive, ScratchDir};
 use serde_json::{json, Value};
 use subc_client_rs::{
@@ -26,7 +27,7 @@ use subc_protocol::{
         CapabilityDeclarations, Concurrency, ManagementOperation, ManagementOperationKind,
         ModuleManifest, ProviderRole,
     },
-    scope::{ScopeAttributes, ScopeCarrier, ScopeKind, ScopeRecord},
+    scope::{ScopeAttributes, ScopeCarrier, ScopeKind, ScopeParent, ScopeRecord},
     session::ModuleControlRequestFromModule,
     BindIdentity, Flags, Frame, FrameType, ModuleHelloBody, Principal, Priority, RouteTarget,
     PROTOCOL_VERSION,
@@ -58,6 +59,7 @@ impl Drop for Task {
 // the owner's reserved nonce. Authentication, HELLO, scope.sync, route.open,
 // route.bind and consent requests still cross authenticated loopback TCP.
 struct Fixture {
+    runtime: Arc<DaemonAccessRuntime>,
     tasks: Vec<Task>,
     consumer: SubcConsumer,
     owner: TcpStream,
@@ -202,10 +204,9 @@ impl Fixture {
         ))
         .await
         .unwrap();
-        handler.set_permissions_runtime(Arc::new(DaemonAccessRuntime::with_consumer(
-            module,
-            runtime_consumer,
-        )));
+        let runtime = Arc::new(DaemonAccessRuntime::with_consumer(module, runtime_consumer));
+        handler.set_permissions_runtime(runtime.clone());
+        handler.set_access_runtime(runtime.clone());
         tasks.push(Task(tokio::spawn(async move {
             serve.await.unwrap();
         })));
@@ -239,6 +240,7 @@ impl Fixture {
         assert_eq!(ack.header.ty, FrameType::HelloAck, "owner HELLO: {ack:?}");
 
         Self {
+            runtime,
             tasks,
             consumer,
             owner,
@@ -730,5 +732,76 @@ async fn live_daemon_direct_routes_cannot_answer_even_with_phone_harness() {
             .unwrap()["state"],
         "pending"
     );
+    fixture.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_asker_liveness_accepts_workers_and_preserves_epoch_checks() {
+    let mut fixture = Fixture::start().await;
+    let identity = ScopeIdentity {
+        scope_ref: "worker-session".into(),
+        scope_epoch: 3,
+        agent_id: None,
+    };
+    let head = ScopeRecord::new("head-session", 7, ScopeKind::Head);
+    let mut worker = ScopeRecord::new("worker-session", 3, ScopeKind::Worker);
+    worker.parent = Some(ScopeParent::new(principal(OWNER), "head-session", 7));
+    let synced = control(
+        &mut fixture.owner,
+        FrameType::Request,
+        2,
+        ModuleControlRequestFromModule::ScopeSync {
+            generation: 1,
+            scopes: vec![head, worker],
+        },
+    )
+    .await;
+    assert_eq!(
+        synced.header.ty,
+        FrameType::Response,
+        "scope.sync: {synced:?}"
+    );
+    match bounded(fixture.runtime.describe_asker(&identity))
+        .await
+        .unwrap()
+    {
+        ScopeLife::Live(live) => assert_eq!(live, identity),
+        other => panic!("a live worker must not look ended: {other:?}"),
+    }
+    assert!(matches!(
+        bounded(fixture.runtime.describe(&identity)).await.unwrap(),
+        ScopeLife::Gone
+    ));
+    let replaced = ScopeIdentity {
+        scope_epoch: 2,
+        ..identity.clone()
+    };
+    assert!(matches!(
+        bounded(fixture.runtime.describe_asker(&replaced))
+            .await
+            .unwrap(),
+        ScopeLife::Gone
+    ));
+    let ended = control(
+        &mut fixture.owner,
+        FrameType::Request,
+        3,
+        ModuleControlRequestFromModule::ScopeSync {
+            generation: 2,
+            scopes: vec![],
+        },
+    )
+    .await;
+    assert_eq!(
+        ended.header.ty,
+        FrameType::Response,
+        "scope.sync: {ended:?}"
+    );
+    assert!(matches!(
+        bounded(fixture.runtime.describe_asker(&identity))
+            .await
+            .unwrap(),
+        ScopeLife::Gone
+    ));
     fixture.stop().await;
 }

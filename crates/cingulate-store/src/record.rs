@@ -67,8 +67,8 @@ pub struct ElicitationRecord {
     /// outcome reads do not infer that timing from a clock or old request history.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub late: bool,
-    /// The agent session stamped on the requesting route, kept only to address
-    /// a late-answer notice. No projection shows it.
+    /// The session stamped on the requesting route, used for late-answer notices
+    /// and the session-ended execution backstop. No projection shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asker: Option<ScopeIdentity>,
 }

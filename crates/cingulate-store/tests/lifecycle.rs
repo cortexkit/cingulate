@@ -1518,3 +1518,204 @@ fn optional_expiry_migration_keeps_an_empty_answer_logs_high_water() {
     store.withdraw(&owner.owner, &id, 102).unwrap();
     assert_eq!(store.outcomes(99, 102).unwrap().cursor, 100);
 }
+
+fn scoped_identity() -> RequestIdentity {
+    RequestIdentity {
+        asker: Some(cingulate_store::ScopeIdentity {
+            scope_ref: "sc_asker".into(),
+            scope_epoch: 3,
+            agent_id: None,
+        }),
+        ..identity("direct", "s")
+    }
+}
+
+#[test]
+fn execution_backstop_installs_only_on_retained_generic_answers() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = scoped_identity();
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.execution_session_ended(&id, 101).unwrap();
+    assert!(store.get(&id, 101).unwrap().unwrap().execution.is_none());
+    store.answer(&id, "allow_once", None, 102).unwrap();
+    let feed = store.answers(&owner.owner, 0, 103).unwrap();
+    store.ack(&owner.owner, feed.cursor).unwrap();
+    assert_eq!(
+        store
+            .execution_candidates(None, 16, 103)
+            .unwrap()
+            .records
+            .len(),
+        1
+    );
+    store.execution_session_ended(&id, 103).unwrap();
+    let record = store.get_phone(&id, 103).unwrap().unwrap();
+    assert_eq!(record.execution.as_deref(), Some("approved_not_executed"));
+    assert_eq!(record.execution_reason.as_deref(), Some("session_ended"));
+    assert_eq!(store.outcomes(0, 103).unwrap().cursor, feed.cursor);
+    assert!(store
+        .execution_candidates(None, 16, 104)
+        .unwrap()
+        .records
+        .is_empty());
+    let decision = store
+        .create(&owner, flow_decision(), 104)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&decision, "proceed", None, 105).unwrap();
+    store.execution_session_ended(&decision, 106).unwrap();
+    assert!(store
+        .get(&decision, 106)
+        .unwrap()
+        .unwrap()
+        .execution
+        .is_none());
+    let pruned = store
+        .create(&owner, request(), 107)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&pruned, "allow_once", None, 108).unwrap();
+    store
+        .execution_session_ended(&pruned, 108 + RETENTION_MS)
+        .unwrap();
+    assert!(store
+        .execution_candidates(None, 16, 108 + RETENTION_MS)
+        .unwrap()
+        .records
+        .is_empty());
+    store.sweep(108 + RETENTION_MS).unwrap();
+    store
+        .execution_session_ended(&pruned, 108 + RETENTION_MS)
+        .unwrap();
+    assert!(store
+        .get_phone(&pruned, 108 + RETENTION_MS)
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn execution_backstop_never_overwrites_a_requester_report() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = scoped_identity();
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&id, "allow_once", None, 102).unwrap();
+    // The liveness probe can be in flight when the requester reports its effect.
+    assert_eq!(
+        store
+            .execution_candidates(None, 16, 103)
+            .unwrap()
+            .records
+            .len(),
+        1
+    );
+    let reported = store
+        .report_execution(&owner.owner, &id, "executed", None, 103)
+        .unwrap();
+    store.execution_session_ended(&id, 104).unwrap();
+    assert_eq!(store.get_phone(&id, 104).unwrap().unwrap(), reported);
+}
+
+#[test]
+fn requester_report_replaces_session_ended_backstop() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = scoped_identity();
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&id, "allow_once", None, 102).unwrap();
+    store.execution_session_ended(&id, 103).unwrap();
+    let backstop = store.get_phone(&id, 103).unwrap().unwrap();
+    assert_eq!(backstop.execution.as_deref(), Some("approved_not_executed"));
+    assert_eq!(backstop.execution_reason.as_deref(), Some("session_ended"));
+    let reported = store
+        .report_execution(&owner.owner, &id, "executed", None, 104)
+        .unwrap();
+    assert_eq!(reported.execution.as_deref(), Some("executed"));
+    assert!(reported.execution_reason.is_none());
+    store.execution_session_ended(&id, 105).unwrap();
+    assert_eq!(store.get_phone(&id, 105).unwrap().unwrap(), reported);
+}
+
+#[test]
+fn requester_report_racing_session_ended_backstop_keeps_exactly_one_report() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let store = Arc::new(store);
+    let owner = scoped_identity();
+    for _ in 0..24 {
+        let id = store
+            .create(&owner, request(), 100)
+            .unwrap()
+            .record
+            .elicitation_id;
+        store.answer(&id, "allow_once", None, 102).unwrap();
+        let cursor = store.outcomes(0, 103).unwrap().cursor;
+        let barrier = Arc::new(Barrier::new(2));
+        let backstop = {
+            let store = store.clone();
+            let barrier = barrier.clone();
+            let id = id.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                store.execution_session_ended(&id, 103).unwrap();
+            })
+        };
+        barrier.wait();
+        let report = store
+            .report_execution(&owner.owner, &id, "executed", None, 103)
+            .unwrap();
+        backstop.join().unwrap();
+        let final_record = store.get_phone(&id, 104).unwrap().unwrap();
+        assert_eq!(report, final_record);
+        assert_eq!(final_record.execution.as_deref(), Some("executed"));
+        assert!(final_record.execution_reason.is_none());
+        assert_eq!(store.outcomes(0, 104).unwrap().cursor, cursor);
+    }
+}
+
+#[test]
+fn execution_scan_bounds_ineligible_rows_and_reaches_later_answers() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = scoped_identity();
+    for _ in 0..39 {
+        store.create(&owner, request(), 100).unwrap();
+    }
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&id, "allow_once", None, 102).unwrap();
+    let mut after = None;
+    let mut found = Vec::new();
+    for scanned in 0..=40 {
+        let page = store
+            .execution_candidates(after.as_deref(), 1, 103)
+            .unwrap();
+        assert!(page.records.len() <= 1);
+        found.extend(page.records.into_iter().map(|r| r.elicitation_id));
+        if scanned == 40 {
+            assert!(page.after.is_none());
+        } else {
+            assert!(page.after.is_some());
+        }
+        after = page.after;
+    }
+    assert_eq!(found, vec![id]);
+}

@@ -181,6 +181,11 @@ pub struct ConsentStore {
     db: SqliteStore,
 }
 
+pub struct ExecutionPage {
+    pub records: Vec<ElicitationRecord>,
+    pub after: Option<String>,
+}
+
 impl fmt::Debug for ConsentStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConsentStore")
@@ -543,7 +548,7 @@ impl ConsentStore {
         now_ms: i64,
     ) -> Result<ElicitationRecord> {
         self.transaction(|tx| {
-            let mut record = owned(tx, owner, id, now_ms)?;
+            let mut record = owned_retained(tx, owner, id, now_ms)?;
             if reason.is_some_and(|reason| {
                 execution != "approved_not_executed"
                     || reason.is_empty()
@@ -574,6 +579,59 @@ impl ConsentStore {
             record.execution_reason = reason.map(str::to_owned);
             save(tx, &record)?;
             Ok(record)
+        })
+    }
+
+    /// Inspect at most `limit` stored rows, returning eligible retained answers.
+    /// Advance by the scanned id even for ineligible rows to bound work and avoid starvation.
+    pub fn execution_candidates(
+        &self,
+        after: Option<&str>,
+        limit: usize,
+        now_ms: i64,
+    ) -> Result<ExecutionPage> {
+        self.read(|conn| {
+            let ids = ids(
+                conn,
+                "SELECT elicitation_id FROM elicitation_records \
+                 WHERE elicitation_id>COALESCE(?1,'') ORDER BY elicitation_id LIMIT ?2",
+                params![after, limit as i64],
+            )?;
+            let mut records = Vec::new();
+            for id in &ids {
+                if let Some(record) = load(conn, id)?.filter(|record| {
+                    retained(record, now_ms)
+                        && record.request.kind == "consent"
+                        && record.state == State::Answered
+                        && record.asker.is_some()
+                        && record.execution.is_none()
+                }) {
+                    records.push(record);
+                }
+            }
+            Ok(ExecutionPage {
+                records,
+                after: ids.last().cloned(),
+            })
+        })
+    }
+
+    /// Recheck eligibility and install the backstop atomically with requester reports.
+    pub fn execution_session_ended(&self, id: &str, now_ms: i64) -> Result<()> {
+        self.transaction(|tx| {
+            let Some(mut record) = load(tx, id)?.filter(|record| retained(record, now_ms)) else {
+                return Ok(());
+            };
+            if record.request.kind == "consent"
+                && record.state == State::Answered
+                && record.asker.is_some()
+                && record.execution.is_none()
+            {
+                record.execution = Some("approved_not_executed".into());
+                record.execution_reason = Some("session_ended".into());
+                save(tx, &record)?;
+            }
+            Ok(())
         })
     }
 
@@ -725,6 +783,24 @@ fn visible(conn: &Connection, id: &str, now_ms: i64) -> Result<Option<Elicitatio
 }
 
 fn owned(conn: &Connection, owner: &str, id: &str, now_ms: i64) -> Result<ElicitationRecord> {
+    check_owner(conn, owner, id)?;
+    visible(conn, id, now_ms)?
+        .ok_or_else(|| refuse("elicitation_not_found", "elicitation is no longer retained"))
+}
+
+fn owned_retained(
+    conn: &Connection,
+    owner: &str,
+    id: &str,
+    now_ms: i64,
+) -> Result<ElicitationRecord> {
+    check_owner(conn, owner, id)?;
+    load(conn, id)?
+        .filter(|record| retained(record, now_ms))
+        .ok_or_else(|| refuse("elicitation_not_found", "elicitation is no longer retained"))
+}
+
+fn check_owner(conn: &Connection, owner: &str, id: &str) -> Result<()> {
     let stored_owner: Option<String> = conn
         .query_row(
             "SELECT owner FROM elicitation_records WHERE elicitation_id=?1",
@@ -738,8 +814,12 @@ fn owned(conn: &Connection, owner: &str, id: &str, now_ms: i64) -> Result<Elicit
             "elicitation has no matching owner",
         ));
     }
-    visible(conn, id, now_ms)?
-        .ok_or_else(|| refuse("elicitation_not_found", "elicitation is no longer retained"))
+    Ok(())
+}
+
+/// Shared exponential retry delay for maintenance work; attempts are zero-based.
+pub fn maintenance_backoff_ms(attempts: u32) -> i64 {
+    (250_i64.saturating_mul(1_i64 << attempts.min(8))).min(60_000)
 }
 
 fn ids<P: rusqlite::Params>(conn: &Connection, sql: &str, params: P) -> Result<Vec<String>> {

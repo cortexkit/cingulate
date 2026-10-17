@@ -51,6 +51,10 @@ nor `block_until_ms` gains an expiry cap. Detached generic cards can be answered
 arbitrarily later and still produce the usual late-answer notice. Permission
 asks continue to forbid expiry fields entirely. The optional execution-report
 `reason` for existing kinds follows [v1](consent-requester-v1.md#consentreport_execution).
+Generic-consent requesters may report after ack while retained. Cingulate's
+`approved_not_executed` / `session_ended` backstop fills in only when no report
+exists and the stamped asker scope has definitely ended; requester reports always
+replace earlier reports, including the backstop, as specified in v1.
 
 `reserved:cerebellum`, `reserved:plexus`, `reserved:broca` and
 `reserved:entorhinal` may call `consent.request`,

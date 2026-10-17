@@ -36,6 +36,7 @@ use tokio::sync::{watch, Mutex};
 
 mod access;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
+mod execution;
 mod permissions;
 pub use permissions::{PermissionsCallError, PermissionsRuntime};
 
@@ -347,6 +348,7 @@ struct Inner {
     access_runtime: StdMutex<Arc<dyn AccessRuntime>>,
     permissions_runtime: StdMutex<Arc<dyn PermissionsRuntime>>,
     notice_delivery: Mutex<()>,
+    execution_maintenance: Mutex<execution::Maintenance>,
     options: Options,
     store: Mutex<Option<ConsentStore>>,
     health: AtomicU8,
@@ -431,6 +433,7 @@ impl Handler {
                     permissions::UnavailablePermissionsRuntime,
                 )),
                 notice_delivery: Mutex::new(()),
+                execution_maintenance: Mutex::new(execution::Maintenance::default()),
                 options,
                 store: Mutex::new(None),
                 health: AtomicU8::new(0),
@@ -553,6 +556,7 @@ impl Handler {
             .with_store(|store| store.sweep(self.inner.options.clock.now_ms()))
             .await?;
         self.settlements(&settlements).await;
+        self.execution_maintenance().await?;
         self.access_maintenance().await?;
         Ok(())
     }
