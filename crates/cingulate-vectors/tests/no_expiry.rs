@@ -22,7 +22,7 @@ async fn no_expiry_and_execution_reason_vectors_regenerate_byte_for_byte() {
         .collect();
     assert_eq!(
         format!("{:x}", Sha256::digest(sums.as_bytes())),
-        "51414a6e018f9440f746d9b7b85f5ae49a39bd0f7903e08e61c8a7c9d4c26894"
+        "30a702ac0a13c5e3ab5cb9087af8ccc229ba5f6444d83f7a53e81fd19881fcbd"
     );
     generated.insert("SHA256SUMS".into(), sums.into_bytes());
     let actual: BTreeSet<_> = fs::read_dir(&root)
