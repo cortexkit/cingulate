@@ -60,7 +60,7 @@ except the explicitly spelled `requestedSchema`. No camelCase aliases exist.
 | `material_damage` | Boolean | Required. |
 | `late_execution` | String | Required: `execute` or `notify_only`. The existing decision examples use `notify_only`. Neither value causes Cingulate to execute a choice. |
 | `target` | Object | Required: exactly string `kind` and `label`, both nonblank. |
-| `expires_in_ms` | Signed-64-bit integer | Required; 1–86,400,000. |
+| `expires_in_ms` | Signed-64-bit integer | Optional; when present, 1–86,400,000. Omitted or null means no deadline; requires `consent-no-expiry/v1`. |
 | `scope` | JSON value | Optional, but either non-null scope or nonblank `args_digest` must be supplied. Contents are opaque. |
 | `args_digest` | String | Optional; needed if no scope. |
 | `dedup_key` | String | Optional; owner-scoped pending-card key, described below. |
@@ -80,6 +80,22 @@ Success result is exactly `{elicitation_id: string}` for creation, in-place
 refresh and replacement. The reply alone does not distinguish those cases: a
 refresh preserves id, a replacement returns a new id. Use requester get or await
 with the returned id to read the current record.
+
+For every v1 card kind, requesters may omit `expires_in_ms` only after checking
+that Cingulate's `catalog.list` entry advertises `consent-no-expiry/v1` in
+`capabilities.provides`. Older Cingulate requires the field and refuses omission.
+A supplied integer retains its existing bounds and fail-closed expiry behavior.
+Without a deadline the card stays pending until answered or withdrawn; it is
+never expired by a maintenance sweep or a wait timeout. Pending payloads are not
+retention-pruned. `on_expiry: "deny"` and a decline default remain required, but
+silence never selects a choice. No-deadline requester records omit both
+`expires_in_ms` and `expires_at_ms`; phone cards omit `expiresInMs` and
+`expiresAtMs`. See the additive
+[no-expiry vectors](../../test-vectors/consent-no-expiry-v1/README.md).
+The phone pending list orders all cards oldest first by creation time, then id,
+regardless of deadline. Its new continuation is a JSON object keyed by
+`created_at_ms` and `elicitation_id`; the previous expiry-keyed input remains
+accepted for one release as described in the phone contract.
 
 ### Three decision bodies and choices
 
@@ -212,11 +228,13 @@ page(s) you processed: an arbitrary high cursor can discard unread existing answ
 Required params: string `elicitation_id` and nonnegative signed-64-bit integer
 `timeout_ms`. The timeout is capped at 120,000 ms. Success is the current full
 requester record, **not** an answer wrapper. `timeout_ms: 0` is an immediate read.
-Otherwise wait until settlement, deadline, or card expiry, whichever is first.
+Otherwise wait until settlement, the caller's wait deadline, or card expiry
+(when present), whichever is first.
 A timeout can return `state: "pending"`; inspect state/choice, never infer approval
 from a completed wait. Dedup refresh wakes the waiter to re-read the card, but
 does not extend the call's timeout. While waiting, pending phone/get projections
-carry `blockUntilMs` / `block_until_ms`, capped at expiry. Dropping/cancelling the
+carry `blockUntilMs` / `block_until_ms`, capped at expiry only when the card has
+one. A no-deadline card uses only the caller's wait bound. Dropping/cancelling the
 wait removes its registration. Same owner/not-found refusals as requester get.
 
 ## `consent.report_execution`
@@ -233,6 +251,17 @@ string. For other kinds, the card must already be answered or the refusal is
 particular grant effect; requesters remain responsible for acting only on an
 appropriate explicit answer. Ownership and retention checks still apply.
 
+Optional `reason` is accepted **only** with `execution: "approved_not_executed"`.
+It is an open-set code of 1–64 bytes matching `^[a-z][a-z0-9_]{0,63}$`; null,
+non-strings, malformed codes, or a reason with any other execution value refuse
+`elicitation_invalid_execution` with `reason` in the diagnostic. Known codes are
+`session_ended`, `target_gone`, `grant_store_unavailable` and
+`refused_at_dispatch`. Cingulate stores any well-formed code, including unknown
+ones, with the execution report. Requester reads use `execution_reason`; phone
+reads use `executionReason`. Both omit it when absent. Each new report replaces
+the execution and reason together, so reporting without a reason clears any
+previous reason. `execution` and `execution_reason` report what the requester says happened; they never authorize running anything.
+
 ## Updating or withdrawing an open card
 
 Submit another `consent.request` with the same `dedup_key` on the same bound
@@ -241,8 +270,10 @@ request. No key means always create. Matching content ignores expiry duration,
 the key itself, discarded answer schema, and resolved subject label, but compares
 all other request data and subject agent/head ids:
 
-* Same content: refresh in place, same id and creation time, expiry moves to
-  current time plus requested lifetime. A newly resolved display label may
+* Same content: refresh in place, same id and creation time. A supplied lifetime
+  moves expiry to current time plus that lifetime; an omitted lifetime leaves
+  the refreshed card without a deadline, including when the old card had one.
+  A no-deadline refresh of a no-deadline card stays no-deadline. A newly resolved display label may
   update. Waiters wake; no new-card pointer is delivered. The phone's revision
   changes when persisted pending content/expiry changes, so it receives the
   refreshed card on its next poll.

@@ -472,7 +472,8 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-card-text/v1",
             "consent-option-group/v1",
             "consent-single-use/v1",
-            "consent-outcomes-late/v1"
+            "consent-outcomes-late/v1",
+            "consent-no-expiry/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
@@ -631,7 +632,8 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-card-text/v1",
             "consent-option-group/v1",
             "consent-single-use/v1",
-            "consent-outcomes-late/v1"
+            "consent-outcomes-late/v1",
+            "consent-no-expiry/v1"
         ]
     );
 }
@@ -2349,7 +2351,7 @@ async fn pending_revision_expiry_swept_on_conditional_read_cannot_be_unchanged()
 }
 
 #[tokio::test]
-async fn pending_revision_continuation_ignores_condition_and_orders_expiry_then_id() {
+async fn pending_revision_continuation_ignores_condition_and_accepts_legacy_expiry_cursor() {
     let fixture = Fixture::open(None).await;
     let mut request = body();
     request["expires_in_ms"] = json!(120_000);
@@ -2363,7 +2365,7 @@ async fn pending_revision_continuation_ignores_condition_and_orders_expiry_then_
         .iter()
         .map(|r| r["elicitationId"].clone())
         .collect();
-    assert_eq!(ids, vec![json!(first), json!(second), json!(late)]);
+    assert_eq!(ids, vec![json!(late), json!(first), json!(second)]);
     let continued = pending_list(
         &fixture,
         json!({
@@ -2372,10 +2374,7 @@ async fn pending_revision_continuation_ignores_condition_and_orders_expiry_then_
         }),
     )
     .await;
-    assert_eq!(
-        continued["records"],
-        json!([full["records"][1], full["records"][2]])
-    );
+    assert_eq!(continued["records"], json!([full["records"][2]]));
     assert_eq!(continued["revision"], full["revision"]);
     assert!(continued.get("unchanged").is_none());
 }
@@ -3145,4 +3144,188 @@ async fn cerebellum_requester_ref_is_not_a_dedup_key() {
     request["dedup_key"] = json!("different-card-key");
     request["requester_ref"] = json!("same-call");
     assert_ne!(f.request(&cerebellum(), request).await, keyed);
+}
+
+#[tokio::test]
+async fn mixed_deadline_paging_walk_returns_every_card_once_in_creation_order() {
+    let f = Fixture::open(None).await;
+    let mut expected = Vec::new();
+    for n in 0..7 {
+        f.clock.set(1000 + n);
+        let mut request = body();
+        request["prompt"] = json!("p".repeat(1_050_000));
+        if n % 2 == 0 {
+            request.as_object_mut().unwrap().remove("expires_in_ms");
+        } else {
+            request["expires_in_ms"] = json!(60_000 - n * 1000);
+        }
+        expected.push(f.request(&direct(), request).await);
+    }
+    let mut params = json!({});
+    let mut seen = Vec::new();
+    let mut pages = 0;
+    loop {
+        let page = pending_list(&f, params).await;
+        pages += 1;
+        for record in page["records"].as_array().unwrap() {
+            seen.push(record["elicitationId"].as_str().unwrap().to_owned());
+        }
+        if let Some(next) = page.get("continuation") {
+            assert!(next.is_object(), "shipped phones require an object cursor");
+            let last = page["records"].as_array().unwrap().last().unwrap();
+            assert_eq!(next["created_at_ms"], last["createdAtMs"]);
+            assert_eq!(next["elicitation_id"], last["elicitationId"]);
+            assert!(next.get("expires_at_ms").is_none());
+            params = json!({"continuation":next});
+        } else {
+            break;
+        }
+        assert!(pages < 8, "paging did not advance");
+    }
+    assert!(pages > 1);
+    assert_eq!(seen, expected);
+}
+
+#[tokio::test]
+async fn no_deadline_await_uses_only_the_callers_wait_bound() {
+    let f = Fixture::open(None).await;
+    let mut request = body();
+    request.as_object_mut().unwrap().remove("expires_in_ms");
+    let id = f.request(&direct(), request).await;
+    let handler = f.handler.clone();
+    let await_id = id.clone();
+    let task = tokio::spawn(async move {
+        ok(
+            &handler,
+            &direct(),
+            "consent.await",
+            json!({"elicitation_id":await_id,"timeout_ms":120_000}),
+        )
+        .await
+    });
+    f.clock.sleeping_at(121_000).await;
+    let phone = ok(
+        &f.handler,
+        &operator(),
+        "consent.get",
+        json!({"elicitationId":id}),
+    )
+    .await;
+    assert_eq!(phone["blockUntilMs"], 121_000);
+    assert!(phone.get("expiresAtMs").is_none());
+    f.clock.set(121_000);
+    let pending = bounded(task).await.unwrap();
+    assert_eq!(pending["state"], "pending");
+    assert!(pending.get("expires_at_ms").is_none());
+    assert!(pending.get("block_until_ms").is_none());
+    f.clock.set(10_000_000_000);
+    assert_eq!(f.get(&id).await["state"], "pending");
+    f.answer(&id, "deny").await;
+    assert_eq!(f.get(&id).await["state"], "answered");
+}
+
+#[tokio::test]
+async fn execution_reason_requires_approved_not_executed_and_a_well_formed_code() {
+    let mut f = Fixture::open(None).await;
+    let id = f.request(&direct(), body()).await;
+    f.answer(&id, "allow_once").await;
+    for execution in [
+        json!("executed"),
+        json!("outcome_unknown"),
+        json!("unknown"),
+        Value::Null,
+        json!(false),
+        json!(123),
+    ] {
+        let refusal = f
+            .unchanged_error(
+                &direct(),
+                "consent.report_execution",
+                json!({"elicitation_id":id,"execution":execution,"reason":"session_ended"}),
+                "elicitation_invalid_execution",
+            )
+            .await;
+        assert!(refusal.contains("reason"));
+    }
+    for reason in [
+        json!(null),
+        json!(42),
+        json!(false),
+        json!([]),
+        json!({}),
+        json!(""),
+        json!("Session_ended"),
+        json!("session-ended"),
+        json!("1session"),
+        json!("session ended"),
+        json!("é"),
+        json!("a".repeat(65)),
+    ] {
+        let refusal = f
+            .unchanged_error(
+                &direct(),
+                "consent.report_execution",
+                json!({"elicitation_id":id,"execution":"approved_not_executed","reason":reason}),
+                "elicitation_invalid_execution",
+            )
+            .await;
+        assert!(refusal.contains("reason"));
+    }
+    for reason in [
+        "session_ended",
+        "target_gone",
+        "grant_store_unavailable",
+        "refused_at_dispatch",
+        "future_provider_code_42",
+        "a",
+        &"a".repeat(64),
+    ] {
+        let record = ok(
+            &f.handler,
+            &direct(),
+            "consent.report_execution",
+            json!({"elicitation_id":id,"execution":"approved_not_executed","reason":reason}),
+        )
+        .await;
+        assert_eq!(record["execution_reason"], reason);
+        assert!(record.get("executionReason").is_none());
+        assert_eq!(
+            ok(
+                &f.handler,
+                &operator(),
+                "consent.get",
+                json!({"elicitationId":id})
+            )
+            .await["executionReason"],
+            reason
+        );
+    }
+    f.reopen(None).await;
+    assert_eq!(
+        ok(
+            &f.handler,
+            &operator(),
+            "consent.get",
+            json!({"elicitationId":id})
+        )
+        .await["executionReason"],
+        "a".repeat(64)
+    );
+    let updated = ok(
+        &f.handler,
+        &direct(),
+        "consent.report_execution",
+        json!({"elicitation_id":id,"execution":"executed"}),
+    )
+    .await;
+    assert!(updated.get("execution_reason").is_none());
+    assert!(ok(
+        &f.handler,
+        &operator(),
+        "consent.get",
+        json!({"elicitationId":id})
+    )
+    .await
+    .get("executionReason")
+    .is_none());
 }

@@ -115,7 +115,13 @@ async fn stored_phone_projections_match_all_record_vectors() {
         );
     }
     store
-        .report_execution(&identity.owner, &head.elicitation_id, "executed", ANSWERED)
+        .report_execution(
+            &identity.owner,
+            &head.elicitation_id,
+            "executed",
+            None,
+            ANSWERED,
+        )
         .unwrap();
     let stored = store.get(&head.elicitation_id, ANSWERED).unwrap().unwrap();
     assert_eq!(

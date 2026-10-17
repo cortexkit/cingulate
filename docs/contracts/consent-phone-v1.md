@@ -77,8 +77,8 @@ nested payload keys are not recursively renamed.
 | `lateExecution` | `execute` or `notify_only`; requester execution policy, not evidence that execution happened. |
 | `target` | `{kind: string, label: string}`. |
 | `facts` | Array of `{label: string, value: string}`; present even when empty. |
-| `expiresInMs` | Integer requested lifetime, 1 through 86,400,000 ms. |
-| `createdAtMs`, `expiresAtMs` | Integer Unix milliseconds. Dedup refresh may move expiry without changing id or creation time. |
+| `expiresInMs` | Optional integer requested lifetime, 1 through 86,400,000 ms. Omitted on no-deadline cards. |
+| `createdAtMs`, `expiresAtMs` | Integer Unix milliseconds. Creation is always present; expiry is omitted on no-deadline cards. Dedup refresh may move or remove expiry without changing id or creation time. |
 | `subject` | `{label: string, agentId?: string, headAgentId?: string}`. Missing agent fields are omitted, not null. |
 | `requesterLabel` | String requester label, e.g. `reserved:cerebellum`. Display data, not client-supplied identity. |
 | `requesterName` | Optional human-readable name for a requester principal Cingulate recognizes, such as `Cerebellum` or `Basal`. Omitted for `direct` and unknown principals; never use the raw principal as a fallback. `requesterLabel` remains the raw principal. |
@@ -86,7 +86,8 @@ nested payload keys are not recursively renamed.
 | `answeredAtMs` | Optional integer settlement time; omitted while pending. Expiry uses the card's deadline, not the later sweep time. |
 | `answeredChoiceId` | Optional string; present after an answer. Expired and withdrawn cards have no selected choice, even though expiry denies. |
 | `execution` | Optional string requester-reported execution outcome: `executed`, `approved_not_executed`, or `outcome_unknown`. Omitted until reported. |
-| `blockUntilMs` | Optional integer, only on pending cards with an active requester wait. The latest wait deadline, capped at card expiry; indicates how long a requester is currently waiting, not an approval, a lease or an extension of expiry. Disappears when the last wait is dropped. Conditional polling accounts for it. |
+| `executionReason` | Optional open-set lowercase snake_case code reported with `approved_not_executed`; absent when no reason was supplied. See the requester execution-report contract. |
+| `blockUntilMs` | Optional integer, only on pending cards with an active requester wait. The latest wait deadline, capped at card expiry only if one exists; indicates how long a requester is currently waiting, not an approval, a lease or an extension of expiry. Disappears when the last wait is dropped. Conditional polling accounts for it. |
 
 Optional requester-provided fields are omitted when absent: `dedupKey` (string),
 `scope` and `duration` (JSON values), `argsDigest` (string), `sessionRef` and
@@ -113,16 +114,24 @@ Flow objects are opaque to the module; do not assume an enforced manifest schema
 | Param | Type | Required? | Phone spelling / behavior |
 |---|---|---|---|
 | `if_revision` | String | No | Send exactly this spelling, copied from a completed first-page poll. Missing, unknown, null or non-string values return a full page. `ifRevision` is ignored. |
-| `continuation` | Object | No | Copy the returned object unchanged. Missing or null means first page. Non-null must contain `expires_at_ms` (nonnegative signed-64-bit integer) and `elicitation_id` (string). No camelCase aliases. Extra members are ignored. |
+| `continuation` | Object | No | Copy the returned JSON object unchanged, including unknown members. Missing or null means first page. Non-null must contain `created_at_ms` (nonnegative signed-64-bit integer) and `elicitation_id` (string). No camelCase aliases. Extra members are ignored. |
 
 There is no `limit`, `since`, agent filter, or caller-selected page size; such
 extra params are ignored. Omitted `params` is also accepted for this operation.
 
 Full reply: `{records: Card[], revision: string, continuation?:
-{expires_at_ms: integer, elicitation_id: string}}`. An empty list is `records: []`.
-`unchanged` is absent on full replies. Records are sorted by increasing expiry,
-then lexicographic id (not numerical id suffix). Only pending cards appear.
+{created_at_ms: integer, elicitation_id: string}}`. An empty list is `records: []`.
+`unchanged` is absent on full replies. All pending cards are sorted oldest first
+by creation time, then lexicographic id (not numerical id suffix), regardless of
+whether they have a deadline. Only pending cards appear.
 Expired cards are swept before comparing a revision or constructing a page.
+
+For one release, the old `{expires_at_ms, elicitation_id}` object is also accepted
+on input: its expiry must be a nonnegative signed-64-bit integer, and Cingulate
+resolves the retained card's creation position. If that legacy card has already
+been pruned, restart the list. All newly served continuations use creation time
+and are JSON objects, never strings, numbers or arrays. An old cursor resumes in
+the new creation order, not a frozen copy of the old expiry order.
 
 Each complete serialized response is below 3 MiB. When more cards remain,
 `continuation` names the last returned position; send it unchanged to advance

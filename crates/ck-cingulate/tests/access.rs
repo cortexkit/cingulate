@@ -1729,7 +1729,9 @@ async fn permission_phone_pages_and_request_bodies_obey_shared_byte_budgets() {
         if page_number == 3 {
             assert!(page.get("continuation").is_none());
         } else {
-            assert_eq!(page["continuation"]["expires_at_ms"], i64::MAX);
+            assert!(page["continuation"].is_object());
+            assert_eq!(page["continuation"]["created_at_ms"], card["createdAtMs"]);
+            assert!(page["continuation"].get("expires_at_ms").is_none());
         }
         params = json!({"continuation": page["continuation"]});
     }

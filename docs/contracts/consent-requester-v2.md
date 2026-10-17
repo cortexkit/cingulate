@@ -37,8 +37,20 @@ session. Body fields cannot supply either identity. Requester reads and the core
 outcome feed include `subject.via_worker: true` for these cards; phone reads use
 `subject.viaWorker: true`. The flag is omitted, not false, on every other card.
 Generic worker cards retain the ordinary generic-consent state machine and
-fail-closed expiry. They ask the user directly; they do not first require an
+fail-closed expiry when a lifetime is supplied. They ask the user directly; they do not first require an
 answer from the head, unlike worker permission asks.
+
+All existing v1 kinds, including generic worker consent, may omit
+`expires_in_ms` only when Cingulate advertises `consent-no-expiry/v1` in its
+`catalog.list` capabilities. Omission (or null) means no deadline: the card stays
+pending until answered or withdrawn, with no expiry fields on requester or
+phone reads. A present integer retains v1's 1–86,400,000 ms bounds and fail-closed
+expiry. Older versions refuse an omitted lifetime, so the capability check is
+required. Await timeouts bound only the call; on a no-deadline card neither await
+nor `block_until_ms` gains an expiry cap. Detached generic cards can be answered
+arbitrarily later and still produce the usual late-answer notice. Permission
+asks continue to forbid expiry fields entirely. The optional execution-report
+`reason` for existing kinds follows [v1](consent-requester-v1.md#consentreport_execution).
 
 `reserved:cerebellum`, `reserved:plexus`, `reserved:broca` and
 `reserved:entorhinal` may call `consent.request`,

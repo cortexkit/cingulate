@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 (ck-cingulate)
+
+- Make `expires_in_ms` optional and advertise `consent-no-expiry/v1`. Without a
+  lifetime, cards remain pending until answered or withdrawn; existing explicit
+  lifetimes retain their bounds and fail-closed behavior. Migration 6 makes expiry
+  nullable without rewriting cards, settlements, revisions or answer cursors.
+- Order every pending card oldest first by creation time then id, including
+  permission asks. Serve JSON object cursors `{created_at_ms, elicitation_id}`;
+  accept the prior expiry-keyed object for one release by resolving its card.
+- Accept an optional open-set `reason` code with `approved_not_executed`, store it
+  with the execution report, and project `execution_reason` to requesters and
+  `executionReason` to the phone. Refuse malformed or inappropriate reasons.
+- Add served no-deadline, mixed-list and execution-reason vectors while retaining
+  all existing corpus bytes.
+
 ## 0.7.1 (ck-cingulate)
 
 - Add optional `single_use` to generic consent requests and advertise

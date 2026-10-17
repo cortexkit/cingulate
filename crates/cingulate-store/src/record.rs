@@ -46,7 +46,8 @@ pub struct ElicitationRecord {
     pub elicitation_id: String,
     pub request: ConsentRequest,
     pub created_at_ms: i64,
-    pub expires_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<i64>,
     pub subject: Subject,
     pub state: State,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,6 +56,8 @@ pub struct ElicitationRecord {
     pub answered_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_reason: Option<String>,
     pub requester: String,
     /// Set once the requester stops holding the agent's call. Requester-private:
     /// no phone or feed projection shows it.
@@ -94,7 +97,10 @@ impl ElicitationRecord {
         object.insert("requesterLabel".into(), json!(self.requester));
         if self.state == State::Pending {
             if let Some(until) = block_until {
-                object.insert("blockUntilMs".into(), json!(until.min(self.expires_at_ms)));
+                object.insert(
+                    "blockUntilMs".into(),
+                    json!(self.expires_at_ms.map_or(until, |expiry| until.min(expiry))),
+                );
             }
         }
         value

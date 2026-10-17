@@ -162,7 +162,6 @@ fn every_required_field_is_required_and_typed() {
         "material_damage",
         "late_execution",
         "target",
-        "expires_in_ms",
     ] {
         let mut missing = consent();
         missing.as_object_mut().unwrap().remove(key);
@@ -461,6 +460,33 @@ fn semantic_refusal_precedence_follows_all_eleven_rules() {
     body["scope"] = Value::Null;
     body["target"]["label"] = json!("");
     invalid(body, "provide args_digest or scope");
+}
+
+#[test]
+fn expiry_is_optional_but_present_values_are_typed() {
+    let mut body = consent();
+    body.as_object_mut().unwrap().remove("expires_in_ms");
+    let request = ConsentRequest::decode(body.clone()).unwrap();
+    assert_eq!(request.expires_in_ms, None);
+    assert!(serde_json::to_value(request)
+        .unwrap()
+        .get("expires_in_ms")
+        .is_none());
+    body["expires_in_ms"] = Value::Null;
+    assert_eq!(
+        ConsentRequest::decode(body.clone()).unwrap().expires_in_ms,
+        None
+    );
+    for value in [
+        json!("60000"),
+        json!(1.5),
+        json!(true),
+        json!([]),
+        json!({}),
+    ] {
+        body["expires_in_ms"] = value;
+        serde_refusal(body.clone(), "invalid type");
+    }
 }
 
 #[test]

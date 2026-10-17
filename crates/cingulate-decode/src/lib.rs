@@ -158,7 +158,8 @@ pub struct ConsentRequest {
     pub facts: Vec<Fact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<Preview>,
-    pub expires_in_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_in_ms: Option<i64>,
     /// Checked against the option ids, then cleared by `decode`. Never serialized
     /// into a stored request, projection or dedup comparison.
     #[serde(default, rename = "requestedSchema", skip_serializing)]
@@ -486,7 +487,10 @@ impl ConsentRequest {
         {
             return Err(Refusal::invalid("invalid urgency or late_execution"));
         }
-        if !(1..=MAX_EXPIRES_IN_MS).contains(&self.expires_in_ms) {
+        if self
+            .expires_in_ms
+            .is_some_and(|expiry| !(1..=MAX_EXPIRES_IN_MS).contains(&expiry))
+        {
             return Err(Refusal::invalid(
                 "expires_in_ms must be positive and at most 24 hours",
             ));

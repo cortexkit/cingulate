@@ -137,6 +137,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-option-group/v1".into(),
                 "consent-single-use/v1".into(),
                 "consent-outcomes-late/v1".into(),
+                "consent-no-expiry/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -850,7 +851,31 @@ impl Handler {
                 .await;
         }
         let execution = if method == "consent.report_execution" {
-            Some(text(&params, "execution")?)
+            Some(text(&params, "execution").map_err(|error| {
+                if params.get("reason").is_some() {
+                    Refusal::new(
+                        "elicitation_invalid_execution",
+                        "reason requires execution approved_not_executed",
+                    )
+                } else {
+                    error
+                }
+            })?)
+        } else {
+            None
+        };
+        let reason = if method == "consent.report_execution" {
+            params
+                .get("reason")
+                .map(|value| {
+                    value.as_str().ok_or_else(|| {
+                        Refusal::new(
+                            "elicitation_invalid_execution",
+                            "reason must be a lowercase snake_case code of 1 to 64 bytes",
+                        )
+                    })
+                })
+                .transpose()?
         } else {
             None
         };
@@ -942,6 +967,7 @@ impl Handler {
                             &stamp.owner(),
                             id.expect("report id"),
                             execution.expect("execution"),
+                            reason,
                             now,
                         )
                         .map_err(store_error)?,
@@ -974,10 +1000,22 @@ impl Handler {
                         .get("continuation")
                         .filter(|value| !value.is_null())
                         .map(|value| -> Result<(i64, String), Refusal> {
-                            Ok((
-                                integer(value, "expires_at_ms")?,
-                                text(value, "elicitation_id")?.to_owned(),
-                            ))
+                            let id = text(value, "elicitation_id")?.to_owned();
+                            let created = if value.get("created_at_ms").is_some() {
+                                integer(value, "created_at_ms")?
+                            } else {
+                                // Accept the previous release's expiry cursor, but
+                                // resume at that card's position in creation order.
+                                integer(value, "expires_at_ms")?;
+                                if let Some(record) = store.get_phone(&id, now).map_err(store_error)? {
+                                    record.created_at_ms
+                                } else if let Some(record) = store.access_get(&id).map_err(store_error)? {
+                                    record.created_at_ms
+                                } else {
+                                    return Err(invalid("legacy continuation card is no longer retained; restart the list"));
+                                }
+                            };
+                            Ok((created, id))
                         })
                         .transpose()?;
                     // Snapshot deadlines once so the revision and every rendered
@@ -1024,7 +1062,7 @@ impl Handler {
                         .map_err(store_error)?
                         .into_iter()
                         .map(|record| {
-                            let key = (record.expires_at_ms, record.elicitation_id.clone());
+                            let key = (record.created_at_ms, record.elicitation_id.clone());
                             let mut value =
                                 record.phone(blocks.get(&record.elicitation_id).copied());
                             if let Some(name) = requester_name(&record.requester) {
@@ -1035,8 +1073,8 @@ impl Handler {
                         .collect();
                     for record in store.access_pending().map_err(store_error)? {
                         if record.state == "pending:user" {
-                            // Pending-list continuations need a common sort key. Place
-                            // nonexpiring asks after expiring cards without adding a deadline.
+                            // Permission asks share the same creation-order cursor
+                            // as generic cards; neither kind needs an expiry to sort.
                             let mut value =
                                 record.wire(true, blocks.get(&record.elicitation_id).copied());
                             if let Some(label) = access_labels.get(&record.elicitation_id) {
@@ -1045,7 +1083,10 @@ impl Handler {
                             if let Some(name) = requester_name(&record.identity.principal) {
                                 value["requesterName"] = json!(name);
                             }
-                            cards.push(((i64::MAX, record.elicitation_id.clone()), value));
+                            cards.push((
+                                (record.created_at_ms, record.elicitation_id.clone()),
+                                value,
+                            ));
                         }
                     }
                     cards.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1067,7 +1108,7 @@ impl Handler {
                         }
                         records.push(value);
                         bytes += size;
-                        last = Some(json!({"expires_at_ms":key.0,"elicitation_id":key.1}));
+                        last = Some(json!({"created_at_ms":key.0,"elicitation_id":key.1}));
                     }
                     let mut reply = json!({"records":records,"revision":revision});
                     if let Some(continuation) = continuation {
@@ -1145,7 +1186,9 @@ impl Handler {
             drop(guard);
             self.settlements(&events).await;
             let record = result?;
-            let until = deadline.min(record.expires_at_ms);
+            let until = record
+                .expires_at_ms
+                .map_or(deadline, |expiry| deadline.min(expiry));
             if record.state != State::Pending || now >= until {
                 drop(registration);
                 return Ok(self.project(&record, false));

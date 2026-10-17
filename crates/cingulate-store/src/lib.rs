@@ -23,7 +23,7 @@ pub use record::{ElicitationRecord, State, Subject, LATE_ANSWER_PURPOSE};
 
 pub const RETENTION_MS: i64 = 86_400_000;
 pub const MIGRATION_NAMESPACE: &str = "cingulate";
-pub const MIGRATIONS: [Migration; 5] = [
+pub const MIGRATIONS: [Migration; 6] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -43,6 +43,10 @@ pub const MIGRATIONS: [Migration; 5] = [
     Migration {
         version: 5,
         statements: include_str!("../migrations/005_shared_notice_outbox.sql"),
+    },
+    Migration {
+        version: 6,
+        statements: include_str!("../migrations/006_optional_expiry.sql"),
     },
 ];
 
@@ -262,12 +266,15 @@ impl ConsentStore {
             let mut settlements = Vec::new();
             if let Some(id) = matched {
                 let mut old = load(tx, &id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-                if old.expires_at_ms <= now_ms {
+                if old.expires_at_ms.is_some_and(|expiry| expiry <= now_ms) {
                     expire(tx, &mut old)?;
                     settlements.push(old);
                 } else if same_content(&old, &request, &identity.subject) {
                     old.request = request;
-                    old.expires_at_ms = now_ms.saturating_add(old.request.expires_in_ms);
+                    old.expires_at_ms = old
+                        .request
+                        .expires_in_ms
+                        .map(|ttl| now_ms.saturating_add(ttl));
                     if let Some(name) = &identity.resolved_name {
                         old.subject.label = name.clone();
                     }
@@ -299,7 +306,7 @@ impl ConsentStore {
             }
             let record = ElicitationRecord {
                 elicitation_id: format!("el_{seq}"),
-                expires_at_ms: now_ms.saturating_add(request.expires_in_ms),
+                expires_at_ms: request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl)),
                 request,
                 created_at_ms: now_ms,
                 subject,
@@ -308,6 +315,7 @@ impl ConsentStore {
                 answered_at_ms: None,
                 answered_choice_id: None,
                 execution: None,
+                execution_reason: None,
                 detached: false,
                 late: false,
                 asker: identity.asker.clone(),
@@ -379,7 +387,7 @@ impl ConsentStore {
             let ids = ids(
                 conn,
                 "SELECT elicitation_id FROM elicitation_records \
-                WHERE state='pending' ORDER BY expires_at_ms,elicitation_id",
+                WHERE state='pending' ORDER BY json_extract(record_json,'$.createdAtMs'),elicitation_id",
                 [],
             )?;
             ids.iter()
@@ -415,7 +423,9 @@ impl ConsentStore {
                 });
             }
             let mut settlements = Vec::new();
-            if record.state == State::Pending && record.expires_at_ms <= now_ms {
+            if record.state == State::Pending
+                && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
+            {
                 expire(tx, &mut record)?;
                 settlements.push(record.clone());
             }
@@ -471,7 +481,7 @@ impl ConsentStore {
             let mut record = owned(tx, owner, id, now_ms)?;
             let mut settlements = Vec::new();
             if record.state == State::Pending {
-                if record.expires_at_ms <= now_ms {
+                if record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms) {
                     expire(tx, &mut record)?;
                 } else {
                     terminal(tx, &mut record, State::Withdrawn, None, now_ms)?;
@@ -508,7 +518,7 @@ impl ConsentStore {
             }
             let mut settlements = Vec::new();
             if record.state == State::Pending {
-                if record.expires_at_ms <= now_ms {
+                if record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms) {
                     // The card was already due, so it settled while still held.
                     expire(tx, &mut record)?;
                     settlements.push(record.clone());
@@ -529,10 +539,20 @@ impl ConsentStore {
         owner: &str,
         id: &str,
         execution: &str,
+        reason: Option<&str>,
         now_ms: i64,
     ) -> Result<ElicitationRecord> {
         self.transaction(|tx| {
             let mut record = owned(tx, owner, id, now_ms)?;
+            if reason.is_some_and(|reason| {
+                execution != "approved_not_executed"
+                    || reason.is_empty()
+                    || reason.len() > 64
+                    || !reason.as_bytes()[0].is_ascii_lowercase()
+                    || !reason.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+            }) {
+                return Err(refuse("elicitation_invalid_execution", "reason requires approved_not_executed and a lowercase snake_case code of 1 to 64 bytes"));
+            }
             if record.request.kind == "flow_decision"
                 || !matches!(
                     execution,
@@ -551,6 +571,7 @@ impl ConsentStore {
                 ));
             }
             record.execution = Some(execution.into());
+            record.execution_reason = reason.map(str::to_owned);
             save(tx, &record)?;
             Ok(record)
         })
@@ -735,8 +756,8 @@ fn same_content(old: &ElicitationRecord, request: &ConsentRequest, subject: &Sub
     // Reply correlation can change on a refresh without replacing the card.
     previous.requester_ref = None;
     next.requester_ref = None;
-    previous.expires_in_ms = 0;
-    next.expires_in_ms = 0;
+    previous.expires_in_ms = None;
+    next.expires_in_ms = None;
     previous.requested_schema = None;
     next.requested_schema = None;
     previous == next
@@ -794,7 +815,13 @@ fn terminal(
 }
 
 fn expire(conn: &Connection, record: &mut ElicitationRecord) -> Result<()> {
-    terminal(conn, record, State::Expired, None, record.expires_at_ms)
+    terminal(
+        conn,
+        record,
+        State::Expired,
+        None,
+        record.expires_at_ms.expect("only deadline cards expire"),
+    )
 }
 
 fn prune(conn: &Connection, now_ms: i64) -> Result<()> {

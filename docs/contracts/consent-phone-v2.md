@@ -74,11 +74,13 @@ approve button. AFT closes the card with withdrawal when access works again.
 There are no `expiresAtMs`, `expiresInMs`, `onExpiry` or timeout outcome fields.
 Phone lists keep the same 3 MiB page budget, package-body omission and revision
 protocol as v1. Permission cards need no large-body omission; their full framed
-request is capped at 1,310,720 bytes, so a card fits a page. Nonexpiring cards
-sort after expiring cards, then by id; the existing continuation object's
-`expires_at_ms` is only a sort position for them (`9223372036854775807`), never
-an expiry on the card. Copy continuations unchanged; never derive timeouts from
-them. Polling revisions account for permission state changes and active waits.
+request is capped at 1,310,720 bytes, so a card fits a page. All pending cards,
+including permission asks and generic cards with or without deadlines, sort
+oldest first by creation time, then lexicographic id. Continuations are JSON
+objects `{created_at_ms, elicitation_id}`. Copy them unchanged, including unknown
+keys; never derive timeouts from them. The old expiry-keyed object is accepted
+on input for one release as specified in v1. Polling revisions account for
+permission state changes and active waits.
 
 ## Answering
 

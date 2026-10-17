@@ -43,7 +43,9 @@ unchanged, and migration 2 seeds the persistent `el_` id counter.
   `ack` is cumulative and owner-scoped, including withdrawals.
 - `ElicitationRecord::phone` and `requester_wire` build the wire projections.
   Supply the greatest registered await deadline as `block_until`; projection
-  clamps it to the current expiry and omits it on terminal cards. The module
+  clamps it only when an expiry exists and omits it on terminal cards. Cards
+  without expiry store SQL NULL and omit expiry from every projection. Pending
+  cards sort by creation time then id, independent of expiry. The module
   owns waiter registration, clock waits, notifications and locking between ops.
 
 All tests use scratch directories under the system temp directory and inspect

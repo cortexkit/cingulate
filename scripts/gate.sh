@@ -18,4 +18,5 @@ cargo test --workspace --locked
 step "vector corpora match their generators"
 cargo run -q -p cingulate-vectors --example generate_vectors --locked -- --check
 cargo run -q -p cingulate-vectors --example generate_consent_outcomes_refs_vectors --locked -- --check
+cargo run -q -p cingulate-vectors --example generate_no_expiry_vectors --locked -- --check
 step "gate passed"

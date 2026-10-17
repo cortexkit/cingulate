@@ -60,6 +60,30 @@ fn read_json(name: &str) -> Value {
 async fn regenerate() -> std::collections::BTreeMap<String, Vec<u8>> {
     let root = cerebellum_agent_permission::corpus();
     let mut files = cerebellum_agent_permission::generate().await;
+    // This historical corpus predates creation-order lists. Verify the live
+    // reply against its original cards in the new order, then retain the old
+    // list bytes and manifest as an unchanged historical snapshot.
+    let historical = fs::read(root.join("list-pending.json")).unwrap();
+    let mut creation_order: Value = serde_json::from_slice(&historical).unwrap();
+    creation_order["result"]["records"]
+        .as_array_mut()
+        .unwrap()
+        .sort_by(|a, b| {
+            (
+                a["createdAtMs"].as_i64().unwrap(),
+                a["elicitationId"].as_str().unwrap(),
+            )
+                .cmp(&(
+                    b["createdAtMs"].as_i64().unwrap(),
+                    b["elicitationId"].as_str().unwrap(),
+                ))
+        });
+    assert_eq!(
+        files["list-pending.json"],
+        serde_json::to_vec(&creation_order).unwrap(),
+        "live list must use creation order without changing card bytes or revision"
+    );
+    files.insert("list-pending.json".into(), historical);
     files.insert(
         "README.md".into(),
         fs::read(root.join("README.md")).unwrap(),
@@ -73,7 +97,7 @@ async fn regenerate() -> std::collections::BTreeMap<String, Vec<u8>> {
 }
 
 #[tokio::test]
-async fn cerebellum_agent_permission_vectors_regenerate_byte_for_byte() {
+async fn cerebellum_agent_permission_vectors_preserve_historical_bytes_and_serve_creation_order() {
     let generated = regenerate().await;
     assert_eq!(
         generated

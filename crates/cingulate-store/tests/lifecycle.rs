@@ -197,7 +197,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5"
+        "1,2,3,4,5,6"
     );
     let answer_schema: String = conn
         .query_row(
@@ -285,14 +285,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,6,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,7,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 6"));
-    assert!(error.to_string().contains("migration 5"));
+    assert!(error.to_string().contains("version 7"));
+    assert!(error.to_string().contains("migration 6"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -440,7 +440,7 @@ fn expiry_never_records_a_choice_for_any_kind() {
     let (store, _) = scratch.open(100);
     let owner = identity("direct", "s");
     let mut consent = request();
-    consent.expires_in_ms = 5;
+    consent.expires_in_ms = Some(5);
     consent.at_console = Some("m1".into());
     let record = store.create(&owner, consent, 100).unwrap().record;
     let result = store
@@ -455,7 +455,7 @@ fn expiry_never_records_a_choice_for_any_kind() {
     assert_eq!(result.settlements, vec![expired.clone()]);
     assert_settlement(&scratch, &expired, 1);
     let mut flow = flow_decision();
-    flow.expires_in_ms = 2;
+    flow.expires_in_ms = Some(2);
     let flow = store.create(&owner, flow, 106).unwrap().record;
     let result = store
         .answer(&flow.elicitation_id, "decline", None, 108)
@@ -467,7 +467,7 @@ fn expiry_never_records_a_choice_for_any_kind() {
     assert_eq!(expired.answered_choice_id, None);
     assert_settlement(&scratch, &expired, 2);
     let mut req = request();
-    req.expires_in_ms = 1;
+    req.expires_in_ms = Some(1);
     let id = store
         .create(&owner, req, 109)
         .unwrap()
@@ -490,7 +490,7 @@ fn open_sweep_settles_downtime_expiry_exactly_once_for_all_kinds() {
     install.flow_install = Some(serde_json::from_value(json!({"not_a_card":true})).unwrap());
     requests.push(install);
     for mut request in requests {
-        request.expires_in_ms = 50;
+        request.expires_in_ms = Some(50);
         store.create(&owner, request, 10).unwrap();
     }
     drop(store);
@@ -546,7 +546,7 @@ fn pending_choice_console_and_owner_refusals_write_nothing() {
         );
         assert_eq!(
             store
-                .report_execution("wrong-owner", id, "executed", 101)
+                .report_execution("wrong-owner", id, "executed", None, 101)
                 .unwrap_err()
                 .code(),
             "elicitation_not_owner"
@@ -575,14 +575,14 @@ fn execution_updates_only_an_answered_non_decision_card_without_logging() {
     let before = snapshot(&scratch);
     assert_eq!(
         store
-            .report_execution(&owner.owner, &id, "not_run", 101)
+            .report_execution(&owner.owner, &id, "not_run", None, 101)
             .unwrap_err()
             .code(),
         "elicitation_invalid_execution"
     );
     assert_eq!(
         store
-            .report_execution(&owner.owner, &id, "executed", 101)
+            .report_execution(&owner.owner, &id, "executed", None, 101)
             .unwrap_err()
             .code(),
         "elicitation_store_error"
@@ -592,7 +592,7 @@ fn execution_updates_only_an_answered_non_decision_card_without_logging() {
     let log = rows(&scratch.sql(), "elicitation_answers");
     for execution in ["executed", "approved_not_executed", "outcome_unknown"] {
         let record = store
-            .report_execution(&owner.owner, &id, execution, 103)
+            .report_execution(&owner.owner, &id, execution, None, 103)
             .unwrap();
         assert_eq!(record.execution.as_deref(), Some(execution));
         assert_eq!(store.get(&id, 103).unwrap().unwrap(), record);
@@ -607,7 +607,7 @@ fn execution_updates_only_an_answered_non_decision_card_without_logging() {
     let before = snapshot(&scratch);
     assert_eq!(
         store
-            .report_execution(&owner.owner, &id, "executed", 106)
+            .report_execution(&owner.owner, &id, "executed", None, 106)
             .unwrap_err()
             .code(),
         "elicitation_invalid_execution"
@@ -625,7 +625,7 @@ fn dedup_refresh_ignores_expiry_schema_and_resolver_label_across_restart() {
     let (store, _) = scratch.open(100);
     let mut req = request();
     req.dedup_key = Some("key".into());
-    req.expires_in_ms = 60_000;
+    req.expires_in_ms = Some(60_000);
     let first = store.create(&owner, req.clone(), 100).unwrap();
     assert!(first.created);
     assert!(first.settlements.is_empty());
@@ -634,15 +634,15 @@ fn dedup_refresh_ignores_expiry_schema_and_resolver_label_across_restart() {
     assert_eq!(second.record, first.record);
     drop(store);
     let (store, _) = scratch.open(200);
-    req.expires_in_ms = 120_000;
+    req.expires_in_ms = Some(120_000);
     req.requested_schema = Some(json!({"transient":"not stored"}));
     owner.resolved_name = Some("ALF".into());
     let refreshed = store.create(&owner, req.clone(), 200).unwrap();
     assert!(!refreshed.created);
     assert_eq!(refreshed.record.elicitation_id, first.record.elicitation_id);
     assert_eq!(refreshed.record.created_at_ms, 100);
-    assert_eq!(refreshed.record.expires_at_ms, 120_200);
-    assert_eq!(refreshed.record.request.expires_in_ms, 120_000);
+    assert_eq!(refreshed.record.expires_at_ms, Some(120_200));
+    assert_eq!(refreshed.record.request.expires_in_ms, Some(120_000));
     assert_eq!(refreshed.record.subject.label, "ALF");
     assert_eq!(refreshed.record.phone(None)["expiresInMs"], 120_000);
     assert!(refreshed.settlements.is_empty());
@@ -785,7 +785,7 @@ fn due_dedup_match_expires_and_replaces_but_request_never_sweeps_unrelated_cards
     let (store, _) = scratch.open(100);
     let owner = identity("direct", "s");
     let mut req = request();
-    req.expires_in_ms = 10;
+    req.expires_in_ms = Some(10);
     let unrelated = store.create(&owner, req.clone(), 100).unwrap().record;
     req.dedup_key = Some("key".into());
     let due = store.create(&owner, req.clone(), 100).unwrap().record;
@@ -818,7 +818,7 @@ fn failing_replacement_insert_rolls_back_settlement_counter_and_old_record() {
     let owner = identity("direct", "s");
     let mut req = request();
     req.dedup_key = Some("key".into());
-    req.expires_in_ms = 10;
+    req.expires_in_ms = Some(10);
     let old = store.create(&owner, req.clone(), 100).unwrap().record;
     scratch.sql().execute_batch("CREATE TRIGGER fail_insert BEFORE INSERT ON elicitation_records BEGIN SELECT RAISE(ABORT,'injected insert failure'); END;").unwrap();
     let before = snapshot(&scratch);
@@ -851,7 +851,7 @@ fn failing_answer_log_insert_rolls_back_record_and_all_sweep_work() {
     let (store, _) = scratch.open(100);
     let owner = identity("direct", "s");
     let mut req = request();
-    req.expires_in_ms = 10;
+    req.expires_in_ms = Some(10);
     let id = store
         .create(&owner, req.clone(), 100)
         .unwrap()
@@ -884,7 +884,7 @@ fn answers_and_outcomes_order_filter_and_global_high_water_survive_ack_and_resta
     req.binding = Some(json!({"private":true}));
     let a = store.create(&owners[0], req.clone(), 100).unwrap().record;
     let mut expiring = flow_decision();
-    expiring.expires_in_ms = 1;
+    expiring.expires_in_ms = Some(1);
     let b = store.create(&owners[1], expiring, 100).unwrap().record;
     let c = store.create(&owners[2], req, 100).unwrap().record;
     store
@@ -1148,10 +1148,10 @@ fn pending_order_and_saturating_expiry_are_durable() {
     let (store, _) = scratch.open(100);
     let owner = identity("direct", "s");
     let mut longer = request();
-    longer.expires_in_ms = 200;
+    longer.expires_in_ms = Some(200);
     let a = store.create(&owner, longer, 100).unwrap().record;
     let mut shorter = request();
-    shorter.expires_in_ms = 100;
+    shorter.expires_in_ms = Some(100);
     let b = store.create(&owner, shorter.clone(), 100).unwrap().record;
     let c = store.create(&owner, shorter, 100).unwrap().record;
     assert_eq!(
@@ -1161,13 +1161,13 @@ fn pending_order_and_saturating_expiry_are_durable() {
             .iter()
             .map(|r| &r.elicitation_id)
             .collect::<Vec<_>>(),
-        vec![&b.elicitation_id, &c.elicitation_id, &a.elicitation_id]
+        vec![&a.elicitation_id, &b.elicitation_id, &c.elicitation_id]
     );
     let near_limit = store
         .create(&owner, request(), i64::MAX - 1)
         .unwrap()
         .record;
-    assert_eq!(near_limit.expires_at_ms, i64::MAX);
+    assert_eq!(near_limit.expires_at_ms, Some(i64::MAX));
     assert!(matches!(
         store
             .answer(&near_limit.elicitation_id, "allow_once", None, i64::MAX)
@@ -1199,7 +1199,7 @@ fn record_projections_preserve_opaque_content_but_do_not_leak_binding_to_phone()
     assert_eq!(phone["requesterLabel"], "reserved:plexus");
     assert_eq!(phone["subject"]["headAgentId"], "worker");
     assert_eq!(phone["atConsole"], "m1");
-    assert_eq!(phone["blockUntilMs"], record.expires_at_ms);
+    assert_eq!(phone["blockUntilMs"], record.expires_at_ms.unwrap());
     assert_eq!(phone["scope"], json!({"MixedCase":{"inside_key":true}}));
     assert_eq!(
         phone["preview"],
@@ -1263,7 +1263,7 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
         DROP TRIGGER access_update_revision;
         DROP TABLE access_notices;
         DROP TABLE access_asks;
-        DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=5;
+        DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version>=5;
         DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=4;
         DROP TRIGGER cingulate_pending_insert;
         DROP TRIGGER cingulate_pending_update;
@@ -1311,13 +1311,14 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         elicitation_id: "el_1".into(),
         request: request(),
         created_at_ms: 100,
-        expires_at_ms: 50_000,
+        expires_at_ms: Some(50_000),
         subject: identity("direct", "s").subject,
         requester: "direct".into(),
         state: State::Pending,
         answered_at_ms: None,
         answered_choice_id: None,
         execution: None,
+        execution_reason: None,
         detached: false,
         late: false,
         asker: None,
@@ -1362,4 +1363,158 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
     );
     assert_eq!(store.access_notices(200).unwrap().len(), 1);
     assert_eq!(store.access_notices(200).unwrap()[0].purpose, "user_ask");
+}
+
+#[test]
+fn no_deadline_survives_future_sweep_refresh_restart_and_late_answer() {
+    let scratch = Scratch::new();
+    let mut owner = identity("direct", "s");
+    owner.asker = Some(cingulate_store::ScopeIdentity {
+        scope_ref: "head".into(),
+        scope_epoch: 1,
+        agent_id: Some("agent".into()),
+    });
+    let (store, _) = scratch.open(100);
+    let mut req = request();
+    req.expires_in_ms = None;
+    req.dedup_key = Some("no-deadline".into());
+    let original = store.create(&owner, req.clone(), 100).unwrap().record;
+    assert_eq!(original.expires_at_ms, None);
+    let expiry: Option<i64> = scratch
+        .sql()
+        .query_row(
+            "SELECT expires_at_ms FROM elicitation_records WHERE elicitation_id=?1",
+            [&original.elicitation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(expiry, None);
+    let future = 100 + 100 * RETENTION_MS;
+    assert!(store.sweep(future).unwrap().is_empty());
+    assert_eq!(store.pending().unwrap(), vec![original.clone()]);
+    let refreshed = store.create(&owner, req.clone(), future).unwrap();
+    assert!(!refreshed.created);
+    assert_eq!(refreshed.record, original);
+    let phone = original.phone(Some(future + 120_000));
+    assert!(phone.get("expiresAtMs").is_none());
+    assert!(phone.get("expiresInMs").is_none());
+    assert_eq!(phone["blockUntilMs"], future + 120_000);
+    let requester = original.requester_wire(None);
+    assert!(requester.get("expires_at_ms").is_none());
+    assert!(requester.get("expires_in_ms").is_none());
+    assert!(requester.get("block_until_ms").is_none());
+    store
+        .detach(&owner.owner, &original.elicitation_id, future)
+        .unwrap();
+    drop(store);
+    let (store, events) = scratch.open(future + 1);
+    assert!(events.is_empty());
+    let answered = store
+        .answer(&original.elicitation_id, "allow_once", None, future + 2)
+        .unwrap();
+    assert!(matches!(answered.value, AnswerOutcome::Answered(_)));
+    assert_eq!(answered.settlements.len(), 1);
+    assert!(answered.settlements[0].late);
+    let notices = store.access_notices(future + 2).unwrap();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].purpose, "consent_answered");
+    let other = store.create(&owner, req, future + 3).unwrap().record;
+    let withdrawn = store
+        .withdraw(&owner.owner, &other.elicitation_id, future + RETENTION_MS)
+        .unwrap();
+    assert_eq!(withdrawn.value.state, State::Withdrawn);
+    assert!(withdrawn.value.answered_choice_id.is_none());
+}
+
+#[test]
+fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
+    let scratch = Scratch::new();
+    let old = cortexkit_store::open_sqlite(&scratch.descriptor).unwrap();
+    old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..5])
+        .unwrap();
+    old.with_conn(|conn| {
+        for (index, state) in ["pending", "answered", "expired", "withdrawn"].iter().enumerate() {
+            let id = format!("el_{}", index + 1);
+            let mut record = json!({
+                "elicitationId":id, "request":request(), "createdAtMs":100,
+                "expiresAtMs":60100, "subject":identity("direct", "s").subject,
+                "state":state, "requester":"direct"
+            });
+            if index > 0 {
+                record["answeredAtMs"] = json!(101);
+            }
+            conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,settled_at_ms,acknowledged,notice_delivered) VALUES (?1,?2,?3,?4,?5,60100,?6,?7,?8)",
+                params![id, identity("direct", "s").owner, format!("key-{index}"), record.to_string(), state, (index > 0).then_some(101), i64::from(index == 3), i64::from(index == 2)])?;
+            if index > 0 {
+                conn.execute("INSERT INTO elicitation_answers(cursor,elicitation_id,owner,settled_at_ms) VALUES (?1,?2,?3,101)", params![index as i64, id, identity("direct", "s").owner])?;
+            }
+        }
+        conn.execute("UPDATE sqlite_sequence SET seq=99 WHERE name='elicitation_answers'", [])?;
+        conn.execute("UPDATE cingulate_id_seq SET value=4", [])?;
+        conn.execute("INSERT INTO access_notices(elicitation_id,purpose,body_json,attempts,retry_at_ms) VALUES ('el_2','consent_answered','{}',3,500)", [])?;
+        Ok(())
+    }).unwrap();
+    drop(old);
+    let before = snapshot(&scratch);
+    let notices = rows(&scratch.sql(), "access_notices");
+    let (store, events) = scratch.open(102);
+    assert!(events.is_empty());
+    assert_eq!(snapshot(&scratch), before);
+    assert_eq!(rows(&scratch.sql(), "access_notices"), notices);
+    assert!(rows(&scratch.sql(), "pragma_foreign_key_check").is_empty());
+    let info = rows(&scratch.sql(), "pragma_table_info('elicitation_records')");
+    assert_eq!(
+        info.iter().find(|row| row[1] == "expires_at_ms").unwrap()[3],
+        0
+    );
+    let record = store
+        .get_owned(&identity("direct", "s").owner, "el_1", 102)
+        .unwrap();
+    assert_eq!(record.expires_at_ms, Some(60100));
+    assert_eq!(
+        store
+            .withdraw(&identity("direct", "s").owner, "el_1", 103)
+            .unwrap()
+            .value
+            .state,
+        State::Withdrawn
+    );
+    assert_eq!(store.outcomes(99, 103).unwrap().cursor, 100);
+    let revision = store.pending_revision().unwrap();
+    let mut req = request();
+    req.expires_in_ms = None;
+    let created = store
+        .create(&identity("direct", "s"), req, 104)
+        .unwrap()
+        .record;
+    assert_eq!(created.elicitation_id, "el_5");
+    assert_eq!(store.pending_revision().unwrap(), revision + 1);
+    assert_eq!(created.expires_at_ms, None);
+}
+
+#[test]
+fn optional_expiry_migration_keeps_an_empty_answer_logs_high_water() {
+    let scratch = Scratch::new();
+    let old = cortexkit_store::open_sqlite(&scratch.descriptor).unwrap();
+    old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..5])
+        .unwrap();
+    old.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO sqlite_sequence(name,seq) VALUES ('elicitation_answers',99)",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    drop(old);
+    let (store, _) = scratch.open(100);
+    assert_eq!(store.outcomes(0, 100).unwrap().cursor, 99);
+    let owner = identity("direct", "s");
+    let id = store
+        .create(&owner, request(), 101)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.withdraw(&owner.owner, &id, 102).unwrap();
+    assert_eq!(store.outcomes(99, 102).unwrap().cursor, 100);
 }
