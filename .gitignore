@@ -11,9 +11,12 @@ target/
 # already summarized by the commit it produced.
 #
 # The two config files beside this directory are NOT ignored on purpose:
-# .cortexkit/alfonso.jsonc chooses where this repository's delegated workers
-# run, and .cortexkit/WORKER.md is the instruction file every one of them
-# receives. Both change how work is done here, so they are reviewed and
-# versioned like any other config.
+# .cortexkit/alfonso.jsonc (renamed .cortexkit/prefrontal.jsonc) chooses where
+# this repository's delegated workers run, and .cortexkit/WORKER.md is the
+# instruction file every one of them receives. Both change how work is done
+# here, so they are reviewed and versioned like any other config. The scratch
+# directory is listed under both names while the rename from alfonso to
+# prefrontal rolls out.
 .cortexkit/alfonso/
+.cortexkit/prefrontal/
 .cortexkit/magic-context/
