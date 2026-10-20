@@ -81,16 +81,16 @@ fn stamped(module: &str, handle: u16) -> Stamp {
             BindIdentity::new("/tmp", "test-harness", "untrusted-session"),
         )
         .with_principal(principal(module))
-        .with_scope(ScopeStamp {
-            owner: principal("prefrontal-core"),
-            scope_ref: "sc_head_alf".into(),
-            scope_epoch: 3,
-            kind: ScopeKind::Head,
-            parent: None,
-            parent_state: None,
-            attributes: ScopeAttributes::new().with_agent_id(Some("agent-alf".into())),
-            owner_authorized: true,
-        }),
+        .with_scope(
+            ScopeStamp::new(
+                principal("prefrontal-core"),
+                "sc_head_alf",
+                3,
+                ScopeKind::Head,
+            )
+            .with_attributes(ScopeAttributes::new().with_agent_id(Some("agent-alf".into())))
+            .with_owner_authorized(true),
+        ),
     )
 }
 fn cerebellum() -> Stamp {

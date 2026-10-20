@@ -224,6 +224,12 @@ pub fn descriptor(path: &std::path::Path) -> StorageDescriptor {
 
 impl Fixture {
     pub async fn open(machine: Option<&str>) -> Self {
+        Self::open_with_change_log(machine, cingulate_store::CHANGE_LOG_ROWS).await
+    }
+
+    /// Open with a chosen change-log retention, so a test can compact the log
+    /// past a watch cursor without writing thousands of changes.
+    pub async fn open_with_change_log(machine: Option<&str>, change_log_rows: i64) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cards.sqlite");
         let clock = Arc::new(TestClock(AtomicI64::new(NOW)));
@@ -235,6 +241,7 @@ impl Fixture {
             await_hook: None,
             sweep_timer: false,
             data_home: dir.path().to_str().unwrap().into(),
+            change_log_rows,
         });
         handler
             .hello_ack(&ModuleHelloAckBody {
@@ -279,6 +286,25 @@ impl Fixture {
                     .collect()
             })
             .collect()
+    }
+
+    /// A separate connection to the scratch store, for tests that corrupt it
+    /// on purpose.
+    pub fn sql(&self) -> Connection {
+        Connection::open(&self.path).unwrap()
+    }
+
+    /// Replace the store's random change-log instance name with a fixed one,
+    /// so watch cursors in vectors are reproducible. The handler reads the
+    /// name from the store on every change-log read.
+    pub fn pin_store_instance(&self, instance: &str) {
+        Connection::open(&self.path)
+            .unwrap()
+            .execute(
+                "UPDATE cingulate_change_log SET instance=?1 WHERE singleton=1",
+                [instance],
+            )
+            .unwrap();
     }
 
     pub fn stored_record(&self, id: &str) -> cingulate_store::ElicitationRecord {

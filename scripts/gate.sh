@@ -20,4 +20,5 @@ cargo run -q -p cingulate-vectors --example generate_vectors --locked -- --check
 cargo run -q -p cingulate-vectors --example generate_consent_outcomes_refs_vectors --locked -- --check
 cargo run -q -p cingulate-vectors --example generate_no_expiry_vectors --locked -- --check
 cargo run -q -p cingulate-vectors --example generate_session_ended_vectors --locked -- --check
+cargo run -q -p cingulate-vectors --example generate_watch_pending_vectors --locked -- --check
 step "gate passed"

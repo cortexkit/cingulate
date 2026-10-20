@@ -129,3 +129,63 @@ core, or head states or first-answer-wins. If an answer reply is lost, phone
 `consent.get` retrieves the same committed final card; it does not re-answer it.
 Never infer a grant from elapsed time, missing cards, a failed get, or a transport
 error. V1 answer recovery/retention remains valid for the existing kinds.
+
+## consent.watch_pending
+
+`consent.watch_pending` replaces polling `consent.list_pending`. It is a
+management `query` that the manifest declares with watch delivery
+(`operation_delivery: {"consent.watch_pending": "watch"}`), so Callosum relays
+it as a subscription: the request stays open and each change arrives as one
+stream item. Served bytes are pinned in the
+[watch corpus](../../test-vectors/consent-watch-pending-v1/README.md).
+
+**Admission** is exactly that of `consent.list_pending`: an open store
+(`consent_unavailable` otherwise), then the phone's operator route
+(`elicitation_operator_required` for every other caller, including Callosum's
+Mac and simulator routes), then a well-formed `clientFeatures`. Called as an
+ordinary unary request, it is refused after that admission with
+`elicitation_invalid_request`. While ck-cingulate is stopping, a new watch is
+refused `consent_unavailable`. At most 16 watches are open per process; one more
+is refused `watch_capacity` (`at most 16 watches may be open`).
+
+**Request** params are `{cursor?, clientFeatures?}`. `clientFeatures` has the
+same meaning as on `consent.list_pending` and `consent.get`.
+
+**Items** are JSON objects, each at most 192 KiB encoded:
+
+| Item | When |
+|---|---|
+| `{"type":"reread"}` | First item when the request has no usable cursor; also replaces an item that would exceed 192 KiB, and closes a watch whose reader fell too far behind. The phone reads `consent.list_pending` once. |
+| `{"type":"changed","cursor":C,"card":Card}` | A phone-visible card was created, answered, withdrawn, expired or settled (an execution report), or a permission ask changed. `card` is byte for byte the phone `consent.get` projection of that card with the watch's `clientFeatures`, package bodies included. |
+| `{"type":"removed","cursor":C,"elicitation_id":Id}` | The card is no longer readable by phone `consent.get`: retention pruned it, or it is a permission ask that never reached the user. |
+
+There is no snapshot message. A usable cursor is one this store minted, not
+older than its retained change log and not ahead of it. A missing, malformed,
+foreign, future or too-old cursor gets `reread` as the first item and is not an
+error.
+
+**Cursor** `C` is an object `{"instance": String, "version": Integer}`. The
+phone stores the cursor of the last item it applied and echoes it back
+unchanged; it must not construct or interpret it. `instance` names the store
+file, and `version` increases with every item, so applying an item twice is
+harmless: keep, per card, the item with the highest version. A watch opened
+with a usable cursor replays every card that changed after it, one item per
+card at that card's latest change, in version order, and then continues live.
+Every change committed after the watch read its starting position is streamed,
+and the phone's list read follows the `reread` item, so no change falls
+between the two.
+
+**Ending.** The stream ends cleanly (StreamEnd, no error) when the caller
+unsubscribes, the route closes, or ck-cingulate starts draining or loses its
+daemon connection; none of these sends a final item, and after a restart the
+phone's last cursor still replays. Refusals come only before the first item.
+Once an item has been sent, an internal error (a store failure, or a card
+that cannot be projected) ends the stream with a final `reread` and a clean
+end, never an error reply. A watch keeps only its position in the store's change log,
+never a queue of changes. If more than 256 cards changed after that position
+while the reader was not keeping up, the watch sends `reread` and ends; the
+phone reconnects. The store keeps the newest 4096 change-log rows; a cursor
+older than those gets `reread`.
+
+Never infer an answer or a grant from a watch item's absence, a `removed` item,
+a `reread`, or the stream ending: those only say what to read again.

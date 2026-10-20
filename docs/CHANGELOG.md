@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.0 (ck-cingulate)
+
+- Add `consent.watch_pending`, a live stream of phone-visible card changes that
+  replaces polling `consent.list_pending`. It is declared with watch delivery in
+  the manifest, admitted exactly like `consent.list_pending`, and streams
+  `reread`, `changed` (the phone `consent.get` projection) and `removed` items
+  with an opaque `{instance, version}` object cursor. A usable cursor replays
+  every card changed after it, at its latest change, in order; a missing,
+  foreign, future or compacted cursor starts with `reread`. Items over 192 KiB
+  become `reread`. At most 16 watches are open (`watch_capacity` beyond); they
+  end on unsubscribe, route close, module drain and connection end; a reader
+  more than 256 changed cards behind gets `reread` and the watch ends.
+- Migration 7 adds the change log: one row per committed change to a card or
+  permission ask, written by triggers in the same transaction, plus a store
+  instance name and a compaction boundary. Sweeps keep the newest 4096 rows.
+  The existing pending revision is a single counter and the answer log records
+  only settlements, so neither can say which card changed at creation, an
+  execution report or a prune.
+- Move to subc-protocol 0.32.5, subc-client-rs 0.30.1 and (for tests)
+  subc-daemon 0.36.14.
+- Pin the stream in `consent-watch-pending-v1` without changing existing corpus
+  bytes.
+
 ## 0.9.1 (ck-cingulate)
 
 - Write `engram-catalog.json` into the module's data folder on every start, so

@@ -27,18 +27,18 @@ fn scoped_requester() -> Stamp {
         .with_principal(Principal::Reserved {
             module_id: "cerebellum".into(),
         })
-        .with_scope(ScopeStamp {
-            owner: Principal::Reserved {
-                module_id: "prefrontal-core".into(),
-            },
-            scope_ref: "sc_head_alf".into(),
-            scope_epoch: 7,
-            kind: ScopeKind::Head,
-            parent: None,
-            parent_state: None,
-            attributes: ScopeAttributes::new().with_agent_id(Some("agent-alf".into())),
-            owner_authorized: true,
-        }),
+        .with_scope(
+            ScopeStamp::new(
+                Principal::Reserved {
+                    module_id: "prefrontal-core".into(),
+                },
+                "sc_head_alf",
+                7,
+                ScopeKind::Head,
+            )
+            .with_attributes(ScopeAttributes::new().with_agent_id(Some("agent-alf".into())))
+            .with_owner_authorized(true),
+        ),
     )
 }
 

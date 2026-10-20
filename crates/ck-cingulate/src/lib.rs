@@ -4,9 +4,9 @@
 //! operations authorize before doing any sweep, and notify only after commit.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicU64, AtomicU8, Ordering},
         Arc, Mutex as StdMutex,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -22,12 +22,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use subc_client_rs::{
-    BindDecision, HandlerOutcome, ModuleHandler, RequestCtx, RouteBindRequest, RouteHandle,
+    BindDecision, ConnectionEnd, HandlerOutcome, ModuleHandler, RequestCtx, RouteBindRequest,
+    RouteCloseReason, RouteHandle,
 };
 use subc_protocol::{
     manifest::{
         CapabilityDeclarations, Concurrency, ManagementOperation, ManagementOperationKind,
-        ModuleManifest, ProviderRole,
+        ModuleManifest, OperationDelivery, ProviderRole,
     },
     session::{HealthReport, HealthStatus},
     ModuleHelloAckBody, Principal,
@@ -40,12 +41,14 @@ pub mod engram;
 mod execution;
 mod permissions;
 pub use permissions::{PermissionsCallError, PermissionsRuntime};
+mod pending_watch;
+pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, WATCH_PENDING};
 
 /// The module id the subc daemon registers. The backup catalog records the same
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 13] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 14] = [
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
     ("consent.await", ManagementOperationKind::Query),
@@ -56,6 +59,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 13] = [
     ("consent.detach", ManagementOperationKind::Mutate),
     ("consent.answer", ManagementOperationKind::Mutate),
     ("consent.list_pending", ManagementOperationKind::Query),
+    (WATCH_PENDING, ManagementOperationKind::Query),
     ("consent.outcomes", ManagementOperationKind::Query),
     ("permissions.list_all", ManagementOperationKind::Query),
     ("permissions.revoke", ManagementOperationKind::Mutate),
@@ -162,6 +166,12 @@ pub fn manifest() -> ModuleManifest {
             identity_scope: vec![],
             concurrency: Concurrency::ModuleManaged,
         }])
+        // The watch holds its request open and streams card changes until the
+        // caller unsubscribes, the route closes or the module stops.
+        .operation_delivery(BTreeMap::from([(
+            WATCH_PENDING.to_owned(),
+            OperationDelivery::WATCH,
+        )]))
         .build()
 }
 
@@ -306,6 +316,8 @@ pub struct Options {
     pub await_hook: Option<Arc<dyn AwaitHook>>,
     pub sweep_timer: bool,
     pub data_home: String,
+    /// Change-log rows the store keeps for consent.watch_pending replays.
+    pub change_log_rows: i64,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -319,6 +331,7 @@ impl Default for Options {
             await_hook: None,
             sweep_timer: true,
             data_home,
+            change_log_rows: cingulate_store::CHANGE_LOG_ROWS,
         }
     }
 }
@@ -362,6 +375,13 @@ struct Inner {
     routes: StdMutex<HashMap<RouteHandle, Stamp>>,
     timer: StdMutex<Option<tokio::task::AbortHandle>>,
     retry: StdMutex<Option<tokio::task::AbortHandle>>,
+    /// The store connection's write count at the last check; see `note_writes`.
+    writes: AtomicU64,
+    /// Ticks after any store write, waking open watches to read the change log.
+    changes: watch::Sender<()>,
+    /// Set once the module is stopping; open watches end and new ones are refused.
+    stopping: watch::Sender<bool>,
+    watch_slots: Arc<tokio::sync::Semaphore>,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -447,6 +467,10 @@ impl Handler {
                 routes: StdMutex::new(HashMap::new()),
                 timer: StdMutex::new(None),
                 retry: StdMutex::new(None),
+                writes: AtomicU64::new(0),
+                changes: watch::channel(()).0,
+                stopping: watch::channel(false).0,
+                watch_slots: pending_watch::watch_slots(),
             }),
         }
     }
@@ -524,9 +548,11 @@ impl Handler {
     }
 
     async fn try_open(&self, descriptor: &StorageDescriptor) -> Result<(), cingulate_store::Error> {
-        let (store, settlements) =
+        let (mut store, settlements) =
             ConsentStore::open(descriptor, self.inner.options.clock.now_ms())?;
+        store.set_change_log_rows(self.inner.options.change_log_rows);
         self.settlements(&settlements).await;
+        self.note_writes(&store);
         *self.inner.store.lock().await = Some(store);
         self.inner.health.store(2, Ordering::Release);
         if self.inner.options.sweep_timer {
@@ -585,10 +611,12 @@ impl Handler {
         f: impl FnOnce(&ConsentStore) -> Result<T, cingulate_store::Error>,
     ) -> Result<T, Refusal> {
         let guard = self.inner.store.lock().await;
-        f(guard
+        let store = guard
             .as_ref()
-            .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?)
-        .map_err(store_error)
+            .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?;
+        let result = f(store).map_err(store_error);
+        self.note_writes(store);
+        result
     }
 
     fn block_until(&self, id: &str) -> Option<i64> {
@@ -784,7 +812,7 @@ impl Handler {
             return reply;
         }
         match method {
-            "consent.answer" | "consent.list_pending" => operator(stamp)?,
+            "consent.answer" | "consent.list_pending" | "consent.watch_pending" => operator(stamp)?,
             "consent.get" if stamp.operator_surface => {}
             "consent.outcomes" => {
                 if stamp.label() != "reserved:prefrontal-core" {
@@ -792,6 +820,14 @@ impl Handler {
                 }
             }
             _ => stamp.authorize_owner()?,
+        }
+        if method == WATCH_PENDING {
+            // The watch streams, so it is served by handle_watch_stamped. A
+            // unary call reaching here is refused only after the same
+            // admission as consent.list_pending.
+            return Err(invalid(
+                "consent.watch_pending is a watch; subscribe to it as a stream",
+            ));
         }
         let option_group = if matches!(method, "consent.answer" | "consent.list_pending")
             || (method == "consent.get" && stamp.operator_surface)
@@ -1154,6 +1190,7 @@ impl Handler {
                 _ => unreachable!("known operation"),
             })
         })();
+        self.note_writes(store);
         drop(guard);
         // A read/answer refusal can follow an independently committed sweep.
         // Its retractions must still be delivered before returning that refusal.
@@ -1195,6 +1232,7 @@ impl Handler {
             let now = self.inner.options.clock.now_ms();
             let events = store.sweep(now).map_err(store_error)?;
             let result = store.get_owned(owner, id, now).map_err(store_error);
+            self.note_writes(store);
             drop(guard);
             self.settlements(&events).await;
             let record = result?;
@@ -1224,6 +1262,16 @@ impl ModuleHandler for Handler {
             .get(&ctx.route_handle())
             .cloned()
             .unwrap_or_default();
+        #[derive(Deserialize)]
+        struct Method {
+            method: String,
+        }
+        if serde_json::from_slice::<Method>(&body)
+            .is_ok_and(|request| request.method == WATCH_PENDING)
+        {
+            // The watch watches ctx.cancelled() itself and ends with Streamed.
+            return self.handle_watch_stamped(&stamp, &body, &ctx).await;
+        }
         tokio::select! {
             result = self.handle_stamped(&stamp, &body) => result,
             _ = ctx.cancelled() => HandlerOutcome::Error { code: "cancelled".into(), message: "request cancelled".into() },
@@ -1245,6 +1293,12 @@ impl ModuleHandler for Handler {
     }
     async fn health(&self) -> HealthReport {
         self.health_report()
+    }
+    async fn on_draining(&self, _reason: RouteCloseReason, _deadline: SystemTime) {
+        self.stop_watches();
+    }
+    async fn on_connection_end(&self, _end: ConnectionEnd) {
+        self.stop_watches();
     }
 }
 

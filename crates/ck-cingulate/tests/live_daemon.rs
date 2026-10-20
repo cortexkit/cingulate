@@ -304,11 +304,7 @@ impl Fixture {
         bounded(self.consumer.open_route_scoped(
             target(),
             self.identity(harness),
-            ScopeSelector {
-                owner: principal(OWNER),
-                scope_ref: "head-session".into(),
-                scope_epoch: Some(epoch),
-            },
+            ScopeSelector::new(principal(OWNER), "head-session", Some(epoch)),
             call_options(Some("plexus")),
         ))
         .await
@@ -626,6 +622,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent.outcomes",
             "consent.report_execution",
             "consent.request",
+            "consent.watch_pending",
             "consent.withdraw",
             "permissions.list_all",
             "permissions.revoke",

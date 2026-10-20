@@ -23,7 +23,10 @@ pub use record::{ElicitationRecord, State, Subject, LATE_ANSWER_PURPOSE};
 
 pub const RETENTION_MS: i64 = 86_400_000;
 pub const MIGRATION_NAMESPACE: &str = "cingulate";
-pub const MIGRATIONS: [Migration; 6] = [
+/// How many change-log rows the store keeps for consent.watch_pending. A watch
+/// cursor older than the retained rows cannot be replayed and gets a reread.
+pub const CHANGE_LOG_ROWS: i64 = 4096;
+pub const MIGRATIONS: [Migration; 7] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -47,6 +50,10 @@ pub const MIGRATIONS: [Migration; 6] = [
     Migration {
         version: 6,
         statements: include_str!("../migrations/006_optional_expiry.sql"),
+    },
+    Migration {
+        version: 7,
+        statements: include_str!("../migrations/007_change_log.sql"),
     },
 ];
 
@@ -179,6 +186,32 @@ pub fn omit_package_bodies(value: &mut Value) {
 /// unrelated cards; a refused request must have no expiry side effects.
 pub struct ConsentStore {
     db: SqliteStore,
+    change_log_rows: i64,
+}
+
+/// One card that changed after a watch position: its id and the version of its
+/// latest change. Earlier changes to the same card are folded into this one,
+/// because a watch item always carries the card's current projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub version: i64,
+    pub elicitation_id: String,
+}
+
+/// The change log as one consistent read, for consent.watch_pending.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangePage {
+    /// Names this store file, so a cursor from another store is recognized.
+    pub instance: String,
+    /// The newest version written; a cursor beyond it is unknown.
+    pub head: i64,
+    /// Versions at or below this were compacted away. A cursor below it cannot
+    /// be replayed in full.
+    pub pruned_through: i64,
+    /// How many distinct cards changed after the requested version.
+    pub backlog: i64,
+    /// Up to the requested number of those cards, oldest latest change first.
+    pub changes: Vec<Change>,
 }
 
 pub struct ExecutionPage {
@@ -226,9 +259,72 @@ impl ConsentStore {
                 outcome.recorded, outcome.chain_max
             ))));
         }
-        let store = Self { db };
+        let store = Self {
+            db,
+            change_log_rows: CHANGE_LOG_ROWS,
+        };
         let settlements = store.sweep(now_ms)?;
         Ok((store, settlements))
+    }
+
+    /// Change how many change-log rows each sweep keeps. Tests use a small
+    /// value to make a watch cursor stale without writing thousands of rows.
+    pub fn set_change_log_rows(&mut self, rows: i64) {
+        self.change_log_rows = rows.max(0);
+    }
+
+    /// Rows this connection has written since it opened, counting trigger
+    /// writes. The module compares it after each store use to wake watches
+    /// only when something was written.
+    pub fn write_count(&self) -> u64 {
+        self.db
+            .with_conn(|conn| Ok(conn.total_changes()))
+            .unwrap_or_default()
+    }
+
+    /// Read the change log after `version` in one snapshot: the log's identity
+    /// and bounds, the number of changed cards, and the first `limit` of them
+    /// ordered by their latest change.
+    pub fn changes_after(&self, version: i64, limit: usize) -> Result<ChangePage> {
+        self.read(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let (instance, pruned_through): (String, i64) = tx.query_row(
+                "SELECT instance,pruned_through FROM cingulate_change_log WHERE singleton=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let head: i64 = tx.query_row(
+                "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='cingulate_changes'),0)",
+                [],
+                |row| row.get(0),
+            )?;
+            let backlog: i64 = tx.query_row(
+                "SELECT COUNT(DISTINCT elicitation_id) FROM cingulate_changes WHERE version>?1",
+                [version],
+                |row| row.get(0),
+            )?;
+            let mut stmt = tx.prepare(
+                "SELECT MAX(version),elicitation_id FROM cingulate_changes WHERE version>?1 \
+                 GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
+            )?;
+            let changes = stmt
+                .query_map(params![version, limit as i64], |row| {
+                    Ok(Change {
+                        version: row.get(0)?,
+                        elicitation_id: row.get(1)?,
+                    })
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            drop(stmt);
+            tx.commit()?;
+            Ok(ChangePage {
+                instance,
+                head,
+                pruned_through,
+                backlog,
+                changes,
+            })
+        })
     }
 
     fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
@@ -639,7 +735,7 @@ impl ConsentStore {
     /// expiries. Returned records represent only this transaction's settlements.
     pub fn sweep(&self, now_ms: i64) -> Result<Vec<ElicitationRecord>> {
         self.transaction(|tx| {
-            prune(tx, now_ms)?;
+            prune(tx, now_ms, self.change_log_rows)?;
             let ids = ids(
                 tx,
                 "SELECT elicitation_id FROM elicitation_records \
@@ -904,7 +1000,7 @@ fn expire(conn: &Connection, record: &mut ElicitationRecord) -> Result<()> {
     )
 }
 
-fn prune(conn: &Connection, now_ms: i64) -> Result<()> {
+fn prune(conn: &Connection, now_ms: i64, change_log_rows: i64) -> Result<()> {
     conn.execute(
         "UPDATE elicitation_records SET record_json=NULL WHERE settled_at_ms<=?1",
         [now_ms.saturating_sub(RETENTION_MS)],
@@ -917,6 +1013,23 @@ fn prune(conn: &Connection, now_ms: i64) -> Result<()> {
     )?;
     conn.execute(
         "DELETE FROM elicitation_records WHERE acknowledged=1 AND record_json IS NULL",
+        [],
+    )?;
+    // Keep the newest change-log rows. Record the compaction boundary before
+    // deleting, so a watch cursor inside the deleted range is detected as
+    // stale and answered with a reread rather than a replay with gaps. Both
+    // statements touch no row when nothing is due, so a routine sweep writes
+    // nothing and does not wake open watches.
+    conn.execute(
+        "UPDATE cingulate_change_log SET pruned_through=MAX(pruned_through, \
+         COALESCE((SELECT seq FROM sqlite_sequence WHERE name='cingulate_changes'),0)-?1) \
+         WHERE singleton=1 AND pruned_through< \
+         COALESCE((SELECT seq FROM sqlite_sequence WHERE name='cingulate_changes'),0)-?1",
+        [change_log_rows],
+    )?;
+    conn.execute(
+        "DELETE FROM cingulate_changes WHERE version<=\
+         (SELECT pruned_through FROM cingulate_change_log WHERE singleton=1)",
         [],
     )?;
     Ok(())

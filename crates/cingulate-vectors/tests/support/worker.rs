@@ -39,21 +39,23 @@ pub fn stamp(module: &str, kind: ScopeKind) -> Stamp {
         } else {
             principal(module)
         })
-        .with_scope(ScopeStamp {
-            owner: principal("prefrontal-core"),
-            scope_ref: if worker { "sc_worker" } else { "sc_head_alf" }.into(),
-            scope_epoch: if worker { 3 } else { 7 },
-            kind,
-            parent: worker
-                .then(|| ScopeParent::new(principal("prefrontal-core"), "sc_head_alf", 7)),
-            parent_state: None,
-            attributes: if worker {
+        .with_scope(
+            ScopeStamp::new(
+                principal("prefrontal-core"),
+                if worker { "sc_worker" } else { "sc_head_alf" },
+                if worker { 3 } else { 7 },
+                kind,
+            )
+            .with_parent(
+                worker.then(|| ScopeParent::new(principal("prefrontal-core"), "sc_head_alf", 7)),
+            )
+            .with_attributes(if worker {
                 ScopeAttributes::new()
             } else {
                 ScopeAttributes::new().with_agent_id(Some("agent-alf".into()))
-            },
-            owner_authorized: true,
-        }),
+            })
+            .with_owner_authorized(true),
+        ),
     )
 }
 

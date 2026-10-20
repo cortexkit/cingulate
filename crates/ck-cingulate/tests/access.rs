@@ -78,21 +78,22 @@ fn head() -> ScopeIdentity {
     }
 }
 fn stamp(module: &str, kind: ScopeKind) -> Stamp {
-    let scope = ScopeStamp {
-        owner: principal("prefrontal-core"),
-        scope_ref: format!("{kind:?}-session"),
-        scope_epoch: 3,
+    let scope = ScopeStamp::new(
+        principal("prefrontal-core"),
+        format!("{kind:?}-session"),
+        3,
         kind,
-        parent: (kind == ScopeKind::Worker)
+    )
+    .with_parent(
+        (kind == ScopeKind::Worker)
             .then(|| ScopeParent::new(principal("prefrontal-core"), "head-session", 7)),
-        parent_state: None,
-        attributes: if kind == ScopeKind::Worker {
-            ScopeAttributes::new()
-        } else {
-            ScopeAttributes::new().with_agent_id(Some("agent-head".into()))
-        },
-        owner_authorized: true,
-    };
+    )
+    .with_attributes(if kind == ScopeKind::Worker {
+        ScopeAttributes::new()
+    } else {
+        ScopeAttributes::new().with_agent_id(Some("agent-head".into()))
+    })
+    .with_owner_authorized(true);
     Stamp::from_bind(
         &RouteBindRequest::new(
             RouteHandle::detached(1, 1),
@@ -1736,4 +1737,79 @@ async fn permission_phone_pages_and_request_bodies_obey_shared_byte_budgets() {
         params = json!({"continuation": page["continuation"]});
     }
     assert_eq!(seen.len(), 4);
+}
+
+/// Collects consent.watch_pending items for the permission-ask watch test.
+struct WatchItems {
+    items: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    unsubscribed: watch::Sender<bool>,
+}
+#[async_trait]
+impl ck_cingulate::WatchSink for WatchItems {
+    async fn emit(&self, item: Vec<u8>) -> Result<(), String> {
+        self.items.send(item).map_err(|error| error.to_string())
+    }
+    async fn ended(&self) {
+        let _ = self.unsubscribed.subscribe().wait_for(|done| *done).await;
+    }
+}
+
+async fn next_item(received: &mut tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) -> Value {
+    let item = tokio::time::timeout(std::time::Duration::from_secs(5), received.recv())
+        .await
+        .expect("watch item within 5 s")
+        .unwrap();
+    serde_json::from_slice(&item).unwrap()
+}
+
+#[tokio::test]
+async fn permission_asks_stream_on_the_phone_watch_once_they_reach_the_user() {
+    let f = Fixture::new(true).await;
+    let (items, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let sink = Arc::new(WatchItems {
+        items,
+        unsubscribed: watch::channel(false).0,
+    });
+    let watch = tokio::spawn({
+        let (handler, sink) = (f.handler.clone(), sink.clone());
+        async move {
+            let body = br#"{"method":"consent.watch_pending","params":{}}"#;
+            handler
+                .handle_watch_stamped(&phone(), body, sink.as_ref())
+                .await
+        }
+    });
+    assert_eq!(next_item(&mut received).await, json!({"type":"reread"}));
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    // On the head leg the phone cannot read the ask, so it is not shown.
+    let item = next_item(&mut received).await;
+    assert_eq!(item["type"], "removed");
+    assert_eq!(item["elicitation_id"], json!(id));
+    f.relay(&id, "escalate").await;
+    let item = next_item(&mut received).await;
+    assert_eq!(item["type"], "changed");
+    assert_eq!(
+        item["card"],
+        f.ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await
+    );
+    assert_eq!(item["card"]["state"], "pending");
+    f.ok(
+        &phone(),
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+    )
+    .await;
+    let answered = next_item(&mut received).await;
+    assert_eq!(answered["card"]["state"], "answered");
+    assert_eq!(answered["card"]["answeredChoiceId"], "allow_once");
+    assert_eq!(
+        answered["card"],
+        f.ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await
+    );
+    sink.unsubscribed.send_replace(true);
+    assert_eq!(watch.await.unwrap(), HandlerOutcome::Streamed);
 }

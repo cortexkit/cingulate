@@ -57,24 +57,25 @@ fn asker(worker: bool) -> Stamp {
     Stamp {
         principal: Some("reserved:aft".into()),
         harness: "test-harness".into(),
-        scope: Some(ScopeStamp {
-            owner: principal("prefrontal-core"),
-            scope_ref: if worker { "worker" } else { "head" }.into(),
-            scope_epoch: if worker { 3 } else { 7 },
-            kind: if worker {
-                ScopeKind::Worker
-            } else {
-                ScopeKind::Head
-            },
-            parent: worker.then(|| ScopeParent::new(principal("prefrontal-core"), "head", 7)),
-            parent_state: None,
-            attributes: if worker {
+        scope: Some(
+            ScopeStamp::new(
+                principal("prefrontal-core"),
+                if worker { "worker" } else { "head" },
+                if worker { 3 } else { 7 },
+                if worker {
+                    ScopeKind::Worker
+                } else {
+                    ScopeKind::Head
+                },
+            )
+            .with_parent(worker.then(|| ScopeParent::new(principal("prefrontal-core"), "head", 7)))
+            .with_attributes(if worker {
                 ScopeAttributes::new()
             } else {
                 ScopeAttributes::new().with_agent_id(Some("agent".into()))
-            },
-            owner_authorized: true,
-        }),
+            })
+            .with_owner_authorized(true),
+        ),
         ..Default::default()
     }
 }

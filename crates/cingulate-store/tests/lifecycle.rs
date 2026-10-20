@@ -197,7 +197,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6"
+        "1,2,3,4,5,6,7"
     );
     let answer_schema: String = conn
         .query_row(
@@ -285,14 +285,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,7,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,8,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 7"));
-    assert!(error.to_string().contains("migration 6"));
+    assert!(error.to_string().contains("version 8"));
+    assert!(error.to_string().contains("migration 7"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1259,7 +1259,12 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
     scratch
         .sql()
         .execute_batch(
-            "DROP TRIGGER access_insert_revision;
+            "DROP TRIGGER cingulate_change_card_insert;
+        DROP TRIGGER cingulate_change_card_update;
+        DROP TRIGGER cingulate_change_card_delete;
+        DROP TABLE cingulate_changes;
+        DROP TABLE cingulate_change_log;
+        DROP TRIGGER access_insert_revision;
         DROP TRIGGER access_update_revision;
         DROP TABLE access_notices;
         DROP TABLE access_asks;
@@ -1718,4 +1723,62 @@ fn execution_scan_bounds_ineligible_rows_and_reaches_later_answers() {
         after = page.after;
     }
     assert_eq!(found, vec![id]);
+}
+
+#[test]
+fn change_log_records_every_card_change_and_compacts_with_a_stale_boundary() {
+    let scratch = Scratch::new();
+    let (mut store, _) = scratch.open(0);
+    let start = store.changes_after(0, 64).unwrap();
+    assert_eq!((start.head, start.pruned_through, start.backlog), (0, 0, 0));
+    assert_eq!(start.instance.len(), 32);
+    let first = store
+        .create(&identity("direct", "s"), request(), 0)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let second = store
+        .create(&identity("direct", "s"), request(), 0)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&first, "allow_once", None, 1).unwrap();
+    // Each card is listed once, at its latest change, ordered by that change.
+    let page = store.changes_after(0, 64).unwrap();
+    assert_eq!(page.head, 3);
+    assert_eq!(page.backlog, 2);
+    let listed: Vec<_> = page
+        .changes
+        .iter()
+        .map(|change| (change.version, change.elicitation_id.clone()))
+        .collect();
+    assert_eq!(listed, [(2, second.clone()), (3, first.clone())]);
+    assert_eq!(store.changes_after(2, 64).unwrap().backlog, 1);
+    assert_eq!(store.changes_after(3, 64).unwrap().changes, []);
+
+    // A sweep with nothing due writes no row, so it wakes no watch.
+    let writes = store.write_count();
+    store.sweep(2).unwrap();
+    assert_eq!(store.write_count(), writes);
+
+    // Compaction keeps the newest row and moves the stale boundary to the
+    // highest version it deleted.
+    store.set_change_log_rows(1);
+    store.sweep(2).unwrap();
+    let page = store.changes_after(0, 64).unwrap();
+    assert_eq!((page.head, page.pruned_through), (3, 2));
+    assert_eq!(page.changes.len(), 1);
+    assert!(store.write_count() > writes);
+
+    // Retention pruning is itself a change for each pruned card; the same
+    // sweep then expires the second card.
+    store.sweep(1 + RETENTION_MS).unwrap();
+    let page = store.changes_after(3, 64).unwrap();
+    let listed: Vec<_> = page
+        .changes
+        .iter()
+        .map(|change| (change.version, change.elicitation_id.clone()))
+        .collect();
+    assert_eq!(listed, [(4, first), (5, second)]);
+    assert_eq!(page.instance, start.instance);
 }

@@ -254,6 +254,7 @@ impl Fixture {
             await_hook: Some(hook.clone()),
             sweep_timer: false,
             data_home: data_home.into(),
+            ..Options::default()
         })
     }
     async fn open(machine: Option<&str>) -> Self {
@@ -497,6 +498,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
         ("consent.detach", true),
         ("consent.answer", true),
         ("consent.list_pending", false),
+        ("consent.watch_pending", false),
         ("consent.outcomes", false),
         ("permissions.list_all", false),
         ("permissions.revoke", true),
