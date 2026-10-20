@@ -88,12 +88,12 @@ tombstones until pruned. The store's own contract is in
 The gates are in `.cortexkit/WORKER.md`. All tests use scratch stores under the
 system temp directory.
 
-## Left before first placement
+## Placement and what is left
 
-- **Production daemon card.** Installing `ck-cingulate` in production daemon
-  configuration and checking supervised startup remain. A real in-process daemon
-  test now proves SDK registration and catalog delivery over authenticated TCP;
-  it does not spawn the production binary or exercise the macOS privacy trampoline.
+- **Production placement.** `ck-cingulate` runs under the production daemon
+  (`cingulate` in `subc.jsonc`) and owns the live cards; prefrontal-core's
+  `elicitation.*` operations are deleted and the phone reads `consent.*`. The
+  bullets below record what is still left after placement.
 - **Attested stamp fields.** The production adapter now reads the SDK's daemon
   `RouteBindRequest.scope`: bind session is `[owner, ref, epoch]` serialized as
   JSON, and carried agent is `attributes.agent_id`. Scoped Cerebellum, Plexus
@@ -113,11 +113,12 @@ system temp directory.
   `Options` use wall time, an unavailable resolver (no Entorhinal names; cards
   show raw agent ids) and a no-op notifier (no pushes until Callosum's
   `surface-notify/v1` exists) (`Options::default`, `lib.rs:192-205`).
-- **Core's client cutover.** prefrontal-core still owns the live card plane. Core
-  turning its `elicitation.*` operations into relays to `consent/v1`, then
-  deleting them, is a separate core campaign (design.md, "Migration outline").
-- **Not built:** `presence/v1` routing, holding `at_console` cards until unlock,
-  and the two contracts above.
+- **Push sender switch.** prefrontal-core still pushes card notifications. The
+  switch to cingulate's notifier follows the consent push runbook: the Mac's
+  notification key moves to Claustrum, the phone ships Auth-mode opening, then the
+  sender switches and Callosum admits `reserved:cingulate` on `push_submit`.
+- **Not built:** `presence/v1` (cingulate serves it; tagged samples come before
+  the phone builds) and holding `at_console` cards until unlock.
 
 ## Who consumes which operations
 
