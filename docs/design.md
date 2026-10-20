@@ -113,11 +113,11 @@ The module is named `cingulate` (operator approval), and ALF owns it. These ruli
 5. **Error codes:** `consent_not_bound` (no capability configured; permanent) and `consent_unavailable` (bound but down; transient). They need opposite handling, so they never share a code. This settles open question 6.
 6. **Presence is its own capability, `presence/v1`** (answers open question 3), fed by:
    - the phone's `presence.report {state, lastInputMs}` on scene transitions and the poll beat, expiring after about 35 s of silence;
-   - the desktop app's focus;
+   - the desktop app's "a card is on screen on this surface, and the person interacted with this app in the last N seconds". App focus is the wrong signal: the island is a non-activating panel that takes input while the app is not frontmost. The desktop reports on transitions plus a heartbeat while a card is visible, with the phone's ~35 s expiry, so a crashed or disconnected app falls silent instead of lingering; it never reports present from window state while the screen is locked;
    - Cerebellum's `screen_locked`;
    - Callosum's local `sessions_read`.
    Unknown never means present, and the consent module and wake routing both read it.
-7. **`at_console` applies to the takeover card only.** Cerebellum already refuses app actions on a locked screen before raising a card, and app cards stay answerable from anywhere. An answer stamped `reserved:callosum` never satisfies `at_console`. The phone lists such cards read-only as "Answer at <Mac>".
+7. **`at_console` applies to the takeover card only.** Cerebellum already refuses app actions on a locked screen before raising a card, and app cards stay answerable from anywhere. An answer stamped `reserved:callosum` never satisfies `at_console`. The phone lists such cards read-only as "Answer at <Mac>". Only an answer whose route the daemon stamps as a registered console surface satisfies it: a daemon-attested module or principal identity on cingulate's own allowlist. A bare `direct` route never does, because any process of the same user can open one, and a harness string sent by the caller never does. The desktop app therefore needs a daemon-registered identity of its own.
 8. **Push becomes Callosum's `surface-notify/v1`.** It is a stateless op that seals a pointer payload and submits it through the rendezvous worker, which already holds the APNs key, so core's `DirectApnsTransport` and its key are deleted rather than moved. The rest of the push plan:
    - **Order:** the phone ships Auth-mode opening, the Mac re-enrolls for a notification key, then the sender switches.
    - **Ids:** card ids are never reused across raises, and retractions carry the raise's id.
