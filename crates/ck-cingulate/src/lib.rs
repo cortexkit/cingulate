@@ -65,12 +65,25 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 14] = [
     ("permissions.revoke", ManagementOperationKind::Mutate),
 ];
 
+/// Where a requester's card gets the agent it is about. The agent always comes
+/// from the daemon's route stamp, never from the request body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SubjectAgent {
+    /// The requester acts for an agent on every card: a stamp without one is refused.
+    Carried,
+    /// The requester acts for an agent when it files the card on that agent's
+    /// scope (an agent's flow install); without one the card is the requester's own.
+    FromScope,
+    /// The card is always the requester's own.
+    Never,
+}
+
 #[derive(Clone, Copy)]
 struct RequesterAdmission {
     principal: &'static str,
     requester_name: Option<&'static str>,
     kinds: &'static [&'static str],
-    carries_agent: bool,
+    agent: SubjectAgent,
 }
 
 // Keep every requester admission beside its phone display name. `direct` is a
@@ -81,49 +94,49 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
         principal: "reserved:cerebellum",
         requester_name: Some("Cerebellum"),
         kinds: &["consent"],
-        carries_agent: true,
+        agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
         principal: "reserved:plexus",
         requester_name: Some("Plexus"),
         kinds: &["consent"],
-        carries_agent: true,
+        agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
         principal: "reserved:broca",
         requester_name: Some("Broca"),
         kinds: &["consent"],
-        carries_agent: true,
+        agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
         principal: "reserved:entorhinal",
         requester_name: Some("Entorhinal"),
         kinds: &["consent"],
-        carries_agent: true,
+        agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
         principal: "direct",
         requester_name: None,
         kinds: &["consent"],
-        carries_agent: false,
+        agent: SubjectAgent::Never,
     },
     RequesterAdmission {
         principal: "reserved:basal",
         requester_name: Some("Basal"),
         kinds: &["flow_decision"],
-        carries_agent: false,
+        agent: SubjectAgent::Never,
     },
     RequesterAdmission {
         principal: "reserved:prefrontal-core",
         requester_name: Some("Prefrontal"),
         kinds: &["flow_install", "package"],
-        carries_agent: false,
+        agent: SubjectAgent::FromScope,
     },
     RequesterAdmission {
         principal: "reserved:aft",
         requester_name: Some("AFT"),
         kinds: &["tool_permission", "macos_permission"],
-        carries_agent: false,
+        agent: SubjectAgent::Never,
     },
 ];
 
@@ -689,9 +702,13 @@ impl Handler {
         {
             return Err(stamp.refuse());
         }
-        let carrier =
-            requester_admission(stamp.label()).is_some_and(|admission| admission.carries_agent);
-        let worker_head = if request.kind == "consent" && stamp.carried_agent_id.trim().is_empty() {
+        let agent_source = requester_admission(stamp.label())
+            .map_or(SubjectAgent::Never, |admission| admission.agent);
+        let carrier = agent_source == SubjectAgent::Carried;
+        let from_scope = agent_source == SubjectAgent::FromScope;
+        let worker_head = if (request.kind == "consent" || from_scope)
+            && stamp.carried_agent_id.trim().is_empty()
+        {
             match &stamp.scope {
                 Some(scope)
                     if scope.kind == subc_protocol::scope::ScopeKind::Worker
@@ -726,7 +743,10 @@ impl Handler {
             }
         }
         let mut resolved_name = None;
-        let subject = if carrier || worker_head.is_some() {
+        let subject = if carrier
+            || worker_head.is_some()
+            || (from_scope && !agent_id.trim().is_empty())
+        {
             if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
                 if agent.retired {
                     return Err(Refusal::new("consent_retired", "subject agent is retired"));

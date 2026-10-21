@@ -888,6 +888,14 @@ async fn allowlist_table_identity_and_order() {
             "",
             "reserved:prefrontal-core",
         ),
+        // Core files an agent's flow install on that agent's scope: the card is
+        // the agent's, not Prefrontal's.
+        (
+            "reserved:prefrontal-core",
+            Some("flow_install"),
+            "agent-alf",
+            "agent-alf",
+        ),
         (
             "reserved:basal",
             Some("flow_decision"),

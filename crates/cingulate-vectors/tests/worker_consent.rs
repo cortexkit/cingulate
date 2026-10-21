@@ -256,3 +256,54 @@ async fn worker_live_head_without_agent_is_refused_no_head() {
         "access_no_head"
     );
 }
+
+/// Core files an agent's flow install on that agent's scope, so the card is the
+/// agent's ("ALF asks"), or its head's when a worker filed it. Unscoped, the
+/// card stays Prefrontal's own.
+#[tokio::test]
+async fn core_flow_install_card_names_the_agent_of_its_scope() {
+    let mut body = app_body();
+    body["kind"] = json!("flow_install");
+    body["flow_install"] = json!({"flow":"morning-summary","manifest":{"schedule":"daily"}});
+    body["target"] = json!({"kind":"flow","label":"morning-summary"});
+    body["scope"] = json!({"flow_id":"morning-summary"});
+    for (kind, via_worker) in [(ScopeKind::Head, false), (ScopeKind::Worker, true)] {
+        let fixture = Fixture::open(None).await;
+        fixture
+            .handler
+            .set_access_runtime(worker::Runtime::new(Ok(ScopeLife::Live(worker::head()))));
+        let stamp = worker::stamp("prefrontal-core", kind);
+        let id = fixture.request(&stamp, body.clone()).await;
+        let phone: Value = serde_json::from_slice(
+            &phone::served(&fixture, "consent.get", json!({"elicitationId":id})).await,
+        )
+        .unwrap();
+        let mut expected =
+            json!({"agentId":"agent-alf","headAgentId":"agent-alf","label":"ALF"});
+        if via_worker {
+            expected["viaWorker"] = json!(true);
+        }
+        assert_eq!(phone["result"]["subject"], expected);
+    }
+    let fixture = Fixture::open(None).await;
+    let mut unscoped = worker::stamp("prefrontal-core", ScopeKind::Head);
+    unscoped.scope = None;
+    unscoped.carried_agent_id.clear();
+    let id = fixture.request(&unscoped, body.clone()).await;
+    let phone: Value = serde_json::from_slice(
+        &phone::served(&fixture, "consent.get", json!({"elicitationId":id})).await,
+    )
+    .unwrap();
+    assert!(phone["result"]["subject"].get("headAgentId").is_none());
+    assert_eq!(phone["result"]["requesterName"], "Prefrontal");
+    // A body naming an agent changes nothing: the agent comes only from the stamp.
+    let mut forged = body.clone();
+    forged["agent_id"] = json!("agent-alf");
+    assert_eq!(
+        fixture
+            .call(&unscoped, "consent.request", forged)
+            .await
+            .unwrap_err()["code"],
+        "elicitation_invalid_request"
+    );
+}
