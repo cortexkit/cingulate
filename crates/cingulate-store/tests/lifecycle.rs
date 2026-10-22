@@ -13,7 +13,7 @@ use cingulate_store::{
     storage_descriptor, AnswerOutcome, ConsentStore, ElicitationRecord, Isolation, RequestIdentity,
     State, StorageBackend, StorageDescriptor, MIGRATION_NAMESPACE, RETENTION_MS,
 };
-use rusqlite::{params, types::ValueRef, Connection};
+use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -197,7 +197,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7"
+        "1,2,3,4,5,6,7,8"
     );
     let answer_schema: String = conn
         .query_row(
@@ -285,14 +285,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,8,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,9,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 8"));
-    assert!(error.to_string().contains("migration 7"));
+    assert!(error.to_string().contains("version 9"));
+    assert!(error.to_string().contains("migration 8"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1273,6 +1273,7 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
         DROP TRIGGER cingulate_pending_insert;
         DROP TRIGGER cingulate_pending_update;
         DROP TRIGGER cingulate_pending_delete;
+        ALTER TABLE elicitation_records DROP COLUMN rich_ui_device;
         DROP TABLE cingulate_pending_revision;
         DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=3;",
         )
@@ -1321,6 +1322,8 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         requester: "direct".into(),
         state: State::Pending,
         answered_at_ms: None,
+        revoked_at_ms: None,
+        answered_device: None,
         answered_choice_id: None,
         execution: None,
         execution_reason: None,
@@ -1334,7 +1337,10 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         Ok(())
     }).unwrap();
     drop(old);
-    let before = rows(&scratch.sql(), "elicitation_records");
+    let mut before = rows(&scratch.sql(), "elicitation_records");
+    for row in &mut before {
+        row.push(Value::Null);
+    }
     let (store, settlements) = scratch.open(100);
     assert!(settlements.is_empty());
     assert_eq!(rows(&scratch.sql(), "elicitation_records"), before);
@@ -1460,7 +1466,10 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
         Ok(())
     }).unwrap();
     drop(old);
-    let before = snapshot(&scratch);
+    let mut before = snapshot(&scratch);
+    for row in &mut before.records {
+        row.push(Value::Null);
+    }
     let notices = rows(&scratch.sql(), "access_notices");
     let (store, events) = scratch.open(102);
     assert!(events.is_empty());
@@ -1781,4 +1790,67 @@ fn change_log_records_every_card_change_and_compacts_with_a_stale_boundary() {
         .collect();
     assert_eq!(listed, [(4, first), (5, second)]);
     assert_eq!(page.instance, start.instance);
+}
+
+#[test]
+fn rich_ui_migration_preserves_v7_records_cursors_and_change_triggers() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.pragma_update(None, "foreign_keys", true).unwrap();
+    for migration in &cingulate_store::MIGRATIONS[..7] {
+        conn.execute_batch(migration.statements).unwrap();
+    }
+    conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state) VALUES('old','owner','{}','answered')", []).unwrap();
+    conn.execute("INSERT INTO elicitation_answers(cursor,elicitation_id,owner,settled_at_ms) VALUES(42,'old','owner',100)", []).unwrap();
+    conn.execute_batch(cingulate_store::MIGRATIONS[7].statements)
+        .unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT cursor FROM elicitation_answers WHERE elicitation_id='old'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        42
+    );
+    assert_eq!(
+        conn.query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
+            .optional()
+            .unwrap(),
+        None
+    );
+    let before: i64 = conn
+        .query_row("SELECT MAX(version) FROM cingulate_changes", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    conn.execute("UPDATE elicitation_records SET state='revoked',record_json='{\"revokedAtMs\":200}' WHERE elicitation_id='old'", []).unwrap();
+    assert!(
+        conn.query_row("SELECT MAX(version) FROM cingulate_changes", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap()
+            > before
+    );
+    conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,rich_ui_device) VALUES('new','owner','{}','pending','device')", []).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT value FROM cingulate_pending_revision", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    conn.execute("INSERT INTO elicitation_answers(elicitation_id,owner,settled_at_ms) VALUES('new','owner',200)", []).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT cursor FROM elicitation_answers WHERE elicitation_id='new'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        43
+    );
+    conn.execute(
+        "UPDATE elicitation_records SET record_json=NULL WHERE elicitation_id='new'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(conn.query_row("SELECT rich_ui_device FROM cingulate_changes WHERE elicitation_id='new' ORDER BY version DESC LIMIT 1", [], |r| r.get::<_,String>(0)).unwrap(), "device");
 }

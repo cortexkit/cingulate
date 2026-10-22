@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.0 (ck-cingulate)
+
+- Add typed, fail-closed `rich_ui_approval` cards requested only by stamped
+  `reserved:occipital`. Grants require an exact `bindDigest`; mismatches refuse
+  `approval_digest_mismatch`, and other kinds reject the field as `invalid_params`.
+- Gate phone list/get/watch/answer with `rich-ui-approval` and the intended
+  device fingerprint. Featureless answers refuse
+  `elicitation_rich_ui_approval_required`; wrong-device reads and answers behave
+  exactly as unknown IDs. This kind never emits notifier pointers.
+- Add owned, idempotent `consent.revoke {elicitationId}` for granted approvals,
+  terminal `revoked` state and `revokedAtMs`. Withdrawal is unchanged.
+- Migration 8 extends the state constraint while preserving answer cursors and
+  triggers, and retains device visibility on change-log rows even after pruning.
+  Record fed-route answering fingerprints for generic cards and permission attempts.
+- Pin complete served states, feature gates and bound-answer/refusal samples in
+  `test-vectors/rich-ui-approval-v1/`; document phone and requester contracts.
+
 ## 0.10.0 (ck-cingulate)
 
 - Add `consent.watch_pending`, a live stream of phone-visible card changes that

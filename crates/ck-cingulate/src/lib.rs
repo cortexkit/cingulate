@@ -48,7 +48,7 @@ pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, W
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 14] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 15] = [
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
     ("consent.await", ManagementOperationKind::Query),
@@ -58,6 +58,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 14] = [
     ("consent.withdraw", ManagementOperationKind::Mutate),
     ("consent.detach", ManagementOperationKind::Mutate),
     ("consent.answer", ManagementOperationKind::Mutate),
+    ("consent.revoke", ManagementOperationKind::Mutate),
     ("consent.list_pending", ManagementOperationKind::Query),
     (WATCH_PENDING, ManagementOperationKind::Query),
     ("consent.outcomes", ManagementOperationKind::Query),
@@ -90,6 +91,12 @@ struct RequesterAdmission {
 // legacy generic-consent caller without a stable human identity, so it has no
 // display name and must never be shown as a raw principal.
 const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
+    RequesterAdmission {
+        principal: "reserved:occipital",
+        requester_name: Some("Occipital"),
+        kinds: &["rich_ui_approval"],
+        agent: SubjectAgent::Never,
+    },
     RequesterAdmission {
         principal: "reserved:cerebellum",
         requester_name: Some("Cerebellum"),
@@ -161,6 +168,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-single-use/v1".into(),
                 "consent-outcomes-late/v1".into(),
                 "consent-no-expiry/v1".into(),
+                "rich-ui-approval/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -241,6 +249,23 @@ impl Stamp {
 
     fn label(&self) -> &str {
         self.principal.as_deref().unwrap_or("absent")
+    }
+    fn answering_device(&self) -> Option<&str> {
+        if self.label() != "reserved:callosum" {
+            return None;
+        }
+        let (class, fingerprint) = self.harness.strip_prefix("fed-")?.split_once(':')?;
+        (matches!(class, "phone" | "sim" | "mac")
+            && cingulate_decode::lowercase_hex(fingerprint, 32))
+        .then_some(fingerprint)
+    }
+
+    fn rich_ui_device_matches(&self, record: &ElicitationRecord) -> bool {
+        record
+            .request
+            .rich_ui_approval
+            .as_ref()
+            .is_none_or(|body| self.answering_device() == Some(body.device.as_str()))
     }
     fn owner(&self) -> String {
         json!([self.label(), self.bind_session]).to_string()
@@ -425,6 +450,13 @@ fn option_group_declared(params: &Value) -> Result<bool, Refusal> {
         .filter(|features| features.iter().all(Value::is_string))
         .ok_or_else(|| invalid("clientFeatures must be an array of strings"))?;
     Ok(features.iter().any(|feature| feature == "option-group"))
+}
+
+fn feature_declared(params: &Value, feature: &str) -> bool {
+    params
+        .get("clientFeatures")
+        .and_then(Value::as_array)
+        .is_some_and(|features| features.iter().any(|value| value == feature))
 }
 
 fn surface_options(mut value: Value, option_group: bool) -> Value {
@@ -668,6 +700,9 @@ impl Handler {
         }
     }
     async fn pointer(&self, record: &ElicitationRecord, retraction: bool) {
+        if record.request.kind == "rich_ui_approval" {
+            return;
+        }
         let mut value = json!({"elicitationId": record.elicitation_id,
             "kind": if retraction { "retraction" } else { "elicitation" },
             "eventAtMs": if retraction { record.answered_at_ms.expect("settlement time") } else { record.created_at_ms }});
@@ -743,35 +778,33 @@ impl Handler {
             }
         }
         let mut resolved_name = None;
-        let subject = if carrier
-            || worker_head.is_some()
-            || (from_scope && !agent_id.trim().is_empty())
-        {
-            if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
-                if agent.retired {
-                    return Err(Refusal::new("consent_retired", "subject agent is retired"));
+        let subject =
+            if carrier || worker_head.is_some() || (from_scope && !agent_id.trim().is_empty()) {
+                if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
+                    if agent.retired {
+                        return Err(Refusal::new("consent_retired", "subject agent is retired"));
+                    }
+                    resolved_name = agent.name;
                 }
-                resolved_name = agent.name;
-            }
-            Subject {
-                agent_id: Some(agent_id.to_owned()),
-                head_agent_id: agent_id.to_owned(),
-                label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
-                via_worker: worker_head.is_some(),
-            }
-        } else {
-            Subject {
-                agent_id: None,
-                head_agent_id: String::new(),
-                via_worker: false,
-                label: match stamp.label() {
-                    "direct" => "an unverified local process",
-                    "reserved:basal" => "operator decision",
-                    label => label,
+                Subject {
+                    agent_id: Some(agent_id.to_owned()),
+                    head_agent_id: agent_id.to_owned(),
+                    label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
+                    via_worker: worker_head.is_some(),
                 }
-                .into(),
-            }
-        };
+            } else {
+                Subject {
+                    agent_id: None,
+                    head_agent_id: String::new(),
+                    via_worker: false,
+                    label: match stamp.label() {
+                        "direct" => "an unverified local process",
+                        "reserved:basal" => "operator decision",
+                        label => label,
+                    }
+                    .into(),
+                }
+            };
         Ok(RequestIdentity {
             owner: stamp.owner(),
             requester: stamp.label().into(),
@@ -873,7 +906,7 @@ impl Handler {
         }
         let id = match method {
             "consent.get" if stamp.operator_surface => Some(text(&params, "elicitationId")?),
-            "consent.answer" => Some(text(&params, "elicitationId")?),
+            "consent.answer" | "consent.revoke" => Some(text(&params, "elicitationId")?),
             "consent.get"
             | "consent.await"
             | "consent.withdraw"
@@ -899,6 +932,7 @@ impl Handler {
             "consent.get"
                 | "consent.await"
                 | "consent.withdraw"
+                | "consent.revoke"
                 | "consent.detach"
                 | "consent.report_execution"
         ) && !(method == "consent.get" && stamp.operator_surface)
@@ -965,6 +999,58 @@ impl Handler {
             .as_ref()
             .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?;
         let now = self.inner.options.clock.now_ms();
+        let rich_ui = feature_declared(&params, "rich-ui-approval");
+        if method == "consent.answer" || (method == "consent.get" && stamp.operator_surface) {
+            if let Some(record) = store
+                .get_phone(id.expect("phone id"), now)
+                .map_err(store_error)?
+            {
+                if !stamp.rich_ui_device_matches(&record) {
+                    return if method == "consent.answer" {
+                        Ok(json!({"ok":false,"code":"not_found"}))
+                    } else {
+                        Err(Refusal::new(
+                            "elicitation_not_found",
+                            "elicitation not found",
+                        ))
+                    };
+                }
+                if record.request.kind == "rich_ui_approval" && !rich_ui {
+                    return if method == "consent.answer" {
+                        Err(Refusal::new(
+                            "elicitation_rich_ui_approval_required",
+                            "declare clientFeatures rich-ui-approval",
+                        ))
+                    } else {
+                        Err(Refusal::new(
+                            "elicitation_not_found",
+                            "elicitation not found",
+                        ))
+                    };
+                }
+                if method == "consent.answer" {
+                    if let Some(body) = &record.request.rich_ui_approval {
+                        let binding = params.get("bindDigest");
+                        let grant = record.request.options.iter().any(|option| {
+                            Some(option.id.as_str()) == choice && option.effect == "grant"
+                        });
+                        if (grant || binding.is_some())
+                            && binding.and_then(Value::as_str) != Some(&body.approval_digest)
+                        {
+                            return Err(Refusal::new(
+                                "approval_digest_mismatch",
+                                "bindDigest must equal approvalDigest",
+                            ));
+                        }
+                    } else if params.get("bindDigest").is_some() {
+                        return Err(Refusal::new(
+                            "invalid_params",
+                            "bindDigest is only valid for rich_ui_approval",
+                        ));
+                    }
+                }
+            }
+        }
         if method == "consent.answer" && !option_group {
             if let Some(record) = store
                 .get(id.expect("answer id"), now)
@@ -992,6 +1078,7 @@ impl Handler {
                 | "consent.list_pending"
                 | "consent.answer"
                 | "consent.withdraw"
+                | "consent.revoke"
                 | "consent.detach"
         ) {
             store.sweep(now).map_err(store_error)?
@@ -1048,6 +1135,13 @@ impl Handler {
                     events.extend(mutation.settlements);
                     self.project(&mutation.value, false)
                 }
+                "consent.revoke" => {
+                    let mutation = store
+                        .revoke(&stamp.owner(), id.expect("revoke id"), now)
+                        .map_err(store_error)?;
+                    events.extend(mutation.settlements);
+                    self.project(&mutation.value, false)
+                }
                 "consent.detach" => {
                     let mutation = store
                         .detach(&stamp.owner(), id.expect("detach id"), now)
@@ -1075,7 +1169,9 @@ impl Handler {
                                 // Accept the previous release's expiry cursor, but
                                 // resume at that card's position in creation order.
                                 integer(value, "expires_at_ms")?;
-                                if let Some(record) = store.get_phone(&id, now).map_err(store_error)? {
+                                if let Some(record) = store.get_phone(&id, now).map_err(store_error)?.filter(|record| {
+                                    stamp.rich_ui_device_matches(record) && (rich_ui || record.request.kind != "rich_ui_approval")
+                                }) {
                                     record.created_at_ms
                                 } else if let Some(record) = store.access_get(&id).map_err(store_error)? {
                                     record.created_at_ms
@@ -1116,6 +1212,12 @@ impl Handler {
                     if option_group {
                         revision.push_str(":option-group");
                     }
+                    if rich_ui {
+                        revision.push_str(&format!(
+                            ":rich-ui:device={}",
+                            stamp.answering_device().unwrap_or("none")
+                        ));
+                    }
                     if after.is_none()
                         && params.get("if_revision").and_then(Value::as_str) == Some(&revision)
                     {
@@ -1129,6 +1231,10 @@ impl Handler {
                         .pending()
                         .map_err(store_error)?
                         .into_iter()
+                        .filter(|record| {
+                            stamp.rich_ui_device_matches(record)
+                                && (rich_ui || record.request.kind != "rich_ui_approval")
+                        })
                         .map(|record| {
                             let key = (record.created_at_ms, record.elicitation_id.clone());
                             let mut value =
@@ -1186,10 +1292,11 @@ impl Handler {
                 }
                 "consent.answer" => {
                     let mutation = store
-                        .answer(
+                        .answer_from_device(
                             id.expect("answer id"),
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
+                            stamp.answering_device(),
                             now,
                         )
                         .map_err(store_error)?;
@@ -1342,6 +1449,11 @@ mod tests {
         assert_eq!(
             admissions,
             [
+                (
+                    "reserved:occipital",
+                    Some("Occipital"),
+                    vec!["rich_ui_approval"]
+                ),
                 ("reserved:cerebellum", Some("Cerebellum"), vec!["consent"]),
                 ("reserved:plexus", Some("Plexus"), vec!["consent"]),
                 ("reserved:broca", Some("Broca"), vec!["consent"]),
@@ -1672,5 +1784,47 @@ mod tests {
             request.await.expect("request task"),
             HandlerOutcome::Response(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod rich_ui_device_tests {
+    use super::*;
+
+    #[test]
+    fn fed_fingerprint_parser_matches_callosum_vectors() {
+        let corpus = include_str!("../../../test-vectors/device-class-harness/harness.jsonl");
+        for line in corpus.lines() {
+            let vector: Value = serde_json::from_str(line).unwrap();
+            let stamp = Stamp {
+                principal: Some("reserved:callosum".into()),
+                harness: vector["harness"].as_str().unwrap().into(),
+                ..Stamp::default()
+            };
+            assert_eq!(
+                stamp.answering_device().is_some(),
+                !vector["class"].is_null()
+            );
+        }
+        for harness in [
+            "fed-phone:",
+            "fed-phone:300C9c9603b92a4b39ed3958bf924011",
+            "fed-phone:300c9c9603b92a4b39ed3958bf924011:extra",
+            "fed-phone:gggggggggggggggggggggggggggggggg",
+            "phone:300c9c9603b92a4b39ed3958bf924011",
+        ] {
+            let stamp = Stamp {
+                principal: Some("reserved:callosum".into()),
+                harness: harness.into(),
+                ..Stamp::default()
+            };
+            assert_eq!(stamp.answering_device(), None, "{harness}");
+        }
+        let stamp = Stamp {
+            principal: Some("reserved:occipital".into()),
+            harness: "fed-phone:300c9c9603b92a4b39ed3958bf924011".into(),
+            ..Stamp::default()
+        };
+        assert_eq!(stamp.answering_device(), None);
     }
 }

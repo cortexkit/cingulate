@@ -78,6 +78,23 @@ pub struct Package {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RichUiApproval {
+    pub approval_digest: String,
+    pub manifest_digest: String,
+    pub capability_digest: String,
+    pub provider: String,
+    pub device: String,
+}
+
+pub fn lowercase_hex(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     pub language: String,
@@ -99,6 +116,8 @@ pub struct DryRunText {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich_ui_approval: Option<RichUiApproval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package: Option<Package>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -282,6 +301,50 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        if self.kind == "rich_ui_approval" {
+            let body = self
+                .rich_ui_approval
+                .as_ref()
+                .ok_or_else(|| Refusal::invalid("missing rich_ui_approval"))?;
+            for digest in [
+                &body.approval_digest,
+                &body.manifest_digest,
+                &body.capability_digest,
+            ] {
+                if !digest
+                    .strip_prefix("sha256:")
+                    .is_some_and(|hex| lowercase_hex(hex, 64))
+                {
+                    return Err(Refusal::invalid(
+                        "rich_ui_approval digests must be sha256: followed by 64 lowercase hex",
+                    ));
+                }
+            }
+            if body.provider.is_empty()
+                || !body
+                    .provider
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            {
+                return Err(Refusal::invalid(
+                    "rich_ui_approval provider must be a module id",
+                ));
+            }
+            if !lowercase_hex(&body.device, 32) {
+                return Err(Refusal::invalid(
+                    "rich_ui_approval device must be 32 lowercase hex",
+                ));
+            }
+            if self.flow_install.is_some() || self.flow_decision.is_some() {
+                return Err(Refusal::invalid(
+                    "rich_ui_approval cannot carry flow bodies",
+                ));
+            }
+        } else if self.rich_ui_approval.is_some() {
+            return Err(Refusal::invalid(
+                "rich_ui_approval body requires rich_ui_approval kind",
+            ));
+        }
         if !matches!(self.kind.as_str(), "flow_install" | "package") {
             if self.source.is_some() {
                 return Err(Refusal::invalid(
@@ -383,7 +446,10 @@ impl ConsentRequest {
         {
             return Err(Refusal::invalid("choose is only valid for flow_decision"));
         }
-        if matches!(self.kind.as_str(), "flow_install" | "package") {
+        if matches!(
+            self.kind.as_str(),
+            "flow_install" | "package" | "rich_ui_approval"
+        ) {
             if self.kind == "flow_install" && self.flow_install.is_none() {
                 return Err(Refusal::invalid("missing flow_install"));
             }
@@ -401,16 +467,16 @@ impl ConsentRequest {
                     .count()
                     != 1
             {
-                return Err(Refusal::invalid(if self.kind == "package" {
-                    "package needs exactly grant and decline"
-                } else {
-                    "flow install needs exactly grant and decline"
+                return Err(Refusal::invalid(match self.kind.as_str() {
+                    "package" => "package needs exactly grant and decline",
+                    "rich_ui_approval" => "rich_ui_approval needs exactly grant and decline",
+                    _ => "flow install needs exactly grant and decline",
                 }));
             }
         }
         if !matches!(
             self.kind.as_str(),
-            "consent" | "flow_install" | "flow_decision" | "package"
+            "consent" | "flow_install" | "flow_decision" | "package" | "rich_ui_approval"
         ) {
             return Err(Refusal::new(
                 "elicitation_unknown_kind",

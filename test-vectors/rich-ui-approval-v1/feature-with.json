@@ -1,0 +1,45 @@
+{
+  "createdAtMs": 10000,
+  "default": "deny",
+  "elicitationId": "el_1",
+  "facts": [],
+  "kind": "rich_ui_approval",
+  "lateExecution": "notify_only",
+  "materialDamage": false,
+  "onExpiry": "deny",
+  "options": [
+    {
+      "effect": "grant",
+      "id": "approve",
+      "label": "Approve"
+    },
+    {
+      "effect": "decline",
+      "id": "deny",
+      "label": "Decline"
+    }
+  ],
+  "prompt": "Review on this phone",
+  "requesterLabel": "reserved:occipital",
+  "requesterName": "Occipital",
+  "richUiApproval": {
+    "approvalDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "capabilityDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "device": "300c9c9603b92a4b39ed3958bf924011",
+    "manifestDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "provider": "weather-tools"
+  },
+  "scope": {
+    "provider": "weather-tools"
+  },
+  "state": "pending",
+  "subject": {
+    "label": "reserved:occipital"
+  },
+  "target": {
+    "kind": "provider",
+    "label": "Weather tools"
+  },
+  "title": "Approve provider interface",
+  "urgency": "normal"
+}

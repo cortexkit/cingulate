@@ -26,7 +26,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 7] = [
+pub const MIGRATIONS: [Migration; 8] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -54,6 +54,10 @@ pub const MIGRATIONS: [Migration; 7] = [
     Migration {
         version: 7,
         statements: include_str!("../migrations/007_change_log.sql"),
+    },
+    Migration {
+        version: 8,
+        statements: include_str!("../migrations/008_rich_ui_approval.sql"),
     },
 ];
 
@@ -194,6 +198,8 @@ pub struct ConsentStore {
 /// because a watch item always carries the card's current projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
+    /// Kept after payload pruning so a watch never reveals a private removal id.
+    pub rich_ui_device: Option<String>,
     pub version: i64,
     pub elicitation_id: String,
 }
@@ -304,12 +310,13 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(rich_ui_device) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
                 .query_map(params![version, limit as i64], |row| {
                     Ok(Change {
+                        rich_ui_device: row.get(2)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
                     })
@@ -414,6 +421,8 @@ impl ConsentStore {
                 requester: identity.requester.clone(),
                 state: State::Pending,
                 answered_at_ms: None,
+                revoked_at_ms: None,
+                answered_device: None,
                 answered_choice_id: None,
                 execution: None,
                 execution_reason: None,
@@ -423,14 +432,19 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms) \
-                 VALUES (?1,?2,?3,?4,'pending',?5)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,rich_ui_device) \
+                 VALUES (?1,?2,?3,?4,'pending',?5,?6)",
                 params![
                     record.elicitation_id,
                     identity.owner,
                     record.request.dedup_key,
                     serde_json::to_string(&record)?,
-                    record.expires_at_ms
+                    record.expires_at_ms,
+                    record
+                        .request
+                        .rich_ui_approval
+                        .as_ref()
+                        .map(|body| &body.device)
                 ],
             )?;
             Ok(CreateResult {
@@ -510,6 +524,17 @@ impl ConsentStore {
         console_machine_id: Option<&str>,
         now_ms: i64,
     ) -> Result<Mutation<AnswerOutcome>> {
+        self.answer_from_device(id, choice, console_machine_id, None, now_ms)
+    }
+
+    pub fn answer_from_device(
+        &self,
+        id: &str,
+        choice: &str,
+        console_machine_id: Option<&str>,
+        device: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Mutation<AnswerOutcome>> {
         self.transaction(|tx| {
             let Some(mut record) = load(tx, id)? else {
                 return Ok(Mutation {
@@ -558,6 +583,7 @@ impl ConsentStore {
                         ));
                     }
                 }
+                record.answered_device = device.map(str::to_owned);
                 terminal(
                     tx,
                     &mut record,
@@ -569,6 +595,51 @@ impl ConsentStore {
                 AnswerOutcome::Answered(record)
             };
             Ok(Mutation { value, settlements })
+        })
+    }
+
+    pub fn revoke(
+        &self,
+        owner: &str,
+        id: &str,
+        now_ms: i64,
+    ) -> Result<Mutation<ElicitationRecord>> {
+        self.transaction(|tx| {
+            let mut record = owned_retained(tx, owner, id, now_ms)?;
+            if record.request.kind != "rich_ui_approval" {
+                return Err(refuse(
+                    "elicitation_unknown_kind",
+                    "revoke requires rich_ui_approval",
+                ));
+            }
+            if record.state == State::Revoked {
+                return Ok(Mutation {
+                    value: record,
+                    settlements: vec![],
+                });
+            }
+            let granted = record.request.options.iter().any(|option| {
+                Some(option.id.as_str()) == record.answered_choice_id.as_deref()
+                    && option.effect == "grant"
+            });
+            if record.state != State::Answered || !granted {
+                let state = if record.state == State::Answered {
+                    "declined"
+                } else {
+                    record.state.as_str()
+                };
+                return Err(refuse(
+                    "elicitation_not_granted",
+                    &format!("revoke requires a granted card; this card is {state}"),
+                ));
+            }
+            record.state = State::Revoked;
+            record.revoked_at_ms = Some(now_ms);
+            save(tx, &record)?;
+            Ok(Mutation {
+                settlements: vec![record.clone()],
+                value: record,
+            })
         })
     }
 

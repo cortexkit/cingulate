@@ -474,7 +474,8 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-option-group/v1",
             "consent-single-use/v1",
             "consent-outcomes-late/v1",
-            "consent-no-expiry/v1"
+            "consent-no-expiry/v1",
+            "rich-ui-approval/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
@@ -497,6 +498,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
         ("consent.withdraw", true),
         ("consent.detach", true),
         ("consent.answer", true),
+        ("consent.revoke", true),
         ("consent.list_pending", false),
         ("consent.watch_pending", false),
         ("consent.outcomes", false),
@@ -635,7 +637,8 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-option-group/v1",
             "consent-single-use/v1",
             "consent-outcomes-late/v1",
-            "consent-no-expiry/v1"
+            "consent-no-expiry/v1",
+            "rich-ui-approval/v1"
         ]
     );
 }

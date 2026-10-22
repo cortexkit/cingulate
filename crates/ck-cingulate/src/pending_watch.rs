@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use subc_client_rs::{HandlerOutcome, RequestCtx};
 use tokio::sync::Semaphore;
 
-use crate::{invalid, operator, option_group_declared, Handler, Stamp};
+use crate::{feature_declared, invalid, operator, option_group_declared, Handler, Stamp};
 
 /// The watch operation's name, declared with watch delivery in the manifest.
 pub const WATCH_PENDING: &str = "consent.watch_pending";
@@ -285,6 +285,15 @@ impl Handler {
             };
             let full = page.changes.len() == BATCH;
             for change in page.changes {
+                // Advance over hidden changes without emitting even a removal id.
+                position = change.version;
+                let hidden = change.rich_ui_device.as_deref().is_some_and(|device| {
+                    stamp.answering_device() != Some(device)
+                        || !feature_declared(params, "rich-ui-approval")
+                });
+                if hidden {
+                    continue;
+                }
                 let item = self
                     .watch_item(
                         stamp,
@@ -301,7 +310,6 @@ impl Handler {
                 if !send(sink, emitted, item).await {
                     return Ok(());
                 }
-                position = change.version;
             }
             if full {
                 continue;

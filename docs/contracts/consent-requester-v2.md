@@ -335,3 +335,54 @@ The target bytes are pinned in
 [`test-vectors/consent-late-answer-v1/`](../../test-vectors/consent-late-answer-v1/README.md).
 Cingulate's implementation must produce them byte for byte, and core decodes
 them.
+
+## Rich UI approval requester (0.11.0)
+
+Only the daemon-stamped principal `reserved:occipital` may request
+`kind: "rich_ui_approval"`; other requesters refuse `elicitation_requester_refused`
+before storage. Occipital is admitted only for this kind, and its subject is the
+requester itself, not an agent asserted in the body. Check the advertised
+`rich-ui-approval/v1` capability before using it.
+
+Use the ordinary consent envelope plus the required typed `rich_ui_approval`
+body `{approvalDigest, manifestDigest, capabilityDigest, provider, device}`. Each
+digest is `sha256:` followed by 64 lowercase hex characters. `provider` is a
+nonempty module id of lowercase ASCII letters, digits and hyphens; `device` is
+exactly 32 lowercase hex characters, the intended phone fingerprint, not its raw
+key. Unknown body fields and malformed or missing values refuse
+`elicitation_invalid_request`. No package or flow body can accompany it.
+Options are exactly one `grant` and one `decline`; default names the decline and
+`on_expiry` is `deny`. Expiry, if supplied, can only deny. Requester body keys use
+snake_case; nested typed body keys retain the camelCase spellings above. Phone
+reads use `richUiApproval`. The phone renders its own verified manifest text.
+
+Occipital tracks the elicitation ID returned by `consent.request` and reads the
+answer with ordinary owned `consent.get` or `consent.await`. The answer's binding
+is enforced by Cingulate: phone `consent.answer` requires a matching `bindDigest`
+for grants, allows omission only for declines, and refuses a mismatched supplied
+binding with `approval_digest_mismatch` without recording anything. Other kinds
+refuse any supplied `bindDigest` as `invalid_params`. Visibility, the strict device
+rule and the required `rich-ui-approval` client feature are specified in the
+[phone contract](consent-phone-v2.md#rich-ui-provider-approvals-0110).
+
+`consent.revoke {elicitationId}` is a requester-side mutation. Only the exact
+raising owner (stamped principal and session identity) may revoke; foreign or
+unknown owners refuse `elicitation_not_owner`. Only a granted `rich_ui_approval`
+may transition to `revoked`; another kind refuses `elicitation_unknown_kind`, and
+an ungranted card refuses the terminal `elicitation_not_granted`, not a store
+failure. Its message names the card's condition: `pending`, `declined` (an
+`answered` card with a decline choice), `expired` or `withdrawn` (for example,
+"revoke requires a granted card; this card is declined").
+Do not retry the same revoke as a transient failure. Repeating revoke on the
+revoked card returns the same card and timestamp. Requester reads carry
+`revoked_at_ms`; phone get and watch carry `revokedAtMs`. Revocation preserves the
+original answer, answer time and device audit. `consent.withdraw` remains a
+pending-only settlement and does not revoke grants. No notifier pointers are
+sent on creation, withdrawal, answer or revocation of this kind.
+
+Migration 8 extends the state constraint and retains device visibility metadata
+through payload pruning, so watch removal IDs cannot leak to other devices or
+legacy phones. Device fingerprints are recorded on accepted generic answers and
+permission answer attempts from parsed fed routes; old records deserialize with
+those optional audit fields absent. See the
+[served corpus](../../test-vectors/rich-ui-approval-v1/README.md).

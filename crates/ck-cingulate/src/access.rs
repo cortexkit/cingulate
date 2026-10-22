@@ -406,6 +406,12 @@ impl Handler {
             async {
                 match method {
                     "consent.answer" => {
+                        if params.get("bindDigest").is_some() {
+                            return Err(Refusal::new(
+                                "invalid_params",
+                                "bindDigest is only valid for rich_ui_approval",
+                            ));
+                        }
                         let surface = if stamp.operator_surface {
                             "user"
                         } else if stamp.label() == "reserved:prefrontal-core" {
@@ -463,6 +469,7 @@ impl Handler {
                                     store.access_rejected_attempt(
                                         id,
                                         AnswerAttempt {
+                                            device: stamp.answering_device().map(str::to_owned),
                                             malformed_params: Some(params.clone()),
                                             surface: surface.into(),
                                             principal: stamp.label().into(),
@@ -480,7 +487,12 @@ impl Handler {
                         };
                         let mutation = self
                             .with_store(|store| {
-                                store.access_answer(id, answer, self.inner.options.clock.now_ms())
+                                store.access_answer_from_device(
+                                    id,
+                                    answer,
+                                    stamp.answering_device(),
+                                    self.inner.options.clock.now_ms(),
+                                )
                             })
                             .await?;
                         if surface == "unauthorized" {

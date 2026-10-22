@@ -34,6 +34,8 @@ pub struct AccessIdentity {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AnswerAttempt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub malformed_params: Option<Value>,
     pub surface: String,
     pub principal: String,
@@ -437,6 +439,16 @@ impl ConsentStore {
         answer: AccessAnswer,
         now: i64,
     ) -> Result<Option<AccessMutation>> {
+        self.access_answer_from_device(id, answer, None, now)
+    }
+
+    pub fn access_answer_from_device(
+        &self,
+        id: &str,
+        answer: AccessAnswer,
+        device: Option<&str>,
+        now: i64,
+    ) -> Result<Option<AccessMutation>> {
         self.transaction(|tx| {
             let Some(mut record) = load(tx, id)? else { return Ok(None); };
             let code = if !record.pending() { Some("conflict") }
@@ -456,7 +468,7 @@ impl ConsentStore {
                     else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None }
                 } else if answer.surface != "user" || answer.principal != "reserved:callosum" || record.state != "pending:user" { Some("access_wrong_leg") }
                 else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None };
-            record.attempts.push(AnswerAttempt { malformed_params: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
+            record.attempts.push(AnswerAttempt { device: device.map(str::to_owned), malformed_params: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
             if code.is_none() {
                 if answer.answer == "escalate" {
                     record.state = "pending:user".into();

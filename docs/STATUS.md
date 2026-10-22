@@ -12,7 +12,7 @@ serve the capability itself.
 ### Operations
 
 The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
-`consent/v1` and ten management operations (`OPERATIONS` and `manifest()`,
+`consent/v1` and fifteen management operations (`OPERATIONS` and `manifest()`,
 `crates/ck-cingulate/src/lib.rs:36-71`):
 
 | Operation | Kind | Who may call (`dispatch`, `lib.rs:585-594`) |
@@ -23,6 +23,8 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | `consent.answers`, `consent.ack` | query, mutate | The owner's cursor feed of settled cards. |
 | `consent.report_execution` | mutate | The owner, after a granted card was acted on. |
 | `consent.withdraw` | mutate | The owner settles its own pending card. |
+| `consent.revoke` | mutate | The owner revokes a granted `rich_ui_approval`. Only `reserved:occipital` may request this kind. |
+| `consent.watch_pending` | query/watch | Phone operator routes, filtered by feature and device for `rich_ui_approval`. |
 | `consent.answer` | mutate | Operator surfaces only (`operator`, `lib.rs:279-288`). |
 | `consent.list_pending` | query | Operator surfaces only. |
 | `consent.outcomes` | query | `reserved:prefrontal-core` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |

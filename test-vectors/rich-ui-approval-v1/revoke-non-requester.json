@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "elicitation_not_owner",
+    "message": "elicitation has no matching owner"
+  },
+  "params": {
+    "elicitationId": "el_1"
+  }
+}

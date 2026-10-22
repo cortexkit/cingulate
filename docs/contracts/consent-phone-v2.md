@@ -189,3 +189,48 @@ older than those gets `reread`.
 
 Never infer an answer or a grant from a watch item's absence, a `removed` item,
 a `reread`, or the stream ending: those only say what to read again.
+
+## Rich UI provider approvals (0.11.0)
+
+Cingulate advertises `rich-ui-approval/v1`. To see `kind: "rich_ui_approval"`,
+every phone list, get, watch and answer call must declare
+`clientFeatures: ["rich-ui-approval"]`. Without it, lists and watch streams omit
+these cards (including removal IDs), get refuses `elicitation_not_found`, and an
+answer on the intended device refuses `elicitation_rich_ui_approval_required`.
+This gate prevents older phones from encountering the new `revoked` state.
+
+The daemon-stamped route must be `reserved:callosum` with a phone harness
+`fed-phone:<32 lowercase hex fingerprint>`. A card is visible only on the phone
+whose fingerprint equals its `richUiApproval.device`. Malformed harnesses and
+other devices see no card: get returns the unknown-ID refusal; answer returns
+`{ok:false, code:"not_found"}` exactly as for an unknown ID, even when features or
+binding are absent. Request body fields never establish route identity.
+
+The phone card carries the typed nested body:
+
+```json
+{"richUiApproval":{"approvalDigest":"sha256:<64 lowercase hex>","manifestDigest":"sha256:<64 lowercase hex>","capabilityDigest":"sha256:<64 lowercase hex>","provider":"module-id","device":"<32 lowercase hex>"}}
+```
+
+The phone verifies its manifest and computes the digest itself, and renders its
+own approval text. Cingulate checks field formats, not manifest contents or digest
+recomputation. Options contain exactly one grant and one decline; the default is
+the decline and `onExpiry` is `deny`. Silence, timeouts and errors never approve.
+No new-card or retraction notifier pointer is sent for this kind.
+
+`consent.answer` adds optional `bindDigest`. A grant requires it to equal
+`richUiApproval.approvalDigest` exactly; a decline may omit it, but a supplied
+value must match. Missing grant bindings, nulls and different values refuse
+`approval_digest_mismatch` without recording an answer. Supplying `bindDigest`
+on any other kind refuses `invalid_params` naming the field.
+
+A grant or decline has state `answered` and the selected `answeredChoiceId`.
+The requester can later revoke a grant: phone get and feature-enabled watch
+changed items then report `state: "revoked"` and `revokedAtMs`. It never returns to
+pending. Normal withdrawal behavior and 24-hour settled-card retention remain.
+An accepted generic-card answer from a parsed fed route records `answeredDevice`
+for audit; permission asks record the fingerprint on their stored answer attempt.
+The fingerprint is never taken from answer params.
+
+Complete served examples and error envelopes are pinned in
+[rich-ui-approval-v1](../../test-vectors/rich-ui-approval-v1/README.md).

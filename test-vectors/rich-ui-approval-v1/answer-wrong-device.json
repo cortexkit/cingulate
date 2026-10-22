@@ -1,0 +1,16 @@
+{
+  "params": {
+    "bindDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "choiceId": "approve",
+    "clientFeatures": [
+      "rich-ui-approval"
+    ],
+    "elicitationId": "el_1"
+  },
+  "reply": {
+    "result": {
+      "code": "not_found",
+      "ok": false
+    }
+  }
+}
