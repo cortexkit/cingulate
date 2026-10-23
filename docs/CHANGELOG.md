@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.1 (ck-cingulate)
+
+- Read Callosum's `computer` device class: a `fed-computer:<fingerprint>` route
+  answers a `rich_ui_approval` card bound to that fingerprint, as `fed-mac:` did.
+  Both spellings are read until no computer runs a Callosum build from before
+  the rename. Neither is the operator surface; that stays `fed-phone:` only.
+
 ## 0.11.0 (ck-cingulate)
 
 - Add typed, fail-closed `rich_ui_approval` cards requested only by stamped

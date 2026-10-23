@@ -255,7 +255,9 @@ impl Stamp {
             return None;
         }
         let (class, fingerprint) = self.harness.strip_prefix("fed-")?.split_once(':')?;
-        (matches!(class, "phone" | "sim" | "mac")
+        // Callosum names the computer class `computer`; builds before that rename
+        // stamp `mac`, so both are read until no computer runs one.
+        (matches!(class, "phone" | "sim" | "computer" | "mac")
             && cingulate_decode::lowercase_hex(fingerprint, 32))
         .then_some(fingerprint)
     }
@@ -1662,6 +1664,12 @@ mod tests {
         "fed-mac:0123456789abcdef0123456789abcdef",
         false
     );
+    phone_case!(
+        computer_callosum_is_not_operator,
+        "callosum",
+        "fed-computer:0123456789abcdef0123456789abcdef",
+        false
+    );
     phone_case!(empty_harness_is_not_operator, "callosum", "", false);
     phone_case!(
         phone_other_principal_is_not_operator,
@@ -1823,6 +1831,28 @@ mod rich_ui_device_tests {
         let stamp = Stamp {
             principal: Some("reserved:occipital".into()),
             harness: "fed-phone:300c9c9603b92a4b39ed3958bf924011".into(),
+            ..Stamp::default()
+        };
+        assert_eq!(stamp.answering_device(), None);
+    }
+
+    /// A computer answers as its fingerprint under both the `computer` class and
+    /// the older `mac` spelling, so a card bound to it stays answerable across
+    /// Callosum's rename; an unknown class still yields no device.
+    #[test]
+    fn the_computer_class_answers_under_both_spellings() {
+        let fingerprint = "300c9c9603b92a4b39ed3958bf924011";
+        for class in ["computer", "mac"] {
+            let stamp = Stamp {
+                principal: Some("reserved:callosum".into()),
+                harness: format!("fed-{class}:{fingerprint}"),
+                ..Stamp::default()
+            };
+            assert_eq!(stamp.answering_device(), Some(fingerprint), "{class}");
+        }
+        let stamp = Stamp {
+            principal: Some("reserved:callosum".into()),
+            harness: format!("fed-desktop:{fingerprint}"),
             ..Stamp::default()
         };
         assert_eq!(stamp.answering_device(), None);

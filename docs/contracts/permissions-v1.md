@@ -169,8 +169,9 @@ The `direct` admission is not proof that a person acted; see "Known gaps" in
 
 The daemon's Callosum harness prefixes are `fed-phone:` for the phone and
 `fed-sim:` for a simulator. Cingulate derives simulator admission separately
-from consent's phone-only operator-surface flag. Neither `fed-mac:` nor
-`fed-unknown:` admits either permissions operation; the prefixes grant nothing
+from consent's phone-only operator-surface flag. Neither `fed-computer:`
+(spelled `fed-mac:` by Callosum builds before the rename) nor `fed-unknown:`
+admits either permissions operation; the prefixes grant nothing
 under a principal other than `reserved:callosum`.
 
 ### Aggregator refusals
