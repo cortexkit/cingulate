@@ -278,8 +278,7 @@ async fn core_flow_install_card_names_the_agent_of_its_scope() {
             &phone::served(&fixture, "consent.get", json!({"elicitationId":id})).await,
         )
         .unwrap();
-        let mut expected =
-            json!({"agentId":"agent-alf","headAgentId":"agent-alf","label":"ALF"});
+        let mut expected = json!({"agentId":"agent-alf","headAgentId":"agent-alf","label":"ALF"});
         if via_worker {
             expected["viaWorker"] = json!(true);
         }
