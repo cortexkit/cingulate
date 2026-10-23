@@ -1700,7 +1700,7 @@ mod tests {
         let bytes = include_bytes!("../../../test-vectors/device-class-harness/harness.jsonl");
         assert_eq!(
             format!("{:x}", Sha256::digest(bytes)),
-            "093493871164662fa6ee02c8240a4e048496d6f36870d1db330fa6725d3f6b35"
+            "da9f5e4d09bcae2dc70045bf4e629b215a1407d8e13eb26275639568488d892c"
         );
         let mut operators = Vec::new();
         let mut rows = 0;

@@ -10,8 +10,10 @@ Cingulate treats a route as the operator's phone only when the principal is
 test `callosum_harness_vectors_mark_only_the_phone_as_operator` binds each row
 and requires exactly the `phone` row to be the operator surface.
 
-Source: the `callosum` repository, commit `537b10e`, path
-`test-vectors/device-class-harness/harness.jsonl`.
-SHA-256: `093493871164662fa6ee02c8240a4e048496d6f36870d1db330fa6725d3f6b35`.
+Source: the `callosum` repository, tag `device-class-harness-vectors-v2.0`
+(commit `8fe42ea4`), path `test-vectors/device-class-harness/harness.jsonl`.
+The computer row's class is `computer`; older Callosum builds stamped `mac`,
+which Cingulate still accepts.
+SHA-256: `da9f5e4d09bcae2dc70045bf4e629b215a1407d8e13eb26275639568488d892c`.
 To refresh it, copy the file from a newer Callosum commit and update the hash
 here and in the test.
