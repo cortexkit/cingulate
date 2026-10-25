@@ -19,7 +19,7 @@ fn flow_install_body() -> Value {
     // A realistic multi-line script, so the phone's collapsed source block is
     // exercised with the kind of text it will really receive.
     body["source"] = json!({
-        "language":"typescript",
+        "language":"javascript",
         "text":"export default flow({\n  schedule: { at: \"08:00\", tz: \"Europe/Madrid\" },\n  async run(ctx) {\n    const board = await ctx.board.read();\n    await ctx.inbox.send({ title: \"Morning summary\", body: board.digest() });\n  },\n});\n"
     });
     body["dry_run_text"] = json!({
@@ -42,7 +42,7 @@ fn package_body() -> Value {
     .unwrap();
     let mut body = request["params"].clone();
     body["source"] = json!({
-        "language":"typescript",
+        "language":"javascript",
         "text":"export default flow({\n  schedule: { interval: \"15m\" },\n  async run(ctx) {\n    await ctx.wake({ digest: \"Nudge: check the open asks\" });\n  },\n});\n"
     });
     body["dry_run_text"] = json!({
