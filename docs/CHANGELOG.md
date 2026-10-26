@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 (cingulate-vectors)
+
+- Add filer-side `secret_use` reply vectors in `test-vectors/secret-use-approval-v1/`
+  for AFT and Cerebellum decoder builders, all produced from the real handler:
+  filing, repeat filing, pending/allowed/partial/declined/expired awaits, and
+  four filing refusals. No behaviour change.
+
 ## 0.12.0 (ck-cingulate)
 
 - Add `secret_use` cards for vault agent-secret approvals, filed only by scoped,

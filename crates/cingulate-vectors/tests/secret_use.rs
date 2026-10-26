@@ -579,6 +579,29 @@ async fn secret_use_served_vectors_regenerate_byte_for_byte() {
 }
 
 #[tokio::test]
+async fn secret_use_filer_vectors_regenerate_byte_for_byte() {
+    // Every filer reply comes from the real handler; the files hold the exact
+    // framed method, request params and reply envelope for decoder builders.
+    let files = generate().await;
+    for name in [
+        "filer-request.json",
+        "filer-request-repeat.json",
+        "filer-await-pending.json",
+        "filer-await-allowed.json",
+        "filer-await-partial.json",
+        "filer-await-declined.json",
+        "filer-await-expired.json",
+        "filer-refusals.json",
+    ] {
+        assert_eq!(
+            fs::read(support::corpus(CORPUS).join(name)).unwrap(),
+            files[name],
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn secret_use_watch_hides_replay_live_and_pruned_removal_ids() {
     use watch_pending::{Watch, INSTANCE};
     let f = fixture().await;

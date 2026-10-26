@@ -122,5 +122,212 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
         };
         files.insert(name.into(), bytes);
     }
+    for (name, bytes) in filer_vectors().await {
+        let mut pretty =
+            serde_json::to_vec_pretty(&serde_json::from_slice::<Value>(&bytes).unwrap()).unwrap();
+        pretty.push(b'\n');
+        files.insert(name, pretty);
+    }
+    files
+}
+
+/// Filer-side request/await samples, filed as `reserved:aft` with the vault's
+/// `approval` statement (`batch-omitted` for the partial card). Each file holds
+/// the exact framed method, request params and handler reply envelope.
+async fn filer_vectors() -> BTreeMap<String, Vec<u8>> {
+    use std::time::Duration;
+    use subc_client_rs::HandlerOutcome;
+
+    async fn capture(fixture: &Fixture, stamp: &Stamp, method: &str, params: Value) -> Vec<u8> {
+        let request = serde_json::to_vec(&json!({"method": method, "params": params})).unwrap();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(1),
+            fixture.handler.handle_stamped(stamp, &request),
+        )
+        .await
+        .expect("filer op exceeded 1 s");
+        let reply = match outcome {
+            HandlerOutcome::Response(bytes) => serde_json::from_slice::<Value>(&bytes).unwrap(),
+            HandlerOutcome::Error { code, message } => {
+                json!({"error": {"code": code, "message": message}})
+            }
+            other => panic!("{method}: {other:?}"),
+        };
+        // The file holds the exact params the filer sent and the exact reply
+        // envelope the handler returned, so decoders can replay both sides.
+        serde_json::to_vec(&json!({"method": method, "params": params, "reply": reply})).unwrap()
+    }
+
+    let mut files = BTreeMap::new();
+    let sender = filer("aft", Some("agent-A"));
+
+    // Fresh filing: the consent.request reply carries the new elicitation id.
+    {
+        let f = fixture().await;
+        files.insert(
+            "filer-request.json".into(),
+            capture(&f, &sender, "consent.request", body("approval")).await,
+        );
+    }
+    // Repeating the identical filing returns the same card without refreshing it.
+    {
+        let f = fixture().await;
+        f.request(&sender, body("approval")).await;
+        files.insert(
+            "filer-request-repeat.json".into(),
+            capture(&f, &sender, "consent.request", body("approval")).await,
+        );
+    }
+    // Zero-timeout wait before any answer returns the pending filer record.
+    {
+        let f = fixture().await;
+        let id = f.request(&sender, body("approval")).await;
+        files.insert(
+            "filer-await-pending.json".into(),
+            capture(
+                &f,
+                &sender,
+                "consent.await",
+                json!({"elicitation_id": id, "timeout_ms": 0}),
+            )
+            .await,
+        );
+    }
+    // Allow with the vector envelope records per-item decisions and the hash.
+    {
+        let f = fixture().await;
+        let id = f.request(&sender, body("approval")).await;
+        f.ok(&phone(DEVICE), "consent.answer", answer(&id, "approval"))
+            .await;
+        files.insert(
+            "filer-await-allowed.json".into(),
+            capture(
+                &f,
+                &sender,
+                "consent.await",
+                json!({"elicitation_id": id, "timeout_ms": 0}),
+            )
+            .await,
+        );
+    }
+    // The batch card allows the enveloped item and declines the omitted one.
+    {
+        let f = fixture().await;
+        let id = f.request(&sender, body("batch-omitted")).await;
+        f.ok(
+            &phone(DEVICE),
+            "consent.answer",
+            answer(&id, "batch-omitted"),
+        )
+        .await;
+        files.insert(
+            "filer-await-partial.json".into(),
+            capture(
+                &f,
+                &sender,
+                "consent.await",
+                json!({"elicitation_id": id, "timeout_ms": 0}),
+            )
+            .await,
+        );
+    }
+    // A whole decline records every item as declined without duration or hash.
+    {
+        let f = fixture().await;
+        let id = f.request(&sender, body("approval")).await;
+        f.ok(
+            &phone(DEVICE),
+            "consent.answer",
+            json!({"elicitationId": id, "choiceId": "decline", "clientFeatures": ["secret-use-approval"]}),
+        )
+        .await;
+        files.insert(
+            "filer-await-declined.json".into(),
+            capture(
+                &f,
+                &sender,
+                "consent.await",
+                json!({"elicitation_id": id, "timeout_ms": 0}),
+            )
+            .await,
+        );
+    }
+    // Advancing the test clock past the earliest expiry settles the card.
+    {
+        let f = fixture().await;
+        let id = f.request(&sender, body("approval")).await;
+        let expiry = decoded(&body("approval")["secret_use"]["items"][0]["statement_b64url"])
+            ["request_expires_at_ms"]
+            .as_i64()
+            .unwrap();
+        f.clock.set(expiry);
+        files.insert(
+            "filer-await-expired.json".into(),
+            capture(
+                &f,
+                &sender,
+                "consent.await",
+                json!({"elicitation_id": id, "timeout_ms": 0}),
+            )
+            .await,
+        );
+    }
+    // Four filings the handler refuses without storing a card.
+    {
+        // A statement naming a different agent than the filing stamp.
+        let mismatched = {
+            let f = fixture().await;
+            capture(
+                &f,
+                &filer("aft", Some("another-agent")),
+                "consent.request",
+                body("approval"),
+            )
+            .await
+        };
+        // Strict unpadded base64url over canonical JSON: pretty bytes fail.
+        let non_canonical = {
+            let f = fixture().await;
+            let statement =
+                decoded(&body("approval")["secret_use"]["items"][0]["statement_b64url"]);
+            let mut request = body("approval");
+            request["secret_use"]["items"][0]["statement_b64url"] =
+                json!(URL_SAFE_NO_PAD.encode(serde_json::to_string_pretty(&statement).unwrap()));
+            capture(&f, &sender, "consent.request", request).await
+        };
+        // Reusing a request id on a different card conflicts.
+        let conflict = {
+            let f = fixture().await;
+            f.request(&sender, body("approval")).await;
+            capture(&f, &sender, "consent.request", body("batch-omitted")).await
+        };
+        // Only aft and cerebellum may file secret_use; broca is refused.
+        let broca = {
+            let f = fixture().await;
+            capture(
+                &f,
+                &filer("broca", Some("agent-A")),
+                "consent.request",
+                body("approval"),
+            )
+            .await
+        };
+        let cases = vec![
+            ("agent-mismatch", mismatched),
+            ("non-canonical", non_canonical),
+            ("request-conflict", conflict),
+            ("broca-refused", broca),
+        ]
+        .into_iter()
+        .map(|(name, bytes)| {
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            json!({"name": name, "method": value["method"], "params": value["params"], "reply": value["reply"]})
+        })
+        .collect::<Vec<_>>();
+        files.insert(
+            "filer-refusals.json".into(),
+            serde_json::to_vec(&json!({"cases": cases})).unwrap(),
+        );
+    }
     files
 }
