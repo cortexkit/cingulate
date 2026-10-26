@@ -396,6 +396,21 @@ fn permissions_manifest_has_query_and_mutate_without_claiming_provider_capabilit
 #[tokio::test]
 async fn permissions_original_aggregator_vectors_match_real_handler_replies() {
     let grants = support::vector("permissions-v1", "provider-list.json")["reply"]["grants"].clone();
+    // The handler fixture filters by `agent_id` on the `agent_id` field, so it
+    // can replay only the rows a real provider would filter the same way.
+    let grants: Value = Value::Array(
+        grants
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row.get("agent_id").is_some())
+            .cloned()
+            .collect(),
+    );
+    assert!(
+        grants.as_array().unwrap().len() < 8,
+        "some rows are filtered"
+    );
     let mut tested = 0;
     for entry in fs::read_dir(permissions::root()).unwrap() {
         let path = entry.unwrap().path();

@@ -38,7 +38,9 @@ operation runs; it is not a wire field.
 ## Scenario
 
 Cerebellum holds five grants minted at 1000000 from answers to cards `el_1` to
-`el_5`:
+`el_5`. Claustrum, an illustrative grant holder here, holds three more: two held
+by an installed flow version and one under a holder kind this contract does not
+define.
 
 | id | holder | scope | expires |
 |---|---|---|---|
@@ -47,14 +49,26 @@ Cerebellum holds five grants minted at 1000000 from answers to cards `el_1` to
 | `grt_03` | agent `agent-alf` | `site` (github.com) | never |
 | `grt_04` | agent `agent-alf` | `all_sites`, group `danger` | 30 minutes |
 | `grt_05` | worker `scope:wkr-7f3a` of `agent-alf` | `app` (Preview) | 30 minutes |
+| `grt_06` | flow `flow_web_index` v3, install `flowinst_9c41d2` (module `claustrum`) | `api_key`, `methods` `["GET"]` | while that version exists |
+| `grt_07` | flow `flow_web_index` v4, install `flowinst_1b77e0` (module `claustrum`) | `site_login`, no `methods` | while that version exists |
+| `grt_08` | unknown kind `schedule` (module `claustrum`) | `api_key` | not stated |
 
-Provider cases (Cerebellum serving `permissions/v1`, called by cingulate):
+A flow row carries no top-level `agent_id`, no `holder.agent_id` and no
+`expires_at_ms`: the grant lasts while that installed flow version exists, and a
+new version of the same flow is a new holder. `grt_06` and `grt_07` are two
+versions of one flow, so they are two holders. `methods` is present only on a
+grant limited by method. `grt_08` is a holder kind from a later version of the
+contract: a reader keeps it, never drops it and never shows it as operator-held.
+All ids, flow names and labels in these rows are invented.
+
+Provider cases (Cerebellum and Claustrum serving `permissions/v1`, called by
+cingulate):
 
 | Case | What it pins |
 |---|---|
-| `provider-list` | `permissions.list` at 1060000: all five rows. |
+| `provider-list` | `permissions.list` at 1060000: all eight rows, including both flow holders and the unknown holder kind. |
 | `provider-list-after-upgrade` | At 1120000 the TextEdit grant was upgraded to always by card `el_6`: same id `grt_01`, no `expires_at_ms`, new `granted_at_ms` and `card_ref`. |
-| `provider-list-after-expiry` | At exactly 2800000 (the 30-minute expiry) the three expiring rows are gone. |
+| `provider-list-after-expiry` | At exactly 2800000 (the 30-minute expiry) the three expiring rows are gone. The flow and unknown-kind rows stay: neither carries an expiry. |
 | `provider-revoke-revoked` | `permissions.revoke` of the site grant. |
 | `provider-revoke-stopping` | Revoking the whole-computer grant while work runs under it: `revoked` with `stopping: true`. |
 | `provider-revoke-not-found` | An id the provider never issued. |
@@ -82,6 +96,10 @@ Aggregator cases (cingulate, called by the phone through Callosum unless noted):
 
 Plexus and AFT appear only as illustrative module ids for the unreachable and
 unsupported statuses; neither is committed to serve `permissions/v1` here.
+Claustrum likewise appears only as the provider holding the flow and
+unknown-kind rows; it is not committed to serve `permissions/v1` here. The flow
+rows appear only in the unfiltered `provider-list` read, never in one filtered by
+`agent_id`.
 Revoke carries no authority field and there is no code to mint: authority is the
 route stamp, and ambiguous drops are resolved through Callosum's effects-v1
 ledger, not by resending (see the contract).

@@ -40,13 +40,14 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | Field | Meaning |
 |---|---|
 | `id` | Opaque, stable for the grant's life. |
-| `agent_id?` | The agent the grant belongs to; for a worker grant, the owning head. Absent for an operator-held grant. |
-| `holder` | `{kind: "agent" \| "worker" \| "operator", agent_id?, scope_ref?}`. See worker grants below. |
+| `agent_id?` | The agent the grant belongs to; for a worker grant, the owning head. Absent for an operator-held grant or a flow grant. |
+| `holder` | `{kind: "agent" \| "worker" \| "operator" \| "flow", agent_id?, scope_ref?, flow_id?, flow_version?, flow_install_id?}`. See worker grants and flow grants below. |
 | `module` | The provider's module id, so the page can address a revoke. |
 | `subject_label` | What the grant covers, for display: an app name, a site, "Whole computer". |
 | `scope` | A token from the provider's declared vocabulary. Cerebellum declares exactly `app`, `whole_computer`, `site` and `all_sites`. |
 | `scope_label` | A human sentence for the grant. Surfaces show it as given and never compose wording from `scope`. |
 | `group?` | `"danger"` for grants as broad as the danger option that minted them. Cerebellum sets it on `whole_computer` and `all_sites`, and only there. |
+| `methods?` | A non-empty list of uppercase HTTP method names, such as `["GET"]`. A provider sends it only for grants it limits by method. Surfaces show it as given. |
 | `expires_at_ms?` | Absent for a grant without expiry ("always"). |
 | `granted_at_ms` | When the current form of the grant was minted. |
 | `card_ref?` | The `elicitation_id` of the card whose answer minted it. |
@@ -91,6 +92,45 @@ A grant answered for a worker is held by the worker's daemon-verified scope:
 the scope reference from the daemon's route stamp; it is stable across the
 worker's revival and new for each retry. The row is listed under the owning head's
 `agent_id`. A worker grant is never keyed by any field the worker can set itself.
+
+### Flow grants
+
+A grant held by an installed flow version has no agent and no expiry, so it
+carries neither the top-level `agent_id`, nor `holder.agent_id`, nor
+`expires_at_ms`. Its holder is:
+
+```json
+{"kind": "flow", "flow_id": "flow_web_index", "flow_version": 3,
+ "flow_install_id": "flowinst_9c41d2"}
+```
+
+| Holder field | Meaning |
+|---|---|
+| `flow_id` | Opaque string naming the flow. |
+| `flow_version` | A positive integer of at most 2^53 − 1, the installed version of that flow. |
+| `flow_install_id` | Opaque string naming that installation. |
+
+The grant lasts while that installed flow version exists, so the row has no
+expiry: retiring the installation, or installing a new version of the same flow,
+ends it. A new version is a new holder, and the one-row-per-subject-per-holder
+rule applies per version: rows for two versions of one flow are two rows, even
+for the same subject. The row's `module` is still the provider that enforces the
+grant and answers the revoke, which need not be the module that installed the
+flow.
+
+Flow rows appear only in an unfiltered `permissions.list`. They are not listed in
+a `permissions.list {agent_id}` reply, even for a flow that an agent installed:
+a caller filtering by agent asks for one agent's grants, and a flow row names no
+agent.
+
+### Holder kinds a reader does not know
+
+`holder.kind` is open: a provider may later hold grants under a kind this
+contract does not define. A reader that meets an unknown `holder.kind` MUST keep
+the row, MUST NOT drop it and MUST NOT fail the list, and MUST NOT show it as
+operator-held. Only `holder.kind: "operator"` is operator-held; a reader shows
+an unknown kind as held by something other than the operator, from whatever
+`holder` fields it can read, and never guesses at the missing ones.
 
 ## Cingulate aggregator
 

@@ -101,7 +101,7 @@ fn danger_option_group_manifest_hash_is_pinned() {
 fn permissions_manifest_hash_is_pinned() {
     pin(
         "permissions-v1",
-        "8fe1bf0030e42bb5901321b9d60ac87b85af0caabd09e0e5596a627cf6a8247c",
+        "0b7d0be8269ac64cd612d78d014252d0965f30ebcdd84972acea2177b83eebf1",
     );
 }
 

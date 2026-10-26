@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2 (cingulate-vectors)
+
+- Extend the `permissions/v1` contract with grants held by an installed flow
+  version (`holder.kind: "flow"`: `flow_id`, `flow_version`, `flow_install_id`,
+  no agent id and no expiry, listed only in unfiltered reads) and with the
+  optional `methods` row field limiting an API-key grant. A reader keeps a row
+  whose holder kind it does not know and never shows it as operator-held.
+- Add the matching `provider-list` and `provider-list-after-expiry` rows
+  (invented ids and labels) and anchor `holder` with `.jcs` and `.sha256`. No
+  runtime behaviour change: the aggregator already relays provider rows
+  unchanged.
+
 ## 0.6.1 (cingulate-vectors)
 
 - Add filer-side `secret_use` reply vectors in `test-vectors/secret-use-approval-v1/`

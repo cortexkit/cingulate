@@ -371,6 +371,54 @@ fn live_grants() -> Value {
     ])
 }
 
+/// A grant held by an installed flow version: no agent id, no expiry.
+fn grant_flow_method() -> Value {
+    json!({
+        "id": "grt_06",
+        "holder": {"kind": "flow", "flow_id": "flow_web_index", "flow_version": 3,
+                   "flow_install_id": "flowinst_9c41d2"},
+        "module": "claustrum", "subject_label": "Search API",
+        "scope": "api_key",
+        "scope_label": "the search API key, for reads only",
+        "methods": ["GET"], "granted_at_ms": NOW_MS, "card_ref": "el_7"
+    })
+}
+
+fn grant_flow_site() -> Value {
+    json!({
+        "id": "grt_07",
+        "holder": {"kind": "flow", "flow_id": "flow_web_index", "flow_version": 4,
+                   "flow_install_id": "flowinst_1b77e0"},
+        "module": "claustrum", "subject_label": "news.example",
+        "scope": "site_login", "scope_label": "your news.example login",
+        "granted_at_ms": NOW_MS, "card_ref": "el_8"
+    })
+}
+
+/// A holder kind this contract does not define, which a reader must keep.
+fn grant_unknown_holder() -> Value {
+    json!({
+        "id": "grt_08",
+        "holder": {"kind": "schedule", "schedule_ref": "sched_nightly"},
+        "module": "claustrum", "subject_label": "Archive",
+        "scope": "api_key", "scope_label": "the archive API key",
+        "granted_at_ms": NOW_MS
+    })
+}
+
+fn provider_rows() -> Value {
+    json!([
+        grant_app(),
+        grant_whole_computer(),
+        grant_site(),
+        grant_all_sites(),
+        grant_worker(),
+        grant_flow_method(),
+        grant_flow_site(),
+        grant_unknown_holder()
+    ])
+}
+
 fn cingulate_route() -> Value {
     json!({"principal": "reserved:cingulate"})
 }
@@ -425,7 +473,7 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
                     "permissions.list",
                     cingulate_route(),
                     json!({}),
-                    reply(json!({"grants": live_grants()})),
+                    reply(json!({"grants": provider_rows()})),
                 ),
                 listed_at,
             ),
@@ -451,7 +499,13 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
                     "permissions.list",
                     cingulate_route(),
                     json!({}),
-                    reply(json!({"grants": [grant_whole_computer(), grant_site()]})),
+                    reply(json!({"grants": [
+                        grant_whole_computer(),
+                        grant_site(),
+                        grant_flow_method(),
+                        grant_flow_site(),
+                        grant_unknown_holder()
+                    ]})),
                 ),
                 expired_at,
             ),

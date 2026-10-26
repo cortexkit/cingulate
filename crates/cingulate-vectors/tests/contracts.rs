@@ -607,6 +607,56 @@ async fn danger_requester_reads_and_feeds_keep_all_filed_options() {
 
 const CEREBELLUM_SCOPES: [&str; 4] = ["app", "whole_computer", "site", "all_sites"];
 
+/// 2^53 - 1: the largest integer every JSON reader represents exactly.
+const MAX_FLOW_VERSION: u64 = 9_007_199_254_740_991;
+
+/// Holder kinds this contract defines. Anything else is a kind from a later
+/// version of the contract, which a reader must keep rather than drop.
+const KNOWN_HOLDER_KINDS: [&str; 4] = ["agent", "worker", "operator", "flow"];
+
+/// `methods`, when a row carries it, limits the grant to uppercase HTTP method
+/// names and nothing else.
+fn check_methods(name: &str, grant: &Value) {
+    let Some(methods) = grant.get("methods") else {
+        return;
+    };
+    let methods = methods.as_array().expect("methods is a list");
+    assert!(!methods.is_empty(), "{name}: methods is never empty");
+    for method in methods {
+        let method = method.as_str().expect("methods holds strings");
+        assert!(!method.is_empty(), "{name}: empty method");
+        assert!(
+            method.chars().all(|ch| ch.is_ascii_uppercase()),
+            "{name}: method {method} is not uppercase"
+        );
+    }
+}
+
+/// A flow grant lasts while its installed flow version exists, so it names no
+/// agent and carries no expiry.
+fn check_flow_holder(name: &str, grant: &Value, holder: &Value) {
+    for path in ["agent_id", "expires_at_ms"] {
+        assert!(grant.get(path).is_none(), "{name}: flow row carries {path}");
+        assert!(
+            holder.get(path).is_none(),
+            "{name}: flow holder carries {path}"
+        );
+    }
+    for field in ["flow_id", "flow_install_id"] {
+        assert!(
+            holder[field].as_str().is_some_and(|text| !text.is_empty()),
+            "{name}: flow holder needs {field}"
+        );
+    }
+    let version = holder["flow_version"]
+        .as_u64()
+        .expect("flow_version is a non-negative integer");
+    assert!(
+        (1..=MAX_FLOW_VERSION).contains(&version),
+        "{name}: flow_version {version} out of range"
+    );
+}
+
 fn grant_rows(cases: &BTreeMap<String, Value>) -> Vec<(String, i64, Vec<Value>)> {
     let mut rows = Vec::new();
     for (name, case) in cases {
@@ -635,6 +685,7 @@ fn grant_rows_follow_the_row_rules() {
         for grant in &grants {
             let scope = grant["scope"].as_str().unwrap();
             assert!(!scope.is_empty(), "{name}: scope token");
+            check_methods(&name, grant);
             // Scope vocabularies and broad-grant group rules belong to each
             // provider; only Cerebellum declares these four scopes here.
             if grant["module"] == "cerebellum" {
@@ -651,13 +702,25 @@ fn grant_rows_follow_the_row_rules() {
                 assert!(expiry.as_i64().unwrap() > now, "{name}: expired row listed");
             }
             let holder = &grant["holder"];
-            match holder["kind"].as_str().unwrap() {
+            let kind = holder["kind"].as_str().expect("holder kind is a string");
+            if !KNOWN_HOLDER_KINDS.contains(&kind) {
+                // An unknown holder kind is shown as held by something, but
+                // never as operator-held, and never dropped from the list.
+                assert!(
+                    kind != "operator",
+                    "{name}: operator is a known kind, not an unknown one"
+                );
+                continue;
+            }
+            match kind {
                 "agent" => assert!(holder.get("scope_ref").is_none()),
                 "worker" => {
                     assert!(holder["scope_ref"].is_string());
                     assert_eq!(holder["agent_id"], grant["agent_id"], "owning head");
                 }
-                kind => panic!("{name}: holder kind {kind}"),
+                "operator" => {}
+                "flow" => check_flow_holder(&name, grant, holder),
+                _ => unreachable!(),
             }
             assert!(
                 holder_subjects.insert((
@@ -668,14 +731,92 @@ fn grant_rows_follow_the_row_rules() {
             );
         }
     }
-    let base = &cases["provider-list"]["reply"]["grants"];
-    let scopes: BTreeSet<&str> = base
+    let base = cases["provider-list"]["reply"]["grants"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|g| g["scope"].as_str().unwrap())
-        .collect();
+        .filter(|g| g["module"] == "cerebellum");
+    let scopes: BTreeSet<&str> = base.map(|g| g["scope"].as_str().unwrap()).collect();
     assert_eq!(scopes, CEREBELLUM_SCOPES.into_iter().collect());
+}
+
+#[test]
+fn flow_and_unknown_holder_rows_keep_their_holder_and_stay_unfiltered() {
+    let cases = cases(PERMISSIONS);
+    let base = cases["provider-list"]["reply"]["grants"]
+        .as_array()
+        .unwrap();
+
+    let flows: Vec<&Value> = base
+        .iter()
+        .filter(|g| g["holder"]["kind"] == "flow")
+        .collect();
+    assert!(flows.len() >= 2, "flow grants with and without methods");
+    let with_methods: Vec<&Value> = flows
+        .iter()
+        .filter(|grant| grant.get("methods").is_some())
+        .copied()
+        .collect();
+    assert!(!with_methods.is_empty(), "a flow grant limited by method");
+    assert!(
+        flows.iter().any(|g| g.get("methods").is_none()),
+        "a flow grant with no method limit"
+    );
+    assert_eq!(with_methods[0]["methods"], serde_json::json!(["GET"]));
+    for flow in &flows {
+        check_flow_holder("provider-list", flow, &flow["holder"]);
+    }
+    // Two installed versions of one flow are two holders, so the same subject
+    // may appear once under each.
+    let flow_ids: BTreeSet<&str> = flows
+        .iter()
+        .map(|g| g["holder"]["flow_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(flow_ids.len(), 1, "both flow grants name one invented flow");
+    let versions: BTreeSet<u64> = flows
+        .iter()
+        .map(|g| g["holder"]["flow_version"].as_u64().unwrap())
+        .collect();
+    assert_eq!(versions.len(), flows.len(), "a version per holder");
+
+    let unknown: Vec<&Value> = base
+        .iter()
+        .filter(|g| !KNOWN_HOLDER_KINDS.contains(&g["holder"]["kind"].as_str().unwrap()))
+        .collect();
+    assert_eq!(unknown.len(), 1, "one row with a holder kind from later");
+    assert!(
+        unknown[0].get("agent_id").is_none(),
+        "an unknown holder is never shown as operator-held, which carries no agent"
+    );
+    let unknown_holder = &unknown[0]["holder"];
+    assert!(
+        unknown_holder
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(field, _)| field != "kind"),
+        "the unknown holder keeps the fields that name it"
+    );
+
+    // Flow rows are listed only when the read is not filtered by agent.
+    assert!(cases["provider-list"]["request"].get("agent_id").is_none());
+    for name in ["provider-list-after-upgrade", "provider-list-after-expiry"] {
+        let case = &cases[name];
+        let rows = case["reply"]["grants"].as_array().unwrap();
+        if case["request"].get("agent_id").is_some() {
+            assert!(
+                rows.iter()
+                    .all(|g| !matches!(g["holder"]["kind"].as_str(), Some("flow" | "schedule"))),
+                "{name}: flow or unknown-kind row in an agent-filtered list"
+            );
+        } else {
+            assert!(
+                rows.iter().any(|g| g["holder"]["kind"] == "flow")
+                    && rows.iter().any(|g| g["holder"]["kind"] == "schedule"),
+                "{name}: an unfiltered read keeps the flow and unknown-kind rows"
+            );
+        }
+    }
 }
 
 #[test]
@@ -687,12 +828,23 @@ fn upgrade_keeps_the_id_and_expiry_drops_rows_at_the_deadline() {
     let upgraded = cases["provider-list-after-upgrade"]["reply"]["grants"]
         .as_array()
         .unwrap();
-    assert_eq!(base.len(), upgraded.len());
+    // The upgrade read is filtered to one agent, so it leaves out the rows whose
+    // holders name no agent (flow grants and the unknown kind).
+    let base_by_id = |id: &Value| base.iter().find(|g| g["id"] == *id).cloned();
+    assert_eq!(base.len(), 8);
+    assert_eq!(upgraded.len(), 5);
     assert_eq!(upgraded[0]["id"], base[0]["id"]);
     assert!(base[0].get("expires_at_ms").is_some());
     assert!(upgraded[0].get("expires_at_ms").is_none());
     assert_ne!(upgraded[0]["card_ref"], base[0]["card_ref"]);
-    assert_eq!(&upgraded[1..], &base[1..]);
+    for row in &upgraded[1..] {
+        assert_eq!(
+            Some(row),
+            base_by_id(&row["id"]).as_ref(),
+            "row {}",
+            row["id"]
+        );
+    }
 
     let after = &cases["provider-list-after-expiry"];
     let deadline = after["now_ms"].as_i64().unwrap();
