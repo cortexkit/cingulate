@@ -9,7 +9,9 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 mod access;
+mod secret_use;
 pub use access::{validate_note, AccessRequest};
+pub use secret_use::{SecretUse, SecretUseAnswer, SecretUseItem, UseStatement};
 
 pub const MAX_EXPIRES_IN_MS: i64 = 86_400_000;
 pub const FLOW_DECISION_EFFECT: &str = "choose";
@@ -116,6 +118,8 @@ pub struct DryRunText {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_use: Option<SecretUse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rich_ui_approval: Option<RichUiApproval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -291,6 +295,11 @@ impl ConsentRequest {
     /// Decode the closed serde shape first, then apply ordered semantic rules.
     /// The returned form has no answer schema, including for equality/dedup.
     pub fn decode(body: Value) -> Result<Self, Refusal> {
+        let body = if body.get("kind").and_then(Value::as_str) == Some("secret_use") {
+            secret_use::normalize(body)?
+        } else {
+            body
+        };
         let mut request: Self =
             serde_json::from_value(body).map_err(|error| Refusal::invalid(error.to_string()))?;
         request.validate()?;
@@ -301,6 +310,14 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        if self.kind == "secret_use" {
+            self.secret_use
+                .as_ref()
+                .ok_or_else(|| Refusal::invalid("missing secret_use"))?
+                .statements()?;
+        } else if self.secret_use.is_some() {
+            return Err(Refusal::invalid("secret_use body requires secret_use kind"));
+        }
         if self.kind == "rich_ui_approval" {
             let body = self
                 .rich_ui_approval
@@ -448,7 +465,7 @@ impl ConsentRequest {
         }
         if matches!(
             self.kind.as_str(),
-            "flow_install" | "package" | "rich_ui_approval"
+            "flow_install" | "package" | "rich_ui_approval" | "secret_use"
         ) {
             if self.kind == "flow_install" && self.flow_install.is_none() {
                 return Err(Refusal::invalid("missing flow_install"));
@@ -476,7 +493,12 @@ impl ConsentRequest {
         }
         if !matches!(
             self.kind.as_str(),
-            "consent" | "flow_install" | "flow_decision" | "package" | "rich_ui_approval"
+            "consent"
+                | "flow_install"
+                | "flow_decision"
+                | "package"
+                | "rich_ui_approval"
+                | "secret_use"
         ) {
             return Err(Refusal::new(
                 "elicitation_unknown_kind",

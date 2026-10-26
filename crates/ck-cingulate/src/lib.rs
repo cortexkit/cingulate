@@ -102,7 +102,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
     RequesterAdmission {
         principal: "reserved:cerebellum",
         requester_name: Some("Cerebellum"),
-        kinds: &["consent"],
+        kinds: &["consent", "secret_use"],
         agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
@@ -144,7 +144,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
     RequesterAdmission {
         principal: "reserved:aft",
         requester_name: Some("AFT"),
-        kinds: &["tool_permission", "macos_permission"],
+        kinds: &["tool_permission", "macos_permission", "secret_use"],
         agent: SubjectAgent::Never,
     },
 ];
@@ -171,6 +171,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-outcomes-late/v1".into(),
                 "consent-no-expiry/v1".into(),
                 "rich-ui-approval/v1".into(),
+                "secret-use-approval/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -270,6 +271,19 @@ impl Stamp {
             .rich_ui_approval
             .as_ref()
             .is_none_or(|body| self.answering_device() == Some(body.device.as_str()))
+    }
+    fn secret_use_phone(&self) -> Option<&str> {
+        let fingerprint = self.harness.strip_prefix("fed-phone:")?;
+        (self.label() == "reserved:callosum" && cingulate_decode::lowercase_hex(fingerprint, 32))
+            .then_some(fingerprint)
+    }
+    fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
+        self.rich_ui_device_matches(record)
+            && (record.request.kind != "rich_ui_approval"
+                || feature_declared(params, "rich-ui-approval"))
+            && (record.request.kind != "secret_use"
+                || (self.secret_use_phone().is_some()
+                    && feature_declared(params, "secret-use-approval")))
     }
     fn owner(&self) -> String {
         json!([self.label(), self.bind_session]).to_string()
@@ -741,11 +755,28 @@ impl Handler {
         {
             return Err(stamp.refuse());
         }
-        let agent_source = requester_admission(stamp.label())
-            .map_or(SubjectAgent::Never, |admission| admission.agent);
+        if let Some(body) = &request.secret_use {
+            let scope = stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
+            if body
+                .statements()?
+                .iter()
+                .any(|s| s.agent_id != scope.attributes.agent_id)
+            {
+                return Err(invalid(
+                    "secret use agent_id must match the stamped agent_id",
+                ));
+            }
+        }
+        let agent_source = if request.kind == "secret_use" {
+            SubjectAgent::FromScope
+        } else {
+            requester_admission(stamp.label())
+                .map_or(SubjectAgent::Never, |admission| admission.agent)
+        };
         let carrier = agent_source == SubjectAgent::Carried;
         let from_scope = agent_source == SubjectAgent::FromScope;
-        let worker_head = if (request.kind == "consent" || from_scope)
+        let worker_head = if request.kind != "secret_use"
+            && (request.kind == "consent" || from_scope)
             && stamp.carried_agent_id.trim().is_empty()
         {
             match &stamp.scope {
@@ -763,6 +794,11 @@ impl Handler {
         } else {
             None
         };
+        let stamped_secret_agent = stamp
+            .scope
+            .as_ref()
+            .and_then(|s| s.attributes.agent_id.as_deref())
+            .unwrap_or_default();
         let agent_id = match &worker_head {
             Some(head) => head
                 .agent_id
@@ -771,6 +807,7 @@ impl Handler {
                 .ok_or_else(|| {
                     Refusal::new("access_no_head", "stamped parent head has no agent_id")
                 })?,
+            None if request.kind == "secret_use" => stamped_secret_agent,
             None => &stamp.carried_agent_id,
         };
         if carrier && agent_id.trim().is_empty() {
@@ -782,33 +819,40 @@ impl Handler {
             }
         }
         let mut resolved_name = None;
-        let subject =
-            if carrier || worker_head.is_some() || (from_scope && !agent_id.trim().is_empty()) {
-                if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
-                    if agent.retired {
-                        return Err(Refusal::new("consent_retired", "subject agent is retired"));
-                    }
-                    resolved_name = agent.name;
+        let subject = if carrier
+            || worker_head.is_some()
+            || (from_scope && !agent_id.trim().is_empty())
+            || (request.kind == "secret_use"
+                && stamp
+                    .scope
+                    .as_ref()
+                    .is_some_and(|s| s.attributes.agent_id.is_some()))
+        {
+            if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
+                if agent.retired {
+                    return Err(Refusal::new("consent_retired", "subject agent is retired"));
                 }
-                Subject {
-                    agent_id: Some(agent_id.to_owned()),
-                    head_agent_id: agent_id.to_owned(),
-                    label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
-                    via_worker: worker_head.is_some(),
+                resolved_name = agent.name;
+            }
+            Subject {
+                agent_id: Some(agent_id.to_owned()),
+                head_agent_id: agent_id.to_owned(),
+                label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
+                via_worker: worker_head.is_some(),
+            }
+        } else {
+            Subject {
+                agent_id: None,
+                head_agent_id: String::new(),
+                via_worker: false,
+                label: match stamp.label() {
+                    "direct" => "an unverified local process",
+                    "reserved:basal" => "operator decision",
+                    label => label,
                 }
-            } else {
-                Subject {
-                    agent_id: None,
-                    head_agent_id: String::new(),
-                    via_worker: false,
-                    label: match stamp.label() {
-                        "direct" => "an unverified local process",
-                        "reserved:basal" => "operator decision",
-                        label => label,
-                    }
-                    .into(),
-                }
-            };
+                .into(),
+            }
+        };
         Ok(RequestIdentity {
             owner: stamp.owner(),
             requester: stamp.label().into(),
@@ -894,6 +938,11 @@ impl Handler {
             false
         };
         if method == "consent.request" {
+            if params.get("kind").and_then(Value::as_str) == Some("secret_use")
+                && (!stamp.admits_kind("secret_use") || stamp.scope.is_none())
+            {
+                return Err(stamp.refuse());
+            }
             let request = ConsentRequest::decode(params)?;
             let identity = self.identity(stamp, &request).await?;
             let result = self
@@ -1004,6 +1053,7 @@ impl Handler {
             .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?;
         let now = self.inner.options.clock.now_ms();
         let rich_ui = feature_declared(&params, "rich-ui-approval");
+        let secret_use = feature_declared(&params, "secret-use-approval");
         if method == "consent.answer" || (method == "consent.get" && stamp.operator_surface) {
             if let Some(record) = store
                 .get_phone(id.expect("phone id"), now)
@@ -1018,6 +1068,22 @@ impl Handler {
                             "elicitation not found",
                         ))
                     };
+                }
+                if record.request.kind == "secret_use"
+                    && (!secret_use || stamp.secret_use_phone().is_none())
+                {
+                    return Err(Refusal::new(
+                        if method == "consent.answer" {
+                            "elicitation_secret_use_approval_required"
+                        } else {
+                            "elicitation_not_found"
+                        },
+                        if method == "consent.answer" {
+                            "secret use requires a phone with clientFeatures secret-use-approval"
+                        } else {
+                            "elicitation not found"
+                        },
+                    ));
                 }
                 if record.request.kind == "rich_ui_approval" && !rich_ui {
                     return if method == "consent.answer" {
@@ -1174,7 +1240,7 @@ impl Handler {
                                 // resume at that card's position in creation order.
                                 integer(value, "expires_at_ms")?;
                                 if let Some(record) = store.get_phone(&id, now).map_err(store_error)?.filter(|record| {
-                                    stamp.rich_ui_device_matches(record) && (rich_ui || record.request.kind != "rich_ui_approval")
+                                    stamp.card_visible(record, &params)
                                 }) {
                                     record.created_at_ms
                                 } else if let Some(record) = store.access_get(&id).map_err(store_error)? {
@@ -1222,6 +1288,9 @@ impl Handler {
                             stamp.answering_device().unwrap_or("none")
                         ));
                     }
+                    if secret_use && stamp.secret_use_phone().is_some() {
+                        revision.push_str(":secret-use");
+                    }
                     if after.is_none()
                         && params.get("if_revision").and_then(Value::as_str) == Some(&revision)
                     {
@@ -1235,10 +1304,7 @@ impl Handler {
                         .pending()
                         .map_err(store_error)?
                         .into_iter()
-                        .filter(|record| {
-                            stamp.rich_ui_device_matches(record)
-                                && (rich_ui || record.request.kind != "rich_ui_approval")
-                        })
+                        .filter(|record| stamp.card_visible(record, &params))
                         .map(|record| {
                             let key = (record.created_at_ms, record.elicitation_id.clone());
                             let mut value =
@@ -1296,11 +1362,18 @@ impl Handler {
                 }
                 "consent.answer" => {
                     let mutation = store
-                        .answer_from_device(
+                        .answer_with_envelope(
                             id.expect("answer id"),
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
                             stamp.answering_device(),
+                            params
+                                .get("envelope_b64url")
+                                .map(|v| {
+                                    v.as_str()
+                                        .ok_or_else(|| invalid("envelope_b64url must be a string"))
+                                })
+                                .transpose()?,
                             now,
                         )
                         .map_err(store_error)?;
@@ -1458,7 +1531,11 @@ mod tests {
                     Some("Occipital"),
                     vec!["rich_ui_approval"]
                 ),
-                ("reserved:cerebellum", Some("Cerebellum"), vec!["consent"]),
+                (
+                    "reserved:cerebellum",
+                    Some("Cerebellum"),
+                    vec!["consent", "secret_use"]
+                ),
                 ("reserved:plexus", Some("Plexus"), vec!["consent"]),
                 ("reserved:broca", Some("Broca"), vec!["consent"]),
                 ("reserved:entorhinal", Some("Entorhinal"), vec!["consent"]),
@@ -1472,7 +1549,7 @@ mod tests {
                 (
                     "reserved:aft",
                     Some("AFT"),
-                    vec!["tool_permission", "macos_permission"]
+                    vec!["tool_permission", "macos_permission", "secret_use"]
                 ),
             ]
         );
@@ -1522,13 +1599,20 @@ mod tests {
         );
         assert_eq!(implemented, documented);
         for name in implemented {
+            // Cerebellum also files secret_use cards for the vault's site
+            // logins; every other generic requester files consent cards only.
+            let expected: &[&str] = if name == "reserved:cerebellum" {
+                &["consent", "secret_use"]
+            } else {
+                &["consent"]
+            };
             assert_eq!(
                 Stamp {
                     principal: Some(name.into()),
                     ..Default::default()
                 }
                 .allowed_kind(),
-                Some(["consent"].as_slice())
+                Some(expected)
             );
         }
     }

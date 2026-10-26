@@ -291,7 +291,11 @@ impl Handler {
                     stamp.answering_device() != Some(device)
                         || !feature_declared(params, "rich-ui-approval")
                 });
-                if hidden {
+                if hidden
+                    || (change.secret_use
+                        && (stamp.secret_use_phone().is_none()
+                            || !feature_declared(params, "secret-use-approval")))
+                {
                     continue;
                 }
                 let item = self

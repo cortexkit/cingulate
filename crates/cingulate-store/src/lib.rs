@@ -26,7 +26,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 8] = [
+pub const MIGRATIONS: [Migration; 9] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -58,6 +58,10 @@ pub const MIGRATIONS: [Migration; 8] = [
     Migration {
         version: 8,
         statements: include_str!("../migrations/008_rich_ui_approval.sql"),
+    },
+    Migration {
+        version: 9,
+        statements: include_str!("../migrations/009_secret_use.sql"),
     },
 ];
 
@@ -198,6 +202,7 @@ pub struct ConsentStore {
 /// because a watch item always carries the card's current projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
+    pub secret_use: bool,
     /// Kept after payload pruning so a watch never reveals a private removal id.
     pub rich_ui_device: Option<String>,
     pub version: i64,
@@ -310,12 +315,13 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id,MAX(rich_ui_device) FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(rich_ui_device),MAX(secret_use) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
                 .query_map(params![version, limit as i64], |row| {
                     Ok(Change {
+                        secret_use: row.get(3)?,
                         rich_ui_device: row.get(2)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
@@ -360,6 +366,26 @@ impl ConsentStore {
         // when a caller constructed the already-validated request directly.
         request.requested_schema = None;
         self.transaction(|tx| {
+            let secret_expiry = request.secret_use.as_ref().map(|body| body.expires_at_ms()).transpose().map_err(Error::Refused)?;
+            if secret_expiry.is_some_and(|expiry| expiry <= now_ms) {
+                return Err(refuse("elicitation_expired", "secret use request has expired"));
+            }
+            if let Some(body) = &request.secret_use {
+                for item in &body.items {
+                    let existing: Option<String> = tx.query_row(
+                        "SELECT elicitation_id FROM secret_use_requests WHERE request_id=?1",
+                        [&item.request_id], |row| row.get(0),
+                    ).optional()?;
+                    if let Some(id) = existing {
+                        if let Some(old) = load(tx, &id)? {
+                            if check_owner(tx, &identity.owner, &id).is_ok() && old.request.secret_use.as_ref() == Some(body) {
+                                return Ok(CreateResult { record: old, created: false, settlements: vec![] });
+                            }
+                        }
+                        return Err(refuse("elicitation_request_conflict", "secret request id is already used"));
+                    }
+                }
+            }
             let matched: Option<String> = match &request.dedup_key {
                 Some(key) => tx
                     .query_row(
@@ -414,7 +440,7 @@ impl ConsentStore {
             }
             let record = ElicitationRecord {
                 elicitation_id: format!("el_{seq}"),
-                expires_at_ms: request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl)),
+                expires_at_ms: secret_expiry.or_else(|| request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl))),
                 request,
                 created_at_ms: now_ms,
                 subject,
@@ -423,6 +449,7 @@ impl ConsentStore {
                 answered_at_ms: None,
                 revoked_at_ms: None,
                 answered_device: None,
+                secret_use_answer: None,
                 answered_choice_id: None,
                 execution: None,
                 execution_reason: None,
@@ -432,8 +459,8 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,rich_ui_device) \
-                 VALUES (?1,?2,?3,?4,'pending',?5,?6)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,rich_ui_device,secret_use) \
+                  VALUES (?1,?2,?3,?4,'pending',?5,?6,?7)",
                 params![
                     record.elicitation_id,
                     identity.owner,
@@ -444,9 +471,15 @@ impl ConsentStore {
                         .request
                         .rich_ui_approval
                         .as_ref()
-                        .map(|body| &body.device)
+                        .map(|body| &body.device),
+                    record.request.secret_use.is_some()
                 ],
             )?;
+            if let Some(body) = &record.request.secret_use {
+                for item in &body.items {
+                    tx.execute("INSERT INTO secret_use_requests(request_id,elicitation_id) VALUES (?1,?2)", params![item.request_id, record.elicitation_id])?;
+                }
+            }
             Ok(CreateResult {
                 record,
                 created: true,
@@ -535,6 +568,18 @@ impl ConsentStore {
         device: Option<&str>,
         now_ms: i64,
     ) -> Result<Mutation<AnswerOutcome>> {
+        self.answer_with_envelope(id, choice, console_machine_id, device, None, now_ms)
+    }
+
+    pub fn answer_with_envelope(
+        &self,
+        id: &str,
+        choice: &str,
+        console_machine_id: Option<&str>,
+        device: Option<&str>,
+        envelope: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Mutation<AnswerOutcome>> {
         self.transaction(|tx| {
             let Some(mut record) = load(tx, id)? else {
                 return Ok(Mutation {
@@ -548,6 +593,27 @@ impl ConsentStore {
                     settlements: vec![],
                 });
             }
+            if record.request.secret_use.is_some()
+                && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
+            {
+                return Err(refuse(
+                    "elicitation_expired",
+                    "secret use request has expired",
+                ));
+            }
+            let secret_answer = record
+                .request
+                .secret_use
+                .as_ref()
+                .map(|body| body.answer(choice, device, envelope))
+                .transpose()
+                .map_err(Error::Refused)?;
+            if record.request.secret_use.is_none() && envelope.is_some() {
+                return Err(refuse(
+                    "invalid_params",
+                    "envelope_b64url requires secret_use",
+                ));
+            }
             let mut settlements = Vec::new();
             if record.state == State::Pending
                 && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
@@ -558,6 +624,7 @@ impl ConsentStore {
             let value = if record.state != State::Pending {
                 if record.state == State::Answered
                     && record.answered_choice_id.as_deref() == Some(choice)
+                    && record.secret_use_answer == secret_answer
                 {
                     AnswerOutcome::AlreadyAnswered(record)
                 } else {
@@ -584,6 +651,7 @@ impl ConsentStore {
                     }
                 }
                 record.answered_device = device.map(str::to_owned);
+                record.secret_use_answer = secret_answer;
                 terminal(
                     tx,
                     &mut record,

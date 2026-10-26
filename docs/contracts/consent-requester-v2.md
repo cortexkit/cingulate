@@ -257,6 +257,10 @@ outcome or its note. Standing grants remain entirely AFT's responsibility.
 
 ## Late answers on generic consent cards
 
+This detached-call definition does not authorize answers after a deadline.
+`secret_use` is refused after its earliest statement expiry, for both allow and
+decline; it does not support `consent.detach`.
+
 A requester that raises a generic `consent` card while holding an agent's tool
 call usually waits on `consent.await` and returns the answer in that call. When
 it stops holding the call and returns "still waiting" to the agent instead, any
@@ -386,3 +390,58 @@ legacy phones. Device fingerprints are recorded on accepted generic answers and
 permission answer attempts from parsed fed routes; old records deserialize with
 those optional audit fields absent. See the
 [served corpus](../../test-vectors/rich-ui-approval-v1/README.md).
+
+## Vault secret-use requester (0.12.0)
+
+Cingulate advertises `secret-use-approval/v1`. Only `reserved:aft` and
+`reserved:cerebellum` routes with a daemon-attested scope stamp may file
+`kind: "secret_use"`; all other requesters or unstamped routes refuse
+`elicitation_requester_refused`. No requester or subject identity is supplied in
+the body. The complete closed filing body is:
+
+```json
+{"kind":"secret_use","secret_use":{"items":[{"request_id":"01HF7YAT000000000000000001","statement_b64url":"<vault statement>"}]}}
+```
+
+There are 1–16 items. No title, prompt, labels, options, expiry override or other
+filer fields are accepted. Cingulate supplies fixed generic card chrome and
+allow/decline options, default `decline`, `on_expiry: "deny"`. The phone renders
+access details from statements, with the subject resolved from the route stamp.
+Notification pointers contain no secret name, host or agent id.
+
+Each statement is strict unpadded base64url (nonzero trailing bits refused),
+decoding to RFC 8785 canonical JSON, byte-identical to its re-encoding. Its
+closed key set is `{v, request_id, member_id, scope, agent_id, coverage, secret,
+use, durations, request_expires_at_ms}` with `v: "ck-secret-use-statement/v1"`.
+Nested closed shapes are `scope: {owner, kind, ref, epoch}`,
+`secret: {name, kind, incarnation}`, and `use: {host, path_prefix, location}` for
+API keys or `{origin}` for logins, as defined by Claustrum's Agent secrets
+contract. Integers are nonnegative and at most 2^53 − 1; floats are refused.
+Each canonical 26-character uppercase ULID `request_id` must equal its item's.
+`agent_id` equals the stamp's `attributes.agent_id`, including null. Every item
+shares one agent and one member, and request ids never repeat.
+
+The card expires at the earliest statement `request_expires_at_ms`. Already
+expired statements and answers at or after expiry refuse `elicitation_expired`.
+Identical ordered items on the same owner return the existing card without
+refreshing its deadline, including after an answer while requests remain live.
+Any different filing that reuses a request id refuses
+`elicitation_request_conflict`. Request-id reservations survive card retention;
+an expired filing is refused even if identical to an older card.
+
+After the phone submits `secret.approve` to the vault using this elicitation id
+as `card_ref`, it answers Cingulate with the exact `envelope_b64url`. The vault
+verifies the signature, not Cingulate. Cingulate verifies the envelope binding
+specified in the [phone contract](consent-phone-v2.md#vault-secret-use-approvals-0120).
+A decline carries no envelope. Owned get/await/answers expose `secret_use_answer`:
+
+```json
+{"decision":"allow","duration":"hour","items":[{"request_id":"01HF7YAT000000000000000001","decision":"allow"}],"envelope_sha256":"7bcd68a3ec5698ad9c9d11e0efa1d67ef7e7aa6ee18c56d963d5f6b18014f180"}
+```
+
+Items are recorded in card order; omitted envelope items are `decline`. A whole
+decline records every item as declined and omits duration/hash. Repeating an
+answer requires the same choice and binding, not merely another allow envelope;
+a different binding returns the existing conflict record. The SHA-256 is over
+the decoded envelope bytes and matches the vault's grant and audit
+`payload_hash`. See the [pinned vault and served phone vectors](../../test-vectors/secret-use-approval-v1/README.md).

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.12.0 (ck-cingulate)
+
+- Add `secret_use` cards for vault agent-secret approvals, filed only by scoped,
+  daemon-attested AFT and Cerebellum routes. Closed canonical vault statements
+  bind the agent, request ids and earliest expiry; duplicate filings are
+  idempotent and request ids cannot be reused for a different card.
+- Advertise `secret-use-approval/v1`. Only fingerprinted Callosum phone routes
+  with `secret-use-approval` can list, get, watch or answer these cards, including
+  declines. Watch privacy survives payload pruning. Notifications contain only
+  generic card pointers, never secret names, hosts or agent ids.
+- Bind allows to the exact canonical envelope, answering device, statement
+  digests and offered duration. Persist per-item allow/decline decisions and the
+  envelope SHA-256 for matching the vault grant/audit; omitted items decline.
+  Both choices refuse after the earliest request expiry. Cingulate does not
+  verify signatures or replace the vault's approval checks.
+- Release cingulate-decode 0.6.0 (closed statement/envelope decoding),
+  cingulate-store 0.5.0 (migration 9, durable request-id reservations and answer
+  binding), and cingulate-vectors 0.6.0 (vendored vault goldens and real served
+  single/batch phone records with regeneration and refusal tests).
+
 ## 0.11.2 (ck-cingulate)
 
 - Wire production agent status reads through Entorhinal's typed `agent.resolve`:

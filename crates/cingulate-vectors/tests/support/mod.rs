@@ -230,13 +230,21 @@ impl Fixture {
     /// Open with a chosen change-log retention, so a test can compact the log
     /// past a watch cursor without writing thousands of changes.
     pub async fn open_with_change_log(machine: Option<&str>, change_log_rows: i64) -> Self {
+        Self::open_with_resolver(machine, change_log_rows, Arc::new(AlfResolver)).await
+    }
+
+    pub async fn open_with_resolver(
+        machine: Option<&str>,
+        change_log_rows: i64,
+        resolver: Arc<dyn Resolver>,
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cards.sqlite");
         let clock = Arc::new(TestClock(AtomicI64::new(NOW)));
         let recorder = Arc::new(Recorder::default());
         let handler = Handler::new(Options {
             clock: clock.clone(),
-            resolver: Arc::new(AlfResolver),
+            resolver,
             notifier: recorder.clone(),
             await_hook: None,
             sweep_timer: false,

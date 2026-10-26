@@ -7,6 +7,11 @@ contract is written ahead of implementation. Cingulate serves the aggregator
 side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
 serve the capability itself.
 
+Version 0.12.0 also serves [vault `secret_use` approvals](contracts/consent-requester-v2.md#vault-secret-use-requester-0120).
+Scoped AFT/Cerebellum routes file closed canonical statements; feature-enabled
+phones answer with the exact vault envelope. Card records bind its SHA-256,
+duration and per-item decisions. Late answers after statement expiry are refused.
+
 ## What v1 does
 
 ### Operations
@@ -24,7 +29,7 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | `consent.report_execution` | mutate | The owner, after a granted card was acted on. |
 | `consent.withdraw` | mutate | The owner settles its own pending card. |
 | `consent.revoke` | mutate | The owner revokes a granted `rich_ui_approval`. Only `reserved:occipital` may request this kind. |
-| `consent.watch_pending` | query/watch | Phone operator routes, filtered by feature and device for `rich_ui_approval`. |
+| `consent.watch_pending` | query/watch | Phone operator routes, filtered by feature and device for `rich_ui_approval` and, for `secret_use`, only `reserved:callosum` routes whose harness is `fed-phone:` plus 32 lowercase hex and whose client advertises `secret-use-approval`. |
 | `consent.answer` | mutate | Operator surfaces only (`operator`, `lib.rs:279-288`). |
 | `consent.list_pending` | query | Operator surfaces only. |
 | `consent.outcomes` | query | `reserved:prefrontal-core` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |

@@ -60,6 +60,8 @@ pub struct ElicitationRecord {
     pub revoked_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_use_answer: Option<cingulate_decode::SecretUseAnswer>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

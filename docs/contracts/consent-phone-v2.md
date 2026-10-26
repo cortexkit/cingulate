@@ -9,6 +9,10 @@ render unknown kinds as ordinary expiring approvals. The shared
 and requester bytes. The [requester v2 contract](consent-requester-v2.md) specifies
 admission, identity, state machine and core notices.
 
+`secret_use` has a hard deadline: both allow and decline are refused at or after
+the earliest statement expiry, even if the same choice was already recorded.
+Late-answer rules never extend a vault request's lifetime.
+
 Generic consent also admits worker sessions without their own agent id, as
 specified below. Cards raised by other sessions and existing served vectors
 remain unchanged.
@@ -234,3 +238,52 @@ The fingerprint is never taken from answer params.
 
 Complete served examples and error envelopes are pinned in
 [rich-ui-approval-v1](../../test-vectors/rich-ui-approval-v1/README.md).
+
+## Vault secret-use approvals (0.12.0)
+
+Cingulate advertises `secret-use-approval/v1`. Only daemon-stamped
+`reserved:callosum` routes with harness `fed-phone:<32 lowercase hex>` and
+`clientFeatures: ["secret-use-approval"]` may read or answer `kind: "secret_use"`.
+List, get and watch hide these cards from older phones and all other devices;
+watch also hides removal ids after payload pruning. Both allow and decline
+require the feature; missing it refuses `elicitation_secret_use_approval_required`.
+Get without the feature refuses `elicitation_not_found`. Agents and computers
+are never answering surfaces for this kind.
+
+The flat phone record carries `secretUse: {items: [{request_id,
+statement_b64url}]}`. Nested fields keep the vault's snake_case spelling. Decode
+each canonical statement and render its agent, secret, scope, coverage, use,
+offered durations and request deadline. The subject label comes from Cingulate's
+route-stamped agent resolution. Generic title, prompt and allow/decline labels
+are fixed by Cingulate, never supplied by the filer. The default is decline and
+`onExpiry` is deny; the earliest `request_expires_at_ms` is `expiresAtMs`.
+
+Decline uses `choiceId: "decline"` with no envelope. For allow, first send the
+signed envelope to the vault's `secret.approve` with `card_ref` equal to this
+`elicitationId`; then answer Cingulate with `choiceId: "allow"` and the exact
+`envelope_b64url` sent to the vault. Cingulate checks, without verifying the
+signature:
+
+- strict unpadded base64url, RFC 8785 canonical JSON and exactly
+  `{v, items, decision, duration, grant_expires_at_ms, device_fingerprint,
+  issued_at_ms}`; `v` is `ck-secret-use-envelope/v1`, `decision` is `allow`;
+- every integer is nonnegative and at most 2^53 − 1, with no floats;
+- `device_fingerprint` equals the answering route's fingerprint;
+- 1–16 items with closed shape `{request_id, statement_sha256}`, no duplicates,
+  each naming a card item and the lowercase SHA-256 of its decoded statement;
+- `duration` is offered by every listed statement.
+
+Malformed or mismatched bindings refuse `elicitation_invalid_request` without
+recording an answer. Envelope params on other kinds refuse `invalid_params`.
+Answers at or after expiry refuse `elicitation_expired`, including declines and
+same-choice retries. The vault separately checks its signature, live requests,
+grant expiry arithmetic, pairing and current sealed-secret incarnation.
+
+Accepted answers expose `secretUseAnswer` containing `decision`, optional
+`duration`, all card `items: [{request_id, decision}]`, and optional
+`envelope_sha256`. Items left out of an allow envelope count as declined.
+A whole decline omits duration/hash. The hash is over the decoded exact envelope
+bytes and matches the vault grant/audit hash, not a reconstructed decision.
+Repeating an allow with a different binding conflicts rather than replacing
+the recorded decision. [Single and batch served records](../../test-vectors/secret-use-approval-v1/README.md)
+are generated through the real phone get path and pinned byte for byte.
