@@ -74,7 +74,7 @@ nested payload keys are not recursively renamed.
 | `urgency` | `low`, `normal`, or `high`. |
 | `onExpiry` | `deny`. Silence never grants. |
 | `materialDamage` | Boolean supplied by the requester. |
-| `lateExecution` | `execute` or `notify_only`; requester execution policy, not evidence that execution happened. |
+| `lateExecution` | `execute` or `notify_only`; requester execution policy, not evidence that execution happened. `execute`: a late grant still takes effect (the held action runs, or the next attempt uses the grant). `notify_only`: a late answer has no effect. |
 | `target` | `{kind: string, label: string}`. |
 | `facts` | Array of `{label: string, value: string}`; present even when empty. |
 | `expiresInMs` | Optional integer requested lifetime, 1 through 86,400,000 ms. Omitted on no-deadline cards. |

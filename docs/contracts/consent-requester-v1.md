@@ -58,7 +58,7 @@ except the explicitly spelled `requestedSchema`. No camelCase aliases exist.
 | `urgency` | String | Required: `low`, `normal`, or `high`. |
 | `on_expiry` | String | Required: `deny`. |
 | `material_damage` | Boolean | Required. |
-| `late_execution` | String | Required: `execute` or `notify_only`. The existing decision examples use `notify_only`. Neither value causes Cingulate to execute a choice. |
+| `late_execution` | String | Required: `execute` or `notify_only`. It states what the requester does with an answer that arrives after its own wait ended. `execute`: a late grant still takes effect, either by running the held action or by recording a grant the next attempt uses. `notify_only`: a late answer is recorded and reported but has no effect. Neither value causes Cingulate to execute a choice. |
 | `target` | Object | Required: exactly string `kind` and `label`, both nonblank. |
 | `expires_in_ms` | Signed-64-bit integer | Optional; when present, 1–86,400,000. Omitted or null means no deadline; requires `consent-no-expiry/v1`. |
 | `scope` | JSON value | Optional, but either non-null scope or nonblank `args_digest` must be supplied. Contents are opaque. |

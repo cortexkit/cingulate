@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.2 (ck-cingulate)
+
+- Wire production agent status reads through Entorhinal's typed `agent.resolve`:
+  retired and merged subjects refuse `consent_retired`; unknown identities and
+  unavailable reads still show the raw agent id. Lookups have a 500 ms deadline,
+  a bounded 60 s cache, and rate-limited, id-free failure warnings.
+- Resolve generic and permission-card display names from Entorhinal's typed
+  `agent.fleet_identity` roster, refreshing with its opaque token and once on a
+  name miss. Unchanged replies retain the roster; full replies replace it.
+- Still check retirement when a name read fails, reserving time for status within
+  the lookup deadline. Roster-derived results expire with the roster rather than
+  extending its 60 s live-status cache window.
+
 ## 0.11.1 (ck-cingulate)
 
 - Read Callosum's `computer` device class: a `fed-computer:<fingerprint>` route

@@ -39,6 +39,8 @@ mod access;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
 pub mod engram;
 mod execution;
+mod identity;
+pub use identity::EntorhinalResolver;
 mod permissions;
 pub use permissions::{PermissionsCallError, PermissionsRuntime};
 mod pending_watch;
