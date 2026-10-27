@@ -20,3 +20,10 @@ target/
 .cortexkit/alfonso/
 .cortexkit/prefrontal/
 .cortexkit/magic-context/
+
+# Maintainer-only folders that stay on this machine: internal design and audit
+# documents, private scripts, and saved review answers. None of it is source,
+# and a delegated worker's helper scripts land here too.
+.cortexkit/internal-docs/
+.cortexkit/scripts/
+.cortexkit/sidekick-answers/
