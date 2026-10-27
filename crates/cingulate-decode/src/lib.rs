@@ -9,8 +9,10 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 mod access;
+mod flow_secrets;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
+pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use secret_use::{SecretUse, SecretUseAnswer, SecretUseItem, UseStatement};
 
 pub const MAX_EXPIRES_IN_MS: i64 = 86_400_000;
@@ -113,8 +115,8 @@ pub struct DryRunText {
 
 /// The request form stored after successful decoding.
 ///
-/// Flow bodies are opaque objects: the consent module checks their presence and
-/// option effects, but neither interprets manifests nor synthesizes card facts.
+/// Flow bodies stay opaque except for the vault identity and secret approvals;
+/// the consent module neither interprets manifests nor synthesizes card facts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
@@ -302,6 +304,9 @@ impl ConsentRequest {
         };
         let mut request: Self =
             serde_json::from_value(body).map_err(|error| Refusal::invalid(error.to_string()))?;
+        if request.flow_install_secrets()?.is_some() {
+            request.on_expiry = "deny".into();
+        }
         request.validate()?;
         request.requested_schema = None;
         Ok(request)
@@ -310,6 +315,7 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        self.flow_install_secrets()?;
         if self.kind == "secret_use" {
             self.secret_use
                 .as_ref()
@@ -595,6 +601,27 @@ impl ConsentRequest {
             return Err(Refusal::invalid("target kind and label must be nonempty"));
         }
         Ok(())
+    }
+
+    pub fn flow_install_secrets(&self) -> Result<Option<FlowInstallSecrets>, Refusal> {
+        if self.kind == "flow_install" {
+            self.flow_install
+                .as_ref()
+                .map(FlowInstallSecrets::decode)
+                .transpose()
+                .map(Option::flatten)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn is_secret_card(&self) -> bool {
+        self.secret_use.is_some()
+            || (self.kind == "flow_install"
+                && self
+                    .flow_install
+                    .as_ref()
+                    .is_some_and(|body| body.contains_key("secrets")))
     }
 }
 

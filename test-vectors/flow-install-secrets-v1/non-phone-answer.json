@@ -1,0 +1,16 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "decline",
+    "clientFeatures": [
+      "secret-use-approval"
+    ],
+    "elicitationId": "el_1"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_secret_use_approval_required",
+      "message": "secret use requires a phone with clientFeatures secret-use-approval"
+    }
+  }
+}

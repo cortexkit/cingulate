@@ -1,0 +1,58 @@
+{
+  "method": "consent.request",
+  "params": {
+    "default": "decline",
+    "flow_install": {
+      "flow": "daily-fetch",
+      "flow_identity": {
+        "code_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "flow_id": "daily-fetch",
+        "install_id": "install-A",
+        "version": 7
+      },
+      "manifest": {
+        "opaque": true
+      },
+      "secrets": [
+        {
+          "request_id": "01HF7YAT000000000000000001",
+          "statement_b64url": "eyJkdXJhdGlvbnMiOlsidmVyc2lvbiJdLCJmbG93Ijp7ImNvZGVfaGFzaCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJmbG93X2lkIjoiZGFpbHktZmV0Y2giLCJpbnN0YWxsX2lkIjoiaW5zdGFsbC1BIiwidmVyc2lvbiI6N30sIm1lbWJlcl9pZCI6ImZlZC1jb21wdXRlcjoyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsInJlcXVlc3RfZXhwaXJlc19hdF9tcyI6MTcwMDAwMDYwMDAwMCwicmVxdWVzdF9pZCI6IjAxSEY3WUFUMDAwMDAwMDAwMDAwMDAwMDAxIiwic2VjcmV0Ijp7ImluY2FybmF0aW9uIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxNDkiLCJraW5kIjoiYWdlbnRfYXBpX2tleSIsIm5hbWUiOiJrZXkifSwidXNlIjp7Imhvc3QiOiJ4LnRlc3QiLCJsb2NhdGlvbiI6ImhlYWRlcjpYLUFwaS1LZXkiLCJtZXRob2RzIjpbIkdFVCJdLCJwYXRoX3ByZWZpeCI6Ii9yZXBvcy9hIn0sInYiOiJjay1zZWNyZXQtZmxvdy1zdGF0ZW1lbnQvdjEifQ"
+        },
+        {
+          "request_id": "01HF7YAT000000000000000001",
+          "statement_b64url": "eyJkdXJhdGlvbnMiOlsidmVyc2lvbiJdLCJmbG93Ijp7ImNvZGVfaGFzaCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJmbG93X2lkIjoiZGFpbHktZmV0Y2giLCJpbnN0YWxsX2lkIjoiaW5zdGFsbC1BIiwidmVyc2lvbiI6N30sIm1lbWJlcl9pZCI6ImZlZC1jb21wdXRlcjoyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsInJlcXVlc3RfZXhwaXJlc19hdF9tcyI6MTcwMDAwMDYwMDAwMCwicmVxdWVzdF9pZCI6IjAxSEY3WUFUMDAwMDAwMDAwMDAwMDAwMDAxIiwic2VjcmV0Ijp7ImluY2FybmF0aW9uIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxNDkiLCJraW5kIjoiYWdlbnRfYXBpX2tleSIsIm5hbWUiOiJrZXkifSwidXNlIjp7Imhvc3QiOiJ4LnRlc3QiLCJsb2NhdGlvbiI6ImhlYWRlcjpYLUFwaS1LZXkiLCJtZXRob2RzIjpbIkdFVCJdLCJwYXRoX3ByZWZpeCI6Ii9yZXBvcy9hIn0sInYiOiJjay1zZWNyZXQtZmxvdy1zdGF0ZW1lbnQvdjEifQ"
+        }
+      ]
+    },
+    "kind": "flow_install",
+    "late_execution": "notify_only",
+    "material_damage": false,
+    "on_expiry": "deny",
+    "options": [
+      {
+        "effect": "grant",
+        "id": "install",
+        "label": "Install"
+      },
+      {
+        "effect": "decline",
+        "id": "decline",
+        "label": "Decline"
+      }
+    ],
+    "prompt": "Review the flow and its vault access.",
+    "scope": {},
+    "target": {
+      "kind": "flow",
+      "label": "daily-fetch"
+    },
+    "title": "Install daily-fetch",
+    "urgency": "normal"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_duplicate_request_id",
+      "message": "duplicate secret request id"
+    }
+  }
+}

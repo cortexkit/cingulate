@@ -366,7 +366,18 @@ impl ConsentStore {
         // when a caller constructed the already-validated request directly.
         request.requested_schema = None;
         self.transaction(|tx| {
-            let secret_expiry = request.secret_use.as_ref().map(|body| body.expires_at_ms()).transpose().map_err(Error::Refused)?;
+            let flow_secrets = request.flow_install_secrets().map_err(Error::Refused)?;
+            let secret_expiry = if let Some(body) = &flow_secrets {
+                Some(body.expires_at_ms().map_err(Error::Refused)?)
+            } else {
+                request.secret_use.as_ref().map(|body| body.expires_at_ms()).transpose().map_err(Error::Refused)?
+            };
+            let filed_expiry = request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl));
+            let deadline = if flow_secrets.is_some() {
+                secret_expiry.map(|expiry| filed_expiry.map_or(expiry, |filed| filed.min(expiry)))
+            } else {
+                secret_expiry.or(filed_expiry)
+            };
             if secret_expiry.is_some_and(|expiry| expiry <= now_ms) {
                 return Err(refuse("elicitation_expired", "secret use request has expired"));
             }
@@ -405,10 +416,7 @@ impl ConsentStore {
                     settlements.push(old);
                 } else if same_content(&old, &request, &identity.subject) {
                     old.request = request;
-                    old.expires_at_ms = old
-                        .request
-                        .expires_in_ms
-                        .map(|ttl| now_ms.saturating_add(ttl));
+                    old.expires_at_ms = deadline;
                     if let Some(name) = &identity.resolved_name {
                         old.subject.label = name.clone();
                     }
@@ -440,7 +448,7 @@ impl ConsentStore {
             }
             let record = ElicitationRecord {
                 elicitation_id: format!("el_{seq}"),
-                expires_at_ms: secret_expiry.or_else(|| request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl))),
+                expires_at_ms: deadline,
                 request,
                 created_at_ms: now_ms,
                 subject,
@@ -472,7 +480,7 @@ impl ConsentStore {
                         .rich_ui_approval
                         .as_ref()
                         .map(|body| &body.device),
-                    record.request.secret_use.is_some()
+                    record.request.is_secret_card()
                 ],
             )?;
             if let Some(body) = &record.request.secret_use {
@@ -593,7 +601,7 @@ impl ConsentStore {
                     settlements: vec![],
                 });
             }
-            if record.request.secret_use.is_some()
+            if record.request.is_secret_card()
                 && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
             {
                 return Err(refuse(
@@ -601,14 +609,40 @@ impl ConsentStore {
                     "secret use request has expired",
                 ));
             }
-            let secret_answer = record
+            let flow_secrets = record
                 .request
-                .secret_use
-                .as_ref()
-                .map(|body| body.answer(choice, device, envelope))
-                .transpose()
+                .flow_install_secrets()
                 .map_err(Error::Refused)?;
-            if record.request.secret_use.is_none() && envelope.is_some() {
+            let secret_answer = if let Some(body) = flow_secrets {
+                let decision = record
+                    .request
+                    .options
+                    .iter()
+                    .find(|option| option.id == choice)
+                    .map(|option| {
+                        if option.effect == "grant" {
+                            "allow"
+                        } else {
+                            "decline"
+                        }
+                    })
+                    .ok_or_else(|| {
+                        refuse("elicitation_invalid_choice", "choice must name an option")
+                    })?;
+                Some(
+                    body.answer(decision, device, envelope)
+                        .map_err(Error::Refused)?,
+                )
+            } else {
+                record
+                    .request
+                    .secret_use
+                    .as_ref()
+                    .map(|body| body.answer(choice, device, envelope))
+                    .transpose()
+                    .map_err(Error::Refused)?
+            };
+            if !record.request.is_secret_card() && envelope.is_some() {
                 return Err(refuse(
                     "invalid_params",
                     "envelope_b64url requires secret_use",

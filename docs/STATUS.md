@@ -7,7 +7,20 @@ contract is written ahead of implementation. Cingulate serves the aggregator
 side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
 serve the capability itself.
 
-Version 0.12.0 also serves [vault `secret_use` approvals](contracts/consent-requester-v2.md#vault-secret-use-requester-0120).
+Version 0.13.0 adds [flow-install secret approvals](contracts/consent-requester-v2.md#flow-install-secret-approvals-0130)
+under `flow-install-secrets/v1`: core files paired `flow_identity` and `secrets`
+inside the otherwise opaque install body. Closed canonical vault statements
+must match that identity and offer only `version`. Supported phone routes alone
+see and answer these cards, using the `secret-use-approval` client feature.
+An allow binds every request/digest exactly once to a version-duration envelope
+with zero grant expiry and the answering phone's fingerprint. The earliest
+statement deadline bounds even a no-expiry filing; an earlier filed expiry wins,
+and timeout always denies. No migration is needed: existing JSON records,
+answer bindings and retained secret-card visibility flags suffice. Generated
+vectors and focused tests live in `flow-install-secrets-v1` and
+`crates/cingulate-vectors/tests/flow_install_secrets.rs`.
+
+Version 0.12.0 introduced [vault `secret_use` approvals](contracts/consent-requester-v2.md#vault-secret-use-requester-0120).
 Scoped AFT/Cerebellum routes file closed canonical statements; feature-enabled
 phones answer with the exact vault envelope. Card records bind its SHA-256,
 duration and per-item decisions. Late answers after statement expiry are refused.

@@ -1,0 +1,17 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "install",
+    "clientFeatures": [
+      "secret-use-approval"
+    ],
+    "elicitationId": "el_1",
+    "envelope_b64url": "eyJkZWNpc2lvbiI6ImFsbG93IiwiZGV2aWNlX2ZpbmdlcnByaW50IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJkdXJhdGlvbiI6InZlcnNpb24iLCJncmFudF9leHBpcmVzX2F0X21zIjowLCJpc3N1ZWRfYXRfbXMiOjE3MDAwMDAwMDAwMDAsIml0ZW1zIjpbeyJyZXF1ZXN0X2lkIjoiMDFIRjdZQVQwMDAwMDAwMDAwMDAwMDAwMDEiLCJzdGF0ZW1lbnRfc2hhMjU2IjoiYmNmM2Y1OWE5OWMwYmVhYTUyMzY2YzZmYTM3YWY2YTc5OTQ2MDI1NzIxNTI1MmQ4MDRjZTc0NzQyNDBhN2M1NyJ9LHsicmVxdWVzdF9pZCI6IjAxSEY3WUFUMDAwMDAwMDAwMDAwMDAwMDAyIiwic3RhdGVtZW50X3NoYTI1NiI6ImU5NjA1YzkxM2FlY2NkZGM4MDc5YzRlODg5NzQ3OTZkMjY4YzRhN2RlMjg2YWM5MjY5YWRhNzY1MWY5OWFjNGEifV0sInYiOiJjay1zZWNyZXQtdXNlLWVudmVsb3BlL3YxIn0"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "elicitation_invalid_request: invalid secret approval statement or envelope"
+    }
+  }
+}

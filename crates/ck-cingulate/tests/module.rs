@@ -476,7 +476,8 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
             "rich-ui-approval/v1",
-            "secret-use-approval/v1"
+            "secret-use-approval/v1",
+            "flow-install-secrets/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
@@ -640,7 +641,8 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
             "rich-ui-approval/v1",
-            "secret-use-approval/v1"
+            "secret-use-approval/v1",
+            "flow-install-secrets/v1"
         ]
     );
 }

@@ -445,3 +445,60 @@ answer requires the same choice and binding, not merely another allow envelope;
 a different binding returns the existing conflict record. The SHA-256 is over
 the decoded envelope bytes and matches the vault's grant and audit
 `payload_hash`. See the [pinned vault and served phone vectors](../../test-vectors/secret-use-approval-v1/README.md).
+
+
+## Flow-install secret approvals (0.13.0)
+
+Cingulate advertises `flow-install-secrets/v1`. Core sends the new fields only
+when that capability is present. Only `reserved:prefrontal-core` may file
+`flow_install`, as before. The existing `flow_install.flow` remains the flow's
+name; the new identity key is **`flow_identity`**, not `flow`.
+
+Inside the otherwise opaque `flow_install` object, supply both new keys or
+neither:
+
+```json
+{"flow":"daily-fetch","flow_identity":{"flow_id":"daily-fetch","version":7,"code_hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","install_id":"install-A"},"secrets":[{"request_id":"01HF7YAT000000000000000001","statement_b64url":"<unchanged vault flow statement>"}]}
+```
+
+`flow_identity` is closed: `flow_id` and `install_id` are 1–256 printable ASCII
+bytes, `version` is an integer 1 through 2^53 − 1, and `code_hash` is exactly 64
+lowercase hex characters. `secrets` has 1–16 closed `{request_id,
+statement_b64url}` objects with unique request ids. Every other install-body key
+remains opaque. Cards without these two keys keep their previous behavior.
+
+Basal obtains each statement via the vault's `secret.request_flow_approval`;
+core forwards its bytes unchanged. Filing reuses the `secret_use` strict
+unpadded base64url and canonical JSON checks (including trailing bits, duplicate
+keys, closed shapes and safe integer bounds). The decoded closed statement is
+`{v, request_id, member_id, flow, secret, use, durations, request_expires_at_ms}`
+with `v: "ck-secret-flow-statement/v1"`. `flow` equals `flow_identity` exactly;
+`request_id` equals the entry's ULID; `durations` is exactly `["version"]`.
+`secret` has the same closed shape as an agent statement. A login uses
+`use: {origin}`; an API key uses `{host, path_prefix, location, methods}`, with
+nonempty, unique, ascending uppercase methods of 1–16 bytes each.
+
+Invalid filings store nothing. Named refusal codes are
+`elicitation_flow_secrets_pair_required` (one key missing),
+`elicitation_invalid_flow_identity` (identity shape/bounds),
+`elicitation_invalid_flow_secrets` (entry/statement shape, count or encoding),
+`elicitation_duplicate_request_id`, `elicitation_flow_identity_mismatch`, and
+`elicitation_invalid_flow_durations`.
+
+Core normally omits `expires_in_ms` under `consent-no-expiry/v1`. A secret-bearing
+install still has a deadline: the earliest statement's `request_expires_at_ms`,
+or the filed expiry if earlier. Vault flow requests may last up to 24 hours.
+An already expired statement refuses `elicitation_expired`; any answer at or
+after the deadline does too. Expiry settles the card as `expired` (denied, no
+grant), regardless of the supplied `on_expiry`, which is normalized to `deny`.
+The decline default is still required.
+
+Only supported phone routes may see or answer these cards, including declines;
+see the [phone contract](consent-phone-v2.md#flow-install-secret-approvals-0130).
+A successful install answer records `secret_use_answer` with duration `version`,
+all items allowed and the exact envelope SHA-256. A decline records all items
+declined without duration/hash. The route's device fingerprint is recorded in
+`answered_device`. Repeat answers require the same choice and exact envelope
+bytes, as for `secret_use`. No storage migration is needed: the existing JSON
+record, answer binding and retained secret-card visibility flag hold these
+values. See [generated vectors](../../test-vectors/flow-install-secrets-v1/README.md).

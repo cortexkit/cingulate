@@ -274,7 +274,7 @@ signature:
 - `duration` is offered by every listed statement.
 
 Malformed or mismatched bindings refuse `elicitation_invalid_request` without
-recording an answer. Envelope params on other kinds refuse `invalid_params`.
+recording an answer. Envelope params on kinds other than `secret_use` or secret-bearing `flow_install` refuse `invalid_params`.
 Answers at or after expiry refuse `elicitation_expired`, including declines and
 same-choice retries. The vault separately checks its signature, live requests,
 grant expiry arithmetic, pairing and current sealed-secret incarnation.
@@ -287,3 +287,45 @@ bytes and matches the vault grant/audit hash, not a reconstructed decision.
 Repeating an allow with a different binding conflicts rather than replacing
 the recorded decision. [Single and batch served records](../../test-vectors/secret-use-approval-v1/README.md)
 are generated through the real phone get path and pinned byte for byte.
+
+
+## Flow-install secret approvals (0.13.0)
+
+`flow-install-secrets/v1` lets one install card approve a flow and its vault
+secrets together. Phone projections carry `flowInstall.flow_identity` and
+`flowInstall.secrets: [{request_id, statement_b64url}]`; nested keys and statement
+bytes are unchanged from core's filing. `flowInstall.flow` is still the existing
+flow name. Decode and show the vault statements verbatim alongside the install
+card: the identity is the installed flow version, not an agent scope. The
+statement domain is `ck-secret-flow-statement/v1`, with only `version` offered.
+The [requester contract](consent-requester-v2.md#flow-install-secret-approvals-0130)
+describes the closed shapes and filing refusals.
+
+The same `secret_use` gate applies, with no new phone feature name:
+`reserved:callosum`, harness `fed-phone:<32 lowercase hex>`, and
+`clientFeatures: ["secret-use-approval"]`. Unsupported phones, computers,
+simulators and agents cannot read or answer, even to decline. List/get/watch
+and pruned watch-removal ids are filtered identically. Plain `flow_install`
+cards remain visible and answerable exactly as before.
+
+For an install/grant choice, sign one `ck-secret-use-envelope/v1`, submit it to
+the vault with Face ID as for `secret_use`, then answer the card with the same
+`envelope_b64url`. Use the card's grant option id as `choiceId`; it need not be
+`allow`. The envelope must have `decision: "allow"`, `duration: "version"`,
+`grant_expires_at_ms: 0`, and the answering phone's fingerprint. All existing
+canonical, closed-shape, integer and statement-digest envelope checks apply.
+Items must be **exactly every** card `{request_id, statement_sha256}` pair, each
+once, in any order. Subsets, extras, duplicate items and another phone's envelope
+are refused without recording anything. Unlike agent secret-use approvals,
+partial approval cannot install a flow. A decline option needs no envelope.
+
+`expiresAtMs` is the earlier of the filed expiry (if present) and the earliest
+statement expiry. No filed expiry is normal; statements can live up to 24 hours.
+On deadline the card expires denied, never installs, regardless of filer policy.
+Answers and retries at or after deadline refuse `elicitation_expired`.
+`secretUseAnswer` records duration `version`, all item decisions and the exact
+envelope hash; `answeredDevice` records the phone fingerprint. Same choice and
+same bytes return the recorded answer; any other valid binding or choice
+conflicts. Cingulate does not verify the signature or release secrets: the vault
+does. [Generated filing, phone, answer and refusal vectors](../../test-vectors/flow-install-secrets-v1/README.md)
+pin the contract without changing older corpora.

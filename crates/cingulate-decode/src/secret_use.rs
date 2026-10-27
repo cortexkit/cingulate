@@ -17,7 +17,7 @@ fn invalid() -> Refusal {
     Refusal::invalid("invalid secret approval statement or envelope")
 }
 
-fn ulid(value: &str) -> bool {
+pub(super) fn ulid(value: &str) -> bool {
     value.len() == 26
         && value.as_bytes()[0] <= b'7'
         && value
@@ -34,7 +34,7 @@ fn safe_numbers(value: &Value) -> bool {
     }
 }
 
-fn canonical<T: DeserializeOwned>(encoded: &str) -> Result<(T, Vec<u8>), Refusal> {
+pub(super) fn canonical<T: DeserializeOwned>(encoded: &str) -> Result<(T, Vec<u8>), Refusal> {
     let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| invalid())?;
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     if !safe_numbers(&value) || serde_jcs::to_vec(&value).map_err(|_| invalid())? != bytes {
@@ -186,6 +186,26 @@ impl SecretUse {
         encoded: Option<&str>,
     ) -> Result<SecretUseAnswer, Refusal> {
         let statements = self.statements()?;
+        self.answer_items(
+            choice,
+            device,
+            encoded,
+            &statements
+                .into_iter()
+                .map(|s| s.durations)
+                .collect::<Vec<_>>(),
+            false,
+        )
+    }
+
+    pub(super) fn answer_items(
+        &self,
+        choice: &str,
+        device: Option<&str>,
+        encoded: Option<&str>,
+        durations: &[Vec<String>],
+        flow: bool,
+    ) -> Result<SecretUseAnswer, Refusal> {
         let (duration, allowed, hash) = match (choice, encoded) {
             ("decline", None) => (None, HashSet::new(), None),
             ("allow", Some(encoded)) => {
@@ -195,6 +215,10 @@ impl SecretUse {
                     || device != Some(envelope.device_fingerprint.as_str())
                     || !lowercase_hex(&envelope.device_fingerprint, 32)
                     || !(1..=16).contains(&envelope.items.len())
+                    || (flow
+                        && (envelope.items.len() != self.items.len()
+                            || envelope.duration != "version"
+                            || envelope.grant_expires_at_ms != 0))
                 {
                     return Err(invalid());
                 }
@@ -210,7 +234,7 @@ impl SecretUse {
                         .map_err(|_| invalid())?;
                     if !allowed.insert(item.request_id.clone())
                         || item.statement_sha256 != format!("{:x}", Sha256::digest(bytes))
-                        || !statements[index].durations.contains(&envelope.duration)
+                        || !durations[index].contains(&envelope.duration)
                     {
                         return Err(invalid());
                     }

@@ -172,6 +172,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-no-expiry/v1".into(),
                 "rich-ui-approval/v1".into(),
                 "secret-use-approval/v1".into(),
+                "flow-install-secrets/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -281,7 +282,7 @@ impl Stamp {
         self.rich_ui_device_matches(record)
             && (record.request.kind != "rich_ui_approval"
                 || feature_declared(params, "rich-ui-approval"))
-            && (record.request.kind != "secret_use"
+            && (!record.request.is_secret_card()
                 || (self.secret_use_phone().is_some()
                     && feature_declared(params, "secret-use-approval")))
     }
@@ -1069,7 +1070,7 @@ impl Handler {
                         ))
                     };
                 }
-                if record.request.kind == "secret_use"
+                if record.request.is_secret_card()
                     && (!secret_use || stamp.secret_use_phone().is_none())
                 {
                     return Err(Refusal::new(

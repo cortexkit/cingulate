@@ -592,7 +592,8 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
             "rich-ui-approval/v1",
-            "secret-use-approval/v1"
+            "secret-use-approval/v1",
+            "flow-install-secrets/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());

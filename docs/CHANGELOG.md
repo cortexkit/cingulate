@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.0 (ck-cingulate)
+
+- Advertise `flow-install-secrets/v1`: core may attach paired `flow_identity` and
+  `secrets` fields to one `flow_install` card. Validate the vault's canonical
+  flow statements, exact installed-version identity, unique request ids and
+  version-only duration, leaving all other install fields opaque.
+- Secret-bearing install cards use the existing supported-phone gate and
+  envelope/answer recording. An install requires every statement exactly once,
+  duration `version`, zero grant expiry and the answering phone's fingerprint;
+  declines require no envelope. The card expires denied at the earlier filed
+  or statement deadline, including when core omits its expiry.
+- Add generated filing, phone, allow, decline and refusal vectors based on
+  Claustrum `1ee946f` goldens. Existing corpora remain unchanged. No storage
+  migration: reuse the JSON records, answer binding and secret visibility flag.
+
 ## 0.6.2 (cingulate-vectors)
 
 - Extend the `permissions/v1` contract with grants held by an installed flow
