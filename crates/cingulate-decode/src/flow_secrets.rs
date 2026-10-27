@@ -5,7 +5,11 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{lowercase_hex, secret_use::canonical, Refusal, SecretUse, SecretUseAnswer};
+use crate::{
+    lowercase_hex,
+    secret_use::{canonical, present_string, statement_version_ok},
+    Refusal, SecretUse, SecretUseAnswer,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +52,10 @@ struct FlowStatement {
     v: String,
     request_id: String,
     member_id: String,
+    /// The paired computer the flow runs on; present only in v2 statements,
+    /// which the home vault writes for requests forwarded from that computer.
+    #[serde(default, deserialize_with = "present_string")]
+    asking_member_id: Option<String>,
     flow: FlowIdentity,
     secret: crate::secret_use::StatementSecret,
     r#use: FlowUse,
@@ -105,13 +113,22 @@ impl FlowInstallSecrets {
             return Err(invalid());
         }
         let mut seen = HashSet::new();
+        // The asking computer of the first statement; every later statement
+        // must name the same one, or all must omit it.
+        let mut asking: Option<Option<String>> = None;
         self.approvals
             .items
             .iter()
             .map(|item| {
                 let (statement, _): (FlowStatement, _) =
                     canonical(&item.statement_b64url).map_err(|_| invalid())?;
-                if statement.v != "ck-secret-flow-statement/v1"
+                if !statement_version_ok(
+                    &statement.v,
+                    "ck-secret-flow-statement",
+                    statement.asking_member_id.as_deref(),
+                    &statement.member_id,
+                ) || *asking.get_or_insert_with(|| statement.asking_member_id.clone())
+                    != statement.asking_member_id
                     || !super::secret_use::ulid(&item.request_id)
                     || statement.request_id != item.request_id
                 {

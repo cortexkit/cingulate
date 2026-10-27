@@ -1,0 +1,86 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "allow",
+    "clientFeatures": [
+      "secret-use-approval"
+    ],
+    "elicitationId": "el_1",
+    "envelope_b64url": "eyJkZWNpc2lvbiI6ImFsbG93IiwiZGV2aWNlX2ZpbmdlcnByaW50IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJkdXJhdGlvbiI6ImhvdXIiLCJncmFudF9leHBpcmVzX2F0X21zIjoxNzAwMDAzNjAwMDAwLCJpc3N1ZWRfYXRfbXMiOjE3MDAwMDAwMDAwMDAsIml0ZW1zIjpbeyJyZXF1ZXN0X2lkIjoiMDFIRjdZQVQwMDAwMDAwMDAwMDAwMDAwMDEiLCJzdGF0ZW1lbnRfc2hhMjU2IjoiODU4NTcyNTgxNTRmNmFmOGIxZWEzNGE1ZjFiYmUyNTE3ZTk1MjY5NTI4OTFmYjQ1ZDhkNjU5YzcyYzU2NGQwZCJ9LHsicmVxdWVzdF9pZCI6IjAxSEY3WUFUMDAwMDAwMDAwMDAwMDAwMDAyIiwic3RhdGVtZW50X3NoYTI1NiI6IjIzODkxMGY5MjIxZDJjYTFkNDE1NWVlMDA4MWNkOWU1NWYyZWI1NTczN2VhMzg5MjE4ZmZkYjk5NzcwOGJkNGQifV0sInYiOiJjay1zZWNyZXQtdXNlLWVudmVsb3BlL3YxIn0"
+  },
+  "reply": {
+    "result": {
+      "alreadyAnswered": false,
+      "elicitation": {
+        "answeredAtMs": 1700000000000,
+        "answeredChoiceId": "allow",
+        "answeredDevice": "11111111111111111111111111111111",
+        "createdAtMs": 1700000000000,
+        "default": "decline",
+        "elicitationId": "el_1",
+        "expiresAtMs": 1700000600000,
+        "facts": [],
+        "kind": "secret_use",
+        "lateExecution": "notify_only",
+        "materialDamage": false,
+        "onExpiry": "deny",
+        "options": [
+          {
+            "effect": "grant",
+            "id": "allow",
+            "label": "Allow"
+          },
+          {
+            "effect": "decline",
+            "id": "decline",
+            "label": "Decline"
+          }
+        ],
+        "prompt": "Review the vault's requested access.",
+        "requesterLabel": "reserved:aft",
+        "requesterName": "AFT",
+        "scope": {},
+        "secretUse": {
+          "items": [
+            {
+              "request_id": "01HF7YAT000000000000000001",
+              "statement_b64url": "eyJhZ2VudF9pZCI6ImFnZW50LUEiLCJhc2tpbmdfbWVtYmVyX2lkIjoiZmVkLWNvbXB1dGVyOjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwiY292ZXJhZ2UiOiJzY29wZSIsImR1cmF0aW9ucyI6WyJvbmNlIiwiaG91ciIsInNlc3Npb24iLCJwZXJtYW5lbnQiXSwibWVtYmVyX2lkIjoiZmVkLWNvbXB1dGVyOjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVxdWVzdF9leHBpcmVzX2F0X21zIjoxNzAwMDAwNjAwMDAwLCJyZXF1ZXN0X2lkIjoiMDFIRjdZQVQwMDAwMDAwMDAwMDAwMDAwMDEiLCJzY29wZSI6eyJlcG9jaCI6Nywia2luZCI6ImhlYWQiLCJvd25lciI6InJlc2VydmVkOnByZWZyb250YWwtY29yZSIsInJlZiI6IkgifSwic2VjcmV0Ijp7ImluY2FybmF0aW9uIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxNDkiLCJraW5kIjoiYWdlbnRfYXBpX2tleSIsIm5hbWUiOiJrZXkifSwidXNlIjp7Imhvc3QiOiJ4LnRlc3QiLCJsb2NhdGlvbiI6ImhlYWRlcjpYLUFwaS1LZXkiLCJwYXRoX3ByZWZpeCI6Ii9yZXBvcy9hIn0sInYiOiJjay1zZWNyZXQtdXNlLXN0YXRlbWVudC92MiJ9"
+            },
+            {
+              "request_id": "01HF7YAT000000000000000002",
+              "statement_b64url": "eyJhZ2VudF9pZCI6ImFnZW50LUEiLCJhc2tpbmdfbWVtYmVyX2lkIjoiZmVkLWNvbXB1dGVyOjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwiY292ZXJhZ2UiOiJzY29wZSIsImR1cmF0aW9ucyI6WyJvbmNlIiwiaG91ciIsInNlc3Npb24iLCJwZXJtYW5lbnQiXSwibWVtYmVyX2lkIjoiZmVkLWNvbXB1dGVyOjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVxdWVzdF9leHBpcmVzX2F0X21zIjoxNzAwMDAwNjAwMDAwLCJyZXF1ZXN0X2lkIjoiMDFIRjdZQVQwMDAwMDAwMDAwMDAwMDAwMDIiLCJzY29wZSI6eyJlcG9jaCI6Nywia2luZCI6ImhlYWQiLCJvd25lciI6InJlc2VydmVkOnByZWZyb250YWwtY29yZSIsInJlZiI6IkgifSwic2VjcmV0Ijp7ImluY2FybmF0aW9uIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAyMTkiLCJraW5kIjoic2l0ZV9sb2dpbiIsIm5hbWUiOiJsb2dpbiJ9LCJ1c2UiOnsib3JpZ2luIjoiaHR0cHM6Ly94LnRlc3QifSwidiI6ImNrLXNlY3JldC11c2Utc3RhdGVtZW50L3YyIn0"
+            }
+          ]
+        },
+        "secretUseAnswer": {
+          "decision": "allow",
+          "duration": "hour",
+          "envelope_sha256": "8026875ef7292e5f045df2761b17831ab3deb06929dd99b5b07b4ed73be384b3",
+          "items": [
+            {
+              "decision": "allow",
+              "request_id": "01HF7YAT000000000000000001"
+            },
+            {
+              "decision": "allow",
+              "request_id": "01HF7YAT000000000000000002"
+            }
+          ]
+        },
+        "state": "answered",
+        "subject": {
+          "agentId": "agent-A",
+          "headAgentId": "agent-A",
+          "label": "agent-A"
+        },
+        "target": {
+          "kind": "secret_use",
+          "label": "Vault access"
+        },
+        "title": "Secret use approval",
+        "urgency": "normal"
+      },
+      "ok": true
+    }
+  }
+}

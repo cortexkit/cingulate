@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -23,6 +23,58 @@ pub(super) fn ulid(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b"0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(&b))
+}
+
+/// Accepts a key that is either absent (`None`) or a JSON string. A present
+/// `null` is refused, so "the key is there" and "the key is missing" can never
+/// be confused: a v1 statement must not carry `asking_member_id` at all.
+pub(super) fn present_string<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
+/// Checks a statement's `v` against its family and the presence of
+/// `asking_member_id`.
+///
+/// The vault writes v1 for a request made on the home computer that holds the
+/// vault. When an agent on another paired computer asks, the home vault
+/// forwards the request and writes v2: the v1 object with `v` ending in `/v2`
+/// and one added key, `asking_member_id`, naming the computer that asked as
+/// `fed-computer:` and 32 lowercase hex characters. `member_id` still names the home vault serving the
+/// grant. So v1 never carries the key and v2 always does. `family` keeps
+/// secret_use and flow statements apart: a version string from the other
+/// family never matches.
+///
+/// Cingulate deliberately does not compare `asking_member_id` with this
+/// computer's own identity. The home vault sets the field from the paired
+/// computer the forwarded request arrived from, as the local subc daemon
+/// stamps it on that route (never from the request's own parameters), and
+/// grants only a statement whose digest
+/// matches the request it stored, so the vault already binds it; a check here
+/// would need a call to another module on every card and add a failure mode.
+pub(super) fn statement_version_ok(
+    v: &str,
+    family: &str,
+    asking_member_id: Option<&str>,
+    member_id: &str,
+) -> bool {
+    let Some(version) = v.strip_prefix(family).and_then(|v| v.strip_prefix('/')) else {
+        return false;
+    };
+    match (version, asking_member_id) {
+        ("v1", None) => true,
+        ("v2", Some(asking)) => {
+            asking
+                .strip_prefix("fed-computer:")
+                .is_some_and(|hex| lowercase_hex(hex, 32))
+                // v2 exists only for a request forwarded from another computer.
+                // The home vault never forwards to itself, so a v2 statement
+                // naming the serving vault as the asker cannot be genuine.
+                && asking != member_id
+        }
+        _ => false,
+    }
 }
 
 fn safe_numbers(value: &Value) -> bool {
@@ -63,6 +115,10 @@ pub struct UseStatement {
     pub v: String,
     pub request_id: String,
     pub member_id: String,
+    /// The paired computer the agent asked from; present only in v2
+    /// statements, which the home vault writes for forwarded requests.
+    #[serde(default, deserialize_with = "present_string")]
+    pub asking_member_id: Option<String>,
     pub agent_id: Option<String>,
     pub scope: StatementScope,
     pub coverage: String,
@@ -150,7 +206,12 @@ impl SecretUse {
             // nullable key in the vault statement.
             let (value, _): (Value, _) = canonical(&item.statement_b64url)?;
             if value.get("agent_id").is_none()
-                || statement.v != "ck-secret-use-statement/v1"
+                || !statement_version_ok(
+                    &statement.v,
+                    "ck-secret-use-statement",
+                    statement.asking_member_id.as_deref(),
+                    &statement.member_id,
+                )
                 || !ulid(&item.request_id)
                 || statement.request_id != item.request_id
                 || !seen.insert(&item.request_id)
@@ -160,7 +221,12 @@ impl SecretUse {
                     .iter()
                     .any(|d| !DURATIONS.contains(&d.as_str()))
                 || statements.first().is_some_and(|first| {
-                    first.agent_id != statement.agent_id || first.member_id != statement.member_id
+                    // One card is one request from one agent on one computer:
+                    // every statement shares the agent, the serving vault and
+                    // the asking computer (or its absence for home requests).
+                    first.agent_id != statement.agent_id
+                        || first.member_id != statement.member_id
+                        || first.asking_member_id != statement.asking_member_id
                 })
             {
                 return Err(invalid());

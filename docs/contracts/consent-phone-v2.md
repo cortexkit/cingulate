@@ -329,3 +329,17 @@ same bytes return the recorded answer; any other valid binding or choice
 conflicts. Cingulate does not verify the signature or release secrets: the vault
 does. [Generated filing, phone, answer and refusal vectors](../../test-vectors/flow-install-secrets-v1/README.md)
 pin the contract without changing older corpora.
+
+## Forwarded secret statements v2 (0.13.1)
+
+`secret_use` and secret-bearing `flow_install` cards may carry v2 statements:
+the v1 statement plus `asking_member_id` (`fed-computer:` and 32 lowercase hex
+characters), with `v` set to `ck-secret-use-statement/v2` or
+`ck-secret-flow-statement/v2`. They mean an agent or flow on that paired
+computer asked, and the home vault named by `member_id` will serve the grant.
+Statement bytes reach the phone unchanged, and answering is identical: the same
+envelope, with each item's `statement_sha256` over the exact statement bytes.
+Cingulate accepts a card only when all its statements share one asking computer
+(or none has one) that differs from `member_id`. [secret_use](../../test-vectors/secret-use-approval-v2/README.md)
+and [flow install](../../test-vectors/flow-install-secrets-v2/README.md) cards
+are generated from the vault's own v2 vectors and pinned byte for byte.

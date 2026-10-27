@@ -502,3 +502,31 @@ declined without duration/hash. The route's device fingerprint is recorded in
 bytes, as for `secret_use`. No storage migration is needed: the existing JSON
 record, answer binding and retained secret-card visibility flag hold these
 values. See [generated vectors](../../test-vectors/flow-install-secrets-v1/README.md).
+
+## Forwarded secret statements v2 (0.13.1)
+
+When an agent or flow on another paired computer asks for a secret, the home
+computer's vault forwards the request and writes a v2 statement. The card is
+filed on the asking computer, by its own AFT, Cerebellum or core, to its own
+Cingulate, exactly as for v1. A v2 statement is the v1 statement plus one key,
+`asking_member_id`, and `v` ends in `/v2`: `ck-secret-use-statement/v2` on a
+`secret_use` card, `ck-secret-flow-statement/v2` in `flow_install.secrets`.
+`member_id` still names the home vault serving the grant. Canonical bytes,
+envelope digests, expiry, idempotency and every other rule above are unchanged.
+Requests made on the home computer stay v1, byte for byte.
+
+- A v1 statement must not carry `asking_member_id`, not even as `null`.
+- A v2 statement must carry it as `fed-computer:` plus exactly 32 lowercase hex
+  characters, different from `member_id` (the home vault never forwards to
+  itself).
+- A version string from the other family is refused.
+- Every statement on one card has the same `asking_member_id`, or none has it,
+  so v1 and v2 statements never share a card.
+
+Refusals reuse the existing codes: `elicitation_invalid_request` for
+`secret_use`, `elicitation_invalid_flow_secrets` for flow statements. Cingulate
+does not compare `asking_member_id` with this computer's identity; the home
+vault sets it from the attested forwarding route and grants only a statement
+whose digest matches its stored request. Vault vectors and generated cards:
+[secret_use](../../test-vectors/secret-use-approval-v2/README.md) and
+[flow install](../../test-vectors/flow-install-secrets-v2/README.md).

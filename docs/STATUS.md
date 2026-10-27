@@ -7,6 +7,12 @@ contract is written ahead of implementation. Cingulate serves the aggregator
 side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
 serve the capability itself.
 
+Version 0.13.1 accepts [forwarded v2 vault statements](contracts/consent-requester-v2.md#forwarded-secret-statements-v2-0131)
+on `secret_use` and flow-install cards: the v1 statement plus `asking_member_id`,
+naming the paired computer that asked. v1 is unchanged. Tests live in
+`crates/cingulate-vectors/tests/forwarded_secrets.rs`; vectors in
+`secret-use-approval-v2` and `flow-install-secrets-v2`.
+
 Version 0.13.0 adds [flow-install secret approvals](contracts/consent-requester-v2.md#flow-install-secret-approvals-0130)
 under `flow-install-secrets/v1`: core files paired `flow_identity` and `secrets`
 inside the otherwise opaque install body. Closed canonical vault statements
