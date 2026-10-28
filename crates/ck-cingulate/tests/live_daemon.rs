@@ -11,7 +11,9 @@ use std::{
 
 use async_trait::async_trait;
 use cingulate_store::ScopeIdentity;
-use ck_cingulate::{AccessRuntime, DaemonAccessRuntime, Handler, Options, ScopeLife};
+use ck_cingulate::{
+    AccessRuntime, DaemonAccessRuntime, Handler, Options, ScopeLife, DEVELOPMENT_LOCAL_OPERATOR,
+};
 use cortexkit_test_support::{process_alive, ScratchDir};
 use serde_json::{json, Value};
 use subc_client_rs::{
@@ -55,7 +57,7 @@ impl Drop for Task {
 }
 
 // All peers run in the test process instead of spawned binaries. The fixture
-// seeds supervisor spawn nonces for the scope owner, carrier and stranger, plus
+// seeds supervisor spawn nonces for the scope owner and module callers, plus
 // the owner's reserved nonce. Authentication, HELLO, scope.sync, route.open,
 // route.bind and consent requests still cross authenticated loopback TCP.
 struct Fixture {
@@ -65,6 +67,7 @@ struct Fixture {
     owner: TcpStream,
     project: PathBuf,
     connection_path: PathBuf,
+    store_path: PathBuf,
     _scratch: ScratchDir,
 }
 
@@ -157,7 +160,7 @@ impl Fixture {
         assert!(process_alive(i32::try_from(published.pid).unwrap()));
 
         let supervisor = SupervisorHandle::new();
-        for id in [OWNER, "plexus", "stranger", "callosum"] {
+        for id in [OWNER, "plexus", "stranger", "callosum", "aft", "occipital"] {
             supervisor.set_spawn_nonce(id, format!("test-launch-{id}"));
         }
         supervisor.set_reserved_nonce(OWNER, format!("test-launch-{OWNER}"));
@@ -182,6 +185,11 @@ impl Fixture {
             }
         }))];
 
+        let cingulate_store::StorageBackend::Sqlite { path: store_path } =
+            cingulate_store::storage_descriptor(None, data.to_str().unwrap()).backend
+        else {
+            panic!("scratch SQLite store")
+        };
         let handler = Handler::new(Options {
             data_home: data.to_str().unwrap().into(),
             sweep_timer: false,
@@ -246,6 +254,7 @@ impl Fixture {
             owner,
             project,
             connection_path,
+            store_path: store_path.into(),
             _scratch: scratch,
         }
     }
@@ -270,7 +279,8 @@ impl Fixture {
     async fn sync(&mut self, generation: u64, epoch: u64) {
         let record = ScopeRecord::new("head-session", epoch, ScopeKind::Head)
             .with_carriers(vec![
-                ScopeCarrier::new(principal("plexus")).with_targets(Some(vec!["cingulate".into()]))
+                ScopeCarrier::new(principal("plexus")).with_targets(Some(vec!["cingulate".into()])),
+                ScopeCarrier::new(principal("aft")).with_targets(Some(vec!["cingulate".into()])),
             ])
             .with_attributes(ScopeAttributes::new().with_agent_id(Some("agent-live".into())));
         let reply = control(
@@ -324,6 +334,22 @@ impl Fixture {
         ))
         .await
         .map(|bytes| serde_json::from_slice::<Value>(&bytes).unwrap()["result"].clone())
+    }
+
+    fn stored<T: serde::de::DeserializeOwned>(&self, table: &str, id: &str) -> T {
+        let db = rusqlite::Connection::open_with_flags(
+            &self.store_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let raw: String = db
+            .query_row(
+                &format!("SELECT record_json FROM {table} WHERE elicitation_id=?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&raw).unwrap()
     }
 
     async fn stop(mut self) {
@@ -705,34 +731,115 @@ async fn live_daemon_scope_stamp_owns_card_and_separates_epochs() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn live_daemon_direct_routes_cannot_answer_even_with_phone_harness() {
-    let fixture = Fixture::start().await;
+async fn live_daemon_direct_operator_follows_development_switch_without_phone_identity() {
+    let mut fixture = Fixture::start().await;
+    fixture.sync(1, 1).await;
+    let aft = bounded(fixture.consumer.open_route_scoped(
+        target(),
+        fixture.identity("aft"),
+        ScopeSelector::new(principal(OWNER), "head-session", Some(1)),
+        call_options(Some("aft")),
+    ))
+    .await
+    .unwrap();
     let route = fixture.open(None, "plain-direct").await;
-    let id = fixture
-        .request(&route, "consent.request", card())
-        .await
-        .unwrap()["elicitation_id"]
-        .clone();
-    for harness in ["plain-direct", "fed-phone:forged"] {
+    let device = "300c9c9603b92a4b39ed3958bf924011";
+    for harness in ["plain-direct", &format!("fed-phone:{device}")] {
+        let id = fixture
+            .request(&route, "consent.request", card())
+            .await
+            .unwrap()["elicitation_id"]
+            .clone();
         let answer_route = fixture.open(None, harness).await;
-        refused(
+        let answer = fixture
+            .request(
+                &answer_route,
+                "consent.answer",
+                json!({"elicitationId": id, "choiceId": "allow_once"}),
+            )
+            .await;
+        if DEVELOPMENT_LOCAL_OPERATOR {
+            assert_eq!(answer.unwrap()["ok"], true);
+            let record: cingulate_store::ElicitationRecord =
+                fixture.stored("elicitation_records", id.as_str().unwrap());
+            assert_eq!(record.answered_choice_id.as_deref(), Some("allow_once"));
+            assert_eq!(record.answered_device, None);
+
+            let permission = fixture.request(&aft, "consent.request", json!({
+                "kind":"tool_permission", "call_key":harness, "tool":"bash", "operation":"exec",
+                "paths":[], "command":"pwd", "reason":"Inspect folder", "args_hash":"hash",
+                "schema_pin":"schema-1", "pattern":"pwd"
+            })).await.unwrap()["elicitation_id"].clone();
+            assert_eq!(
+                fixture
+                    .request(
+                        &answer_route,
+                        "consent.answer",
+                        json!({"elicitationId":permission,"choiceId":"allow_once"})
+                    )
+                    .await
+                    .unwrap()["ok"],
+                true
+            );
+            let audit: cingulate_store::AccessRecord =
+                fixture.stored("access_asks", permission.as_str().unwrap());
+            assert_eq!(audit.attempts.len(), 1);
+            assert_eq!(audit.attempts[0].principal, "direct");
+            assert_eq!(audit.attempts[0].device, None);
+            assert_eq!(audit.attempts[0].result, "accepted");
+        } else {
+            refused(answer, "elicitation_operator_required");
+        }
+        assert_eq!(
             fixture
-                .request(
-                    &answer_route,
-                    "consent.answer",
-                    json!({"elicitationId": id, "choiceId": "allow_once"}),
-                )
-                .await,
-            "elicitation_operator_required",
+                .request(&route, "consent.get", json!({"elicitation_id": id}))
+                .await
+                .unwrap()["state"],
+            if DEVELOPMENT_LOCAL_OPERATOR {
+                "answered"
+            } else {
+                "pending"
+            }
         );
     }
-    assert_eq!(
-        fixture
-            .request(&route, "consent.get", json!({"elicitation_id": id}))
+    if DEVELOPMENT_LOCAL_OPERATOR {
+        let occipital = fixture.open(Some("occipital"), "provider").await;
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let id = fixture.request(&occipital, "consent.request", json!({
+            "kind":"rich_ui_approval", "title":"Approve provider", "prompt":"Review on this phone",
+            "default":"deny", "on_expiry":"deny", "urgency":"normal", "material_damage":false,
+            "late_execution":"notify_only", "scope":{}, "target":{"kind":"provider","label":"Weather"},
+            "options":[{"id":"approve","label":"Approve","effect":"grant"},{"id":"deny","label":"Decline","effect":"decline"}],
+            "rich_ui_approval":{"provider":"weather", "device":device, "manifestDigest":digest,
+                "capabilityDigest":digest, "approvalDigest":digest}
+        })).await.unwrap()["elicitation_id"].clone();
+        let forged = fixture.open(None, &format!("fed-phone:{device}")).await;
+        let params = json!({"elicitationId":id,"clientFeatures":["rich-ui-approval"]});
+        refused(
+            fixture
+                .request(&forged, "consent.get", params.clone())
+                .await,
+            "elicitation_not_found",
+        );
+        let mut answer = params;
+        answer["choiceId"] = json!("deny");
+        assert_eq!(
+            fixture
+                .request(&forged, "consent.answer", answer)
+                .await
+                .unwrap(),
+            json!({"ok":false,"code":"not_found"})
+        );
+        let pending = fixture
+            .request(
+                &forged,
+                "consent.list_pending",
+                json!({"clientFeatures":["rich-ui-approval"]}),
+            )
             .await
-            .unwrap()["state"],
-        "pending"
-    );
+            .unwrap();
+        assert_eq!(pending["records"], json!([]));
+    }
     fixture.stop().await;
 }
 

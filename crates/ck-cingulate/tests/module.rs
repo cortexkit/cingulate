@@ -8,17 +8,19 @@ use std::{
 
 use async_trait::async_trait;
 use cingulate_store::{ConsentStore, Isolation, StorageBackend, StorageDescriptor, RETENTION_MS};
-use ck_cingulate::{AwaitHook, Clock, Handler, Notifier, Options, ResolvedAgent, Resolver, Stamp};
+use ck_cingulate::{
+    AwaitHook, Clock, Handler, Notifier, Options, ResolvedAgent, Resolver, Stamp, WatchSink,
+};
 use rusqlite::{types::Value as SqlValue, Connection};
 use serde_json::{json, Value};
-use subc_client_rs::HandlerOutcome;
+use subc_client_rs::{HandlerOutcome, RouteBindRequest, RouteHandle};
 use subc_protocol::{
     manifest::{Concurrency, ManagementOperationKind, ProviderRole},
     session::HealthStatus,
-    ModuleHelloAckBody, Principal,
+    BindIdentity, ModuleHelloAckBody, Principal, RouteTarget,
 };
 use tempfile::TempDir;
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{mpsc, watch, Semaphore};
 
 struct TestClock {
     time: watch::Sender<i64>,
@@ -396,6 +398,36 @@ fn operator() -> Stamp {
         operator_surface: true,
         ..stamp("reserved:callosum")
     }
+}
+fn bound_surface(principal: Principal, harness: &str) -> Stamp {
+    Stamp::from_bind(
+        &RouteBindRequest::new(
+            RouteHandle::detached(1, 1),
+            RouteTarget::ManagementSurface {
+                module_id: "cingulate".into(),
+            },
+            BindIdentity::new("/scratch", harness, "desktop-session"),
+        )
+        .with_principal(principal),
+    )
+}
+struct OperatorWatch(mpsc::UnboundedSender<Value>);
+#[async_trait]
+impl WatchSink for OperatorWatch {
+    async fn emit(&self, item: Vec<u8>) -> Result<(), String> {
+        self.0
+            .send(serde_json::from_slice(&item).unwrap())
+            .map_err(|error| error.to_string())
+    }
+    async fn ended(&self) {
+        std::future::pending::<()>().await;
+    }
+}
+async fn next_operator_item(items: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), items.recv())
+        .await
+        .expect("operator watch item deadline")
+        .expect("operator watch remains open")
 }
 fn carrier() -> Stamp {
     Stamp {
@@ -869,6 +901,292 @@ async fn owner_principal_and_operator_refusals_write_nothing() {
         .contains("unknown field `unknown`"));
     assert_eq!(f.get(&due).await["state"], "expired");
     assert_eq!(f.counts(), (1, 1));
+}
+
+#[tokio::test]
+async fn development_local_operator_direct_lists_gets_and_answers_ordinary_card() {
+    let f = Fixture::open(None).await;
+    let id = f.request(&carrier(), body()).await;
+    let local = bound_surface(Principal::Direct, "alfonso-desktop");
+    let answer = ok(
+        &f.handler,
+        &local,
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+    )
+    .await;
+    assert_eq!(answer["ok"], true);
+    assert_eq!(
+        ok(
+            &f.handler,
+            &local,
+            "consent.get",
+            json!({"elicitationId":id})
+        )
+        .await["state"],
+        "answered"
+    );
+    let record: String = f
+        .db()
+        .query_row(
+            "SELECT record_json FROM elicitation_records WHERE elicitation_id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let record: cingulate_store::ElicitationRecord = serde_json::from_str(&record).unwrap();
+    assert_eq!(record.answered_choice_id.as_deref(), Some("allow_once"));
+    assert_eq!(record.answered_at_ms, Some(1000));
+    assert_eq!(record.answered_device, None);
+    let pending_id = f.request(&carrier(), body()).await;
+    let pending = ok(&f.handler, &local, "consent.list_pending", json!({})).await;
+    assert_eq!(pending["records"].as_array().unwrap().len(), 1);
+    assert_eq!(pending["records"][0]["elicitationId"], pending_id);
+    let card = ok(
+        &f.handler,
+        &local,
+        "consent.get",
+        json!({"elicitationId":pending_id}),
+    )
+    .await;
+    assert_eq!(card["elicitationId"], pending_id);
+}
+
+#[tokio::test]
+async fn development_local_operator_keeps_direct_requester_operations() {
+    let f = Fixture::open(None).await;
+    let local = bound_surface(Principal::Direct, "alfonso-desktop");
+    let id = f.request(&local, body()).await;
+    let record = ok(
+        &f.handler,
+        &local,
+        "consent.get",
+        json!({"elicitation_id":id,"clientFeatures":false}),
+    )
+    .await;
+    assert_eq!(record["elicitation_id"], id);
+    assert_eq!(record["state"], "pending");
+    assert!(record.get("elicitationId").is_none());
+    let phone = bound_surface(
+        Principal::Reserved {
+            module_id: "callosum".into(),
+        },
+        "fed-phone:0123456789abcdef0123456789abcdef",
+    );
+    assert_eq!(
+        f.unchanged_error(
+            &phone,
+            "consent.get",
+            json!({"elicitation_id":id}),
+            "elicitation_invalid_request",
+        )
+        .await,
+        "elicitationId must be a string"
+    );
+    assert_eq!(
+        ok(
+            &f.handler,
+            &local,
+            "consent.await",
+            json!({"elicitation_id":id,"timeout_ms":0}),
+        )
+        .await["state"],
+        "pending"
+    );
+    ok(
+        &f.handler,
+        &local,
+        "consent.detach",
+        json!({"elicitation_id":id}),
+    )
+    .await;
+    assert_eq!(
+        ok(
+            &f.handler,
+            &local,
+            "consent.withdraw",
+            json!({"elicitation_id":id})
+        )
+        .await["state"],
+        "withdrawn"
+    );
+    let other_id = f.request(&carrier(), body()).await;
+    f.unchanged_error(
+        &local,
+        "consent.get",
+        json!({"elicitation_id":other_id}),
+        "elicitation_not_owner",
+    )
+    .await;
+    assert_eq!(
+        ok(
+            &f.handler,
+            &local,
+            "consent.get",
+            json!({"elicitationId":other_id})
+        )
+        .await["elicitationId"],
+        other_id
+    );
+}
+
+#[tokio::test]
+async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_watch() {
+    let secret: Value = serde_json::from_str(include_str!(
+        "../../../test-vectors/secret-use-approval-v1/filer-request.json"
+    ))
+    .unwrap();
+    let flow: Value = serde_json::from_str(include_str!(
+        "../../../test-vectors/flow-install-secrets-v1/filing.json"
+    ))
+    .unwrap();
+    let device = "300c9c9603b92a4b39ed3958bf924011";
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let rich_ui = json!({
+        "kind":"rich_ui_approval", "title":"Approve provider interface",
+        "prompt":"Review on this phone", "default":"deny", "on_expiry":"deny",
+        "options":[{"id":"approve","label":"Approve","effect":"grant"},
+                   {"id":"deny","label":"Decline","effect":"decline"}],
+        "urgency":"normal", "material_damage":false, "late_execution":"notify_only",
+        "scope":{"provider":"weather-tools"}, "target":{"kind":"provider","label":"Weather tools"},
+        "rich_ui_approval":{"provider":"weather-tools", "device":device,
+            "manifestDigest":digest, "capabilityDigest":digest, "approvalDigest":digest}
+    });
+    let features = json!(["secret-use-approval", "rich-ui-approval"]);
+    for (module, request, decline) in [
+        ("aft", secret["params"].clone(), "decline"),
+        ("prefrontal-core", flow["params"].clone(), "decline"),
+        ("occipital", rich_ui, "deny"),
+    ] {
+        let f = Fixture::open(None).await;
+        f.clock.set(1_700_000_000_000);
+        let local = bound_surface(Principal::Direct, &format!("fed-phone:{device}"));
+        let (send, mut items) = mpsc::unbounded_channel();
+        let handler = f.handler.clone();
+        let watcher = local.clone();
+        let params = json!({"method":"consent.watch_pending","params":{"clientFeatures":features}});
+        let watch = tokio::spawn(async move {
+            handler
+                .handle_watch_stamped(
+                    &watcher,
+                    &serde_json::to_vec(&params).unwrap(),
+                    &OperatorWatch(send),
+                )
+                .await
+        });
+        assert_eq!(
+            next_operator_item(&mut items).await,
+            json!({"type":"reread"})
+        );
+        let requester = Stamp {
+            scope: Some(
+                serde_json::from_value(json!({
+                    "owner":{"kind":"reserved","module_id":"prefrontal-core"},
+                    "ref":"H", "scope_epoch":7, "kind":"head",
+                    "attributes":{"agent_id":"agent-A"}, "owner_authorized":true
+                }))
+                .unwrap(),
+            ),
+            carried_agent_id: "agent-A".into(),
+            ..stamp(&format!("reserved:{module}"))
+        };
+        let hidden_id = f.request(&requester, request).await;
+        let phone = bound_surface(
+            Principal::Reserved {
+                module_id: "callosum".into(),
+            },
+            &format!("fed-phone:{device}"),
+        );
+        let phone_list = ok(
+            &f.handler,
+            &phone,
+            "consent.list_pending",
+            json!({"clientFeatures":features}),
+        )
+        .await;
+        assert_eq!(
+            phone_list["records"].as_array().unwrap().len(),
+            1,
+            "{module}"
+        );
+        assert_eq!(phone_list["records"][0]["elicitationId"], hidden_id);
+        assert_eq!(
+            ok(
+                &f.handler,
+                &local,
+                "consent.list_pending",
+                json!({"clientFeatures":features})
+            )
+            .await["records"],
+            json!([]),
+            "{module}"
+        );
+        f.unchanged_error(
+            &local,
+            "consent.get",
+            json!({"elicitationId":hidden_id,"clientFeatures":features}),
+            "elicitation_not_found",
+        )
+        .await;
+        for choice in [
+            decline,
+            if module == "occipital" {
+                "approve"
+            } else if module == "aft" {
+                "allow"
+            } else {
+                "install"
+            },
+        ] {
+            let mut answer =
+                json!({"elicitationId":hidden_id,"choiceId":choice,"clientFeatures":features});
+            if module == "occipital" {
+                answer["bindDigest"] = json!(digest);
+                let before = f.rows();
+                assert_eq!(
+                    ok(&f.handler, &local, "consent.answer", answer).await,
+                    json!({"ok":false,"code":"not_found"})
+                );
+                assert_eq!(f.rows(), before);
+            } else {
+                f.unchanged_error(
+                    &local,
+                    "consent.answer",
+                    answer,
+                    "elicitation_secret_use_approval_required",
+                )
+                .await;
+            }
+        }
+        let ordinary_id = f.request(&carrier(), body()).await;
+        let changed = next_operator_item(&mut items).await;
+        assert_eq!(changed["type"], "changed");
+        assert_eq!(changed["card"]["elicitationId"], ordinary_id, "{module}");
+        ok(
+            &f.handler,
+            &requester,
+            "consent.withdraw",
+            json!({"elicitation_id":hidden_id}),
+        )
+        .await;
+        ok(
+            &f.handler,
+            &local,
+            "consent.answer",
+            json!({"elicitationId":ordinary_id,"choiceId":"allow_once"}),
+        )
+        .await;
+        let changed = next_operator_item(&mut items).await;
+        assert_eq!(changed["type"], "changed");
+        assert_eq!(changed["card"]["elicitationId"], ordinary_id, "{module}");
+        assert_eq!(changed["card"]["state"], "answered");
+        f.handler.stop_watches();
+        assert_eq!(watch.await.unwrap(), HandlerOutcome::Streamed);
+        assert!(
+            items.try_recv().is_err(),
+            "phone-only changes must not leak"
+        );
+    }
 }
 
 #[tokio::test]

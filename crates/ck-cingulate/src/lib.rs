@@ -200,6 +200,11 @@ pub fn manifest() -> ModuleManifest {
         .build()
 }
 
+/// During development, no caller check may block an app or module being built,
+/// so plain local programs (`Principal::Direct`) may act as the operator surface.
+/// Set to false before public release.
+pub const DEVELOPMENT_LOCAL_OPERATOR: bool = true;
+
 /// Requester, session and subject identity taken from the daemon's route bind,
 /// never from a consent request body.
 #[derive(Debug, Default, Clone)]
@@ -210,6 +215,8 @@ pub struct Stamp {
     pub bind_session: String,
     pub carried_agent_id: String,
     pub operator_surface: bool,
+    /// Operator authority supplied by the development opening, not by a phone.
+    pub local_operator: bool,
     pub sim_surface: bool,
     pub console_machine_id: Option<String>,
 }
@@ -229,6 +236,10 @@ impl Stamp {
     }
 
     pub fn from_bind(req: &RouteBindRequest) -> Self {
+        Self::from_bind_with_local_operator(req, DEVELOPMENT_LOCAL_OPERATOR)
+    }
+
+    fn from_bind_with_local_operator(req: &RouteBindRequest, local_operator: bool) -> Self {
         let mut stamp = Self::from_principal(req.principal.as_ref());
         stamp.scope = req.scope.clone();
         stamp.harness = req.identity.harness.clone();
@@ -240,15 +251,29 @@ impl Stamp {
                     .expect("scope identity serialization");
             stamp.carried_agent_id = scope.attributes.agent_id.clone().unwrap_or_default();
         }
-        // Only Callosum's phone routes may answer or list pending cards. The
-        // fed-phone: harness prefix restricts that principal, not any other caller.
-        stamp.operator_surface =
-            stamp.label() == "reserved:callosum" && req.identity.harness.starts_with("fed-phone:");
+        // Callosum's phone routes retain operator authority independently of the
+        // development opening for daemon-stamped plain local programs.
+        stamp.local_operator = local_operator && matches!(req.principal, Some(Principal::Direct));
+        stamp.operator_surface = (stamp.label() == "reserved:callosum"
+            && req.identity.harness.starts_with("fed-phone:"))
+            || stamp.local_operator;
         // Simulators can read the permissions inventory, but cannot narrow grants
         // or answer cards. Keep this separate from consent's phone authority.
         stamp.sim_surface =
             stamp.label() == "reserved:callosum" && req.identity.harness.starts_with("fed-sim:");
         stamp
+    }
+
+    // Local programs retain their requester operations. Only the camelCase get
+    // form selects the operator projection; phone routes keep their dispatch.
+    fn operator_handles(&self, method: &str, params: &Value) -> bool {
+        self.operator_surface
+            && (!self.local_operator
+                || matches!(
+                    method,
+                    "consent.answer" | "consent.list_pending" | WATCH_PENDING
+                )
+                || (method == "consent.get" && params.get("elicitationId").is_some()))
     }
 
     fn label(&self) -> &str {
@@ -913,9 +938,10 @@ impl Handler {
         if let Some(reply) = self.access_dispatch(stamp, method, &params).await {
             return reply;
         }
+        let operator_surface = stamp.operator_handles(method, &params);
         match method {
             "consent.answer" | "consent.list_pending" | "consent.watch_pending" => operator(stamp)?,
-            "consent.get" if stamp.operator_surface => {}
+            "consent.get" if operator_surface => {}
             "consent.outcomes" => {
                 if stamp.label() != "reserved:prefrontal-core" {
                     return Err(stamp.refuse());
@@ -932,7 +958,7 @@ impl Handler {
             ));
         }
         let option_group = if matches!(method, "consent.answer" | "consent.list_pending")
-            || (method == "consent.get" && stamp.operator_surface)
+            || (method == "consent.get" && operator_surface)
         {
             option_group_declared(&params)?
         } else {
@@ -959,7 +985,7 @@ impl Handler {
             return Ok(json!({"elicitation_id": result.record.elicitation_id}));
         }
         let id = match method {
-            "consent.get" if stamp.operator_surface => Some(text(&params, "elicitationId")?),
+            "consent.get" if operator_surface => Some(text(&params, "elicitationId")?),
             "consent.answer" | "consent.revoke" => Some(text(&params, "elicitationId")?),
             "consent.get"
             | "consent.await"
@@ -989,7 +1015,7 @@ impl Handler {
                 | "consent.revoke"
                 | "consent.detach"
                 | "consent.report_execution"
-        ) && !(method == "consent.get" && stamp.operator_surface)
+        ) && !(method == "consent.get" && operator_surface)
         {
             let owner = self
                 .with_store(|store| store.owner(id.expect("owner id")))
@@ -1055,7 +1081,7 @@ impl Handler {
         let now = self.inner.options.clock.now_ms();
         let rich_ui = feature_declared(&params, "rich-ui-approval");
         let secret_use = feature_declared(&params, "secret-use-approval");
-        if method == "consent.answer" || (method == "consent.get" && stamp.operator_surface) {
+        if method == "consent.answer" || (method == "consent.get" && operator_surface) {
             if let Some(record) = store
                 .get_phone(id.expect("phone id"), now)
                 .map_err(store_error)?
@@ -1158,7 +1184,7 @@ impl Handler {
         };
         let result: Reply = (|| {
             Ok(match method {
-                "consent.get" if stamp.operator_surface => {
+                "consent.get" if operator_surface => {
                     let record = store
                         .get_phone(id.expect("get id"), now)
                         .map_err(store_error)?
@@ -1629,6 +1655,54 @@ mod tests {
         .with_principal(Principal::Reserved {
             module_id: principal.into(),
         })
+    }
+
+    #[test]
+    fn development_local_operator_bind_switch_preserves_phone_boundaries() {
+        let phone_harness = "fed-phone:0123456789abcdef0123456789abcdef";
+        for harness in ["local-desktop", phone_harness, "fed-sim:ignored"] {
+            let req = bind("unused", harness).with_principal(Principal::Direct);
+            for enabled in [false, true] {
+                let stamp = Stamp::from_bind_with_local_operator(&req, enabled);
+                assert_eq!(stamp.operator_surface, enabled);
+                assert_eq!(stamp.local_operator, enabled);
+                assert_eq!(operator(&stamp).is_ok(), enabled);
+                assert!(!stamp.sim_surface);
+                assert_eq!(stamp.answering_device(), None);
+                assert_eq!(stamp.secret_use_phone(), None);
+            }
+        }
+        for req in [
+            bind("plexus", phone_harness),
+            bind("unused", phone_harness).with_principal(Principal::Unverified),
+            {
+                let mut req = bind("unused", phone_harness);
+                req.principal = None;
+                req
+            },
+            bind("callosum", "fed-sim:0123456789abcdef0123456789abcdef"),
+        ] {
+            for enabled in [false, true] {
+                let stamp = Stamp::from_bind_with_local_operator(&req, enabled);
+                assert!(!stamp.operator_surface);
+                assert!(!stamp.local_operator);
+                assert_eq!(
+                    stamp.sim_surface,
+                    stamp.label() == "reserved:callosum" && stamp.harness.starts_with("fed-sim:")
+                );
+            }
+        }
+        for enabled in [false, true] {
+            let stamp =
+                Stamp::from_bind_with_local_operator(&bind("callosum", phone_harness), enabled);
+            assert!(stamp.operator_surface);
+            assert!(!stamp.local_operator);
+            assert!(!stamp.sim_surface);
+            assert_eq!(
+                stamp.secret_use_phone(),
+                Some("0123456789abcdef0123456789abcdef")
+            );
+        }
     }
 
     #[tokio::test]

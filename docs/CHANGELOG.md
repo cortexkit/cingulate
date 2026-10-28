@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.13.2 (ck-cingulate)
+
+- Open ordinary operator cards to daemon-stamped `Principal::Direct` local
+  programs during development with the code-only `DEVELOPMENT_LOCAL_OPERATOR`
+  switch. Local programs can list, get, answer and watch cards without a device
+  fingerprint. Permission answer audits retain the real principal `direct`.
+  Set the switch to false before public release.
+- Keep secret-use cards, flow installs carrying secrets and device-bound rich UI
+  approvals hidden and unanswerable locally. Simulators, unverified callers and
+  other reserved modules gain no operator authority.
+- Preserve local callers' requester operations: `consent.get` selects the operator
+  projection only for the `elicitationId` form, and permission requester operations
+  keep their ownership checks. Live daemon coverage follows the development switch
+  without granting a local caller phone identity.
+
+## 0.5.1 (cingulate-store)
+
+- Accept explicitly route-authorized operator answers on the permission user leg,
+  preserving the real audit principal and optional device. Existing phone answers
+  remain valid; head-leg and all other answer checks are unchanged.
+
 ## 0.13.1 (ck-cingulate)
 
 - Accept v2 vault statements. When an agent or flow on another paired computer

@@ -1381,6 +1381,69 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
 }
 
 #[test]
+fn development_local_operator_permission_answer_requires_explicit_authority() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let identity = cingulate_store::AccessIdentity {
+        principal: "reserved:aft".into(),
+        scope_owner: Some("reserved:prefrontal-core".into()),
+        asker: cingulate_store::ScopeIdentity {
+            scope_ref: "head".into(),
+            scope_epoch: 1,
+            agent_id: Some("agent".into()),
+        },
+        scope_kind: "head".into(),
+        harness: "test".into(),
+        head: None,
+    };
+    let request = cingulate_decode::AccessRequest::decode(json!({
+        "kind":"tool_permission", "call_key":"local-user", "tool":"read",
+        "operation":"read", "paths":["/scratch/file"], "reason":"Read file",
+        "args_hash":"hash", "pattern":"/scratch/file"
+    }))
+    .unwrap();
+    let id = store
+        .access_create(identity, request, 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    let answer = || cingulate_store::AccessAnswer {
+        surface: "user".into(),
+        principal: "direct".into(),
+        answer: "allow_once".into(),
+        note: None,
+        answered_by: None,
+    };
+    let refused = store
+        .access_answer_from_operator(&id, answer(), None, false, 101)
+        .unwrap()
+        .unwrap();
+    assert_eq!(refused.code.as_deref(), Some("access_wrong_leg"));
+    assert!(!refused.changed);
+    assert_eq!(refused.record.state, "pending:user");
+    let accepted = store
+        .access_answer_from_operator(&id, answer(), None, true, 102)
+        .unwrap()
+        .unwrap();
+    assert_eq!(accepted.code, None);
+    assert!(accepted.changed);
+    assert_eq!(accepted.record.state, "settled");
+    assert_eq!(accepted.record.outcome.as_deref(), Some("allow_once"));
+    for (attempt, result) in accepted
+        .record
+        .attempts
+        .iter()
+        .zip(["access_wrong_leg", "accepted"])
+    {
+        assert_eq!(attempt.principal, "direct");
+        assert_eq!(attempt.surface, "user");
+        assert_eq!(attempt.device, None);
+        assert_eq!(attempt.result, result);
+    }
+    assert_eq!(accepted.record.attempts.len(), 2);
+}
+
+#[test]
 fn no_deadline_survives_future_sweep_refresh_restart_and_late_answer() {
     let scratch = Scratch::new();
     let mut owner = identity("direct", "s");

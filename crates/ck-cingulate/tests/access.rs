@@ -118,6 +118,18 @@ fn phone() -> Stamp {
         .with_principal(principal("callosum")),
     )
 }
+fn local_operator() -> Stamp {
+    Stamp::from_bind(
+        &RouteBindRequest::new(
+            RouteHandle::detached(3, 1),
+            RouteTarget::ManagementSurface {
+                module_id: "cingulate".into(),
+            },
+            BindIdentity::new("/scratch", "alfonso-desktop", "desktop"),
+        )
+        .with_principal(Principal::Direct),
+    )
+}
 fn core() -> Stamp {
     Stamp::from_principal(Some(&principal("prefrontal-core")))
 }
@@ -461,6 +473,87 @@ async fn phone_cannot_answer_or_fetch_head_leg() {
         f.ok(&phone(), "consent.list_pending", json!({})).await["records"],
         json!([])
     );
+}
+
+#[tokio::test]
+async fn development_local_operator_permission_answers_keep_identity_and_head_boundary() {
+    let f = Fixture::new(true).await;
+    let local = local_operator();
+    let id = f.ask(&stamp("aft", ScopeKind::Head), request(None)).await;
+    let pending = f.ok(&local, "consent.list_pending", json!({})).await;
+    assert_eq!(pending["records"][0]["elicitationId"], id);
+    assert_eq!(
+        f.ok(
+            &local,
+            "consent.answer",
+            json!({"elicitationId":id,"choiceId":"allow_once"}),
+        )
+        .await["ok"],
+        true
+    );
+    let audit = f.audit(&id);
+    assert_eq!(audit["state"], "settled");
+    assert_eq!(audit["outcome"], "allow_once");
+    assert_eq!(audit["attempts"][0]["surface"], "user");
+    assert_eq!(audit["attempts"][0]["principal"], "direct");
+    assert_eq!(audit["attempts"][0]["result"], "accepted");
+    assert!(audit["attempts"][0]["device"].is_null());
+
+    let mut worker_request = request(Some("allow"));
+    worker_request["call_key"] = json!("worker-head-leg");
+    let head_id = f
+        .ask(&stamp("aft", ScopeKind::Worker), worker_request)
+        .await;
+    assert_eq!(
+        f.ok(
+            &local,
+            "consent.answer",
+            json!({"elicitationId":head_id,"choiceId":"allow_once"}),
+        )
+        .await["code"],
+        "access_wrong_leg"
+    );
+    assert_eq!(f.audit(&head_id)["state"], "pending:head");
+    assert_eq!(
+        f.call(&local, "consent.get", json!({"elicitationId":head_id}))
+            .await
+            .unwrap_err(),
+        "elicitation_not_found"
+    );
+    assert_eq!(
+        f.ok(&local, "consent.list_pending", json!({})).await["records"],
+        json!([])
+    );
+}
+
+#[tokio::test]
+async fn development_local_operator_permission_requester_forms_keep_owner_checks() {
+    let f = Fixture::new(true).await;
+    let local = local_operator();
+    let id = f.ask(&stamp("aft", ScopeKind::Head), request(None)).await;
+    for method in [
+        "consent.get",
+        "consent.await",
+        "consent.withdraw",
+        "consent.detach",
+    ] {
+        let params = json!({"elicitation_id":id,"timeout_ms":0});
+        assert_eq!(
+            f.call(&local, method, params).await.unwrap_err(),
+            "elicitation_not_owner",
+            "{method}"
+        );
+        if method != "consent.get" {
+            assert_eq!(
+                f.call(&local, method, json!({"elicitationId":id,"timeout_ms":0}))
+                    .await
+                    .unwrap_err(),
+                "elicitation_not_owner",
+                "{method}"
+            );
+        }
+    }
+    assert_eq!(f.audit(&id)["state"], "pending:user");
 }
 #[tokio::test]
 async fn wrong_head_or_epoch_or_agent_leaves_ask_pending() {

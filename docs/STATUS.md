@@ -7,6 +7,15 @@ contract is written ahead of implementation. Cingulate serves the aggregator
 side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
 serve the capability itself.
 
+During development, no caller check may block an app or module being built, so
+version 0.13.2 opens the operator surface to daemon-stamped plain local programs
+(`Principal::Direct`) through the single code switch `DEVELOPMENT_LOCAL_OPERATOR`.
+Local answers have no device fingerprint; permission answer audits retain `direct`.
+Secret-use cards, flow
+installs carrying secrets and device-bound rich UI approvals remain hidden and
+unanswerable locally. Set the switch to false before public release; it is not a
+configuration setting.
+
 Version 0.13.1 accepts [forwarded v2 vault statements](contracts/consent-requester-v2.md#forwarded-secret-statements-v2-0131)
 on `secret_use` and flow-install cards: the v1 statement plus `asking_member_id`,
 naming the paired computer that asked. v1 is unchanged. Tests live in
@@ -48,7 +57,7 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | `consent.report_execution` | mutate | The owner, after a granted card was acted on. |
 | `consent.withdraw` | mutate | The owner settles its own pending card. |
 | `consent.revoke` | mutate | The owner revokes a granted `rich_ui_approval`. Only `reserved:occipital` may request this kind. |
-| `consent.watch_pending` | query/watch | Phone operator routes, filtered by feature and device for `rich_ui_approval` and, for `secret_use`, only `reserved:callosum` routes whose harness is `fed-phone:` plus 32 lowercase hex and whose client advertises `secret-use-approval`. |
+| `consent.watch_pending` | query/watch | Operator routes (including local `direct` during development), filtered by feature and device for `rich_ui_approval` and, for `secret_use`, only `reserved:callosum` routes whose harness is `fed-phone:` plus 32 lowercase hex and whose client advertises `secret-use-approval`. |
 | `consent.answer` | mutate | Operator surfaces only (`operator`, `lib.rs:279-288`). |
 | `consent.list_pending` | query | Operator surfaces only. |
 | `consent.outcomes` | query | `reserved:prefrontal-core` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |
@@ -151,31 +160,27 @@ system temp directory.
 | Consumer | Operations | Where the code or vectors show it |
 |---|---|---|
 | prefrontal-core | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (core's dispatch is the source of the requester shapes) |
-| Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `operator_surface` requires `reserved:callosum` and the literal `fed-phone:` harness prefix (`Stamp::from_bind`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
+| Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `reserved:callosum` and the literal `fed-phone:` harness prefix retain `operator_surface` independently of the local development switch (`Stamp::from_bind`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
 | Plexus | Requester of `consent` cards as a carrier, then owner ops | `allowed_kind` (`lib.rs:106`), carrier check (`lib.rs:498-504`); `test-vectors/elicitation-requester-v1/README.md` names `reserved:plexus` as the requester |
 | Basal | Requester of `flow_decision` cards, then owner ops | `allowed_kind` (`lib.rs:110`) |
 | Cerebellum, Entorhinal | Requesters of `consent` cards as carriers | `allowed_kind` (`lib.rs:106`) |
-| Local `direct` callers | Requester of `consent` cards, labelled "an unverified local process" | `allowed_kind` (`lib.rs:106`), label (`lib.rs:535-536`) |
+| Local `direct` callers | Requester of `consent` cards, labelled "an unverified local process"; ordinary operator cards during development | `allowed_kind`, label, and `DEVELOPMENT_LOCAL_OPERATOR` in `Stamp::from_bind` |
 
 ## Known gaps
 
-From SUBC. An operation admitted on the local operator's `direct` route proves
-only that the caller runs as the operator's user. Any local process connects as
-`direct`, an agent's shell included. Admitting a card answer there would be a
-self-approval door: an agent could answer its own head's card. This is the same
-open gap as §5.8 and §5.10 of the elevation design (`docs/designs/operator-elevation.md`
-in the private `cortexkit/subconscious-design` repository). It
-closes with the runtime cell (separate runtime user accounts) or a program check
-on the caller. It is not a v1 blocker, and it must not be read as a guarantee.
+An operation admitted on a `direct` route proves only that the caller runs as the
+operator's user. Any local program, including an agent's shell, can approve
+ordinary consent cards without the phone, including a card it filed itself.
+Separate runtime user accounts or a caller program check would close that
+self-approval gap. The development opening is not a guarantee of human approval.
 
-- **Card answers.** In this code `consent.answer` and `consent.list_pending` are
-  not admitted on `direct`: both require `operator_surface` (`dispatch`,
-  `crates/ck-cingulate/src/lib.rs:586`; `operator`, `lib.rs:279-288`), which only
-  `reserved:callosum` with a `fed-phone:` bind harness sets (`Stamp::from_bind`). `owner_principal_and_operator_refusals_write_nothing`
-  (`crates/ck-cingulate/tests/module.rs:788-807`) proves a `direct` answer is
-  refused with `elicitation_operator_required`. The gap applies to any change
-  that admits `direct` answers. `direct` may raise cards (`lib.rs:106`); those
-  name "an unverified local process" and approve nothing by themselves.
+- **Card answers.** `DEVELOPMENT_LOCAL_OPERATOR` currently admits daemon-stamped
+  `direct` binds to ordinary operator cards. This deliberately accepts the
+  self-approval gap because, during development, no caller check may block an app
+  or module being built. It is not a release guarantee: set the switch to false
+  before public release. The switch-disabled bind test proves local operator
+  authority is removed, while
+  phone-only secret and device gates remain enforced with the switch enabled.
 - **`permissions.revoke`.** The [permissions/v1](contracts/permissions-v1.md)
   contract admits revoke from `direct`, both on providers and on cingulate. The
   same caveat applies: any local process can revoke. The worst case is a local

@@ -19,8 +19,8 @@ remain unchanged.
 
 ## Identity and visibility
 
-The existing operator rule is unchanged: `reserved:callosum` on a daemon-stamped
-harness starting `fed-phone:`. No body field establishes authority. Permission
+The release operator rule is `reserved:callosum` on a daemon-stamped harness
+starting `fed-phone:`. No body field establishes authority. Permission
 asks appear in `consent.list_pending` **only** while in `pending:user`, projected
 as `state: "pending"`. Phone `consent.get` continues to serve a permission ask
 after settlement if its durable surface history includes the user leg. A worker's
@@ -29,6 +29,20 @@ and after settlement. Removing a card from pending lists does not hide its final
 phone get projection. Existing generic consent kinds follow the v1 rule: phone get
 continues to return a settled card after requester acknowledgment until the
 24-hour retention prune removes its payload.
+
+During development, no caller check may block an app or module being built, so the
+code-only `DEVELOPMENT_LOCAL_OPERATOR` switch also admits daemon-stamped
+`Principal::Direct` programs as operator surfaces for listing, fetching, answering
+and watching ordinary cards. Local answers have no device fingerprint; permission
+answer audits retain the real principal `direct`. Secret-use cards, flow installs
+carrying secrets and device-bound rich UI approvals remain hidden and unanswerable
+from local programs. Set the switch to false before public release; no
+configuration setting enables it.
+
+Local programs also retain their requester operations. A local `consent.get` uses
+the operator projection only when `elicitationId` is present; `elicitation_id`
+selects the requester projection and its ownership checks. Phone dispatch is
+unchanged.
 
 ## Generic consent raised by a worker
 

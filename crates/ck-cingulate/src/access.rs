@@ -332,7 +332,8 @@ impl Handler {
             params.get("kind").and_then(Value::as_str),
             Some("tool_permission" | "macos_permission")
         );
-        let id = if stamp.operator_surface {
+        let operator_surface = stamp.operator_handles(method, params);
+        let id = if operator_surface {
             params.get("elicitationId")
         } else {
             params
@@ -412,7 +413,7 @@ impl Handler {
                                 "bindDigest is only valid for rich_ui_approval",
                             ));
                         }
-                        let surface = if stamp.operator_surface {
+                        let surface = if operator_surface {
                             "user"
                         } else if stamp.label() == "reserved:prefrontal-core" {
                             "head"
@@ -487,10 +488,11 @@ impl Handler {
                         };
                         let mutation = self
                             .with_store(|store| {
-                                store.access_answer_from_device(
+                                store.access_answer_from_operator(
                                     id,
                                     answer,
                                     stamp.answering_device(),
+                                    operator_surface,
                                     self.inner.options.clock.now_ms(),
                                 )
                             })
@@ -498,22 +500,18 @@ impl Handler {
                         if surface == "unauthorized" {
                             return Err(Refusal::new(
                                 "elicitation_operator_required",
-                                "answer requires a phone operator route or core relay",
+                                "answer requires an operator route or core relay",
                             ));
                         }
                         let Some(mutation) = mutation else {
                             return Ok(json!({"ok":false,"code":"not_found"}));
                         };
                         self.access_changed(&mutation).await;
-                        if stamp.operator_surface && mutation.record.state == "pending:head" {
+                        if operator_surface && mutation.record.state == "pending:head" {
                             return Ok(json!({"ok":false,"code":"access_wrong_leg"}));
                         }
                         let value = self
-                            .access_wire(
-                                &mutation.record,
-                                stamp.operator_surface,
-                                self.block_until(id),
-                            )
+                            .access_wire(&mutation.record, operator_surface, self.block_until(id))
                             .await;
                         if let Some(code) = &mutation.code {
                             Ok(json!({"ok":false,"code":code,"elicitation":value}))
@@ -522,7 +520,7 @@ impl Handler {
                         }
                     }
                     "consent.get" | "consent.await" | "consent.withdraw" | "consent.detach" => {
-                        if !stamp.operator_surface {
+                        if !operator_surface {
                             stamp.authorize_owner()?;
                         }
                         let record = self
@@ -531,7 +529,7 @@ impl Handler {
                             .ok_or_else(|| {
                                 Refusal::new("elicitation_not_found", "ask not found")
                             })?;
-                        if stamp.operator_surface {
+                        if operator_surface {
                             if method != "consent.get" || !record.reached_user() {
                                 return Err(Refusal::new(
                                     "elicitation_not_found",
@@ -577,7 +575,7 @@ impl Handler {
                                     .await
                             }
                             _ => Ok(self
-                                .access_wire(&record, stamp.operator_surface, self.block_until(id))
+                                .access_wire(&record, operator_surface, self.block_until(id))
                                 .await),
                         }
                     }

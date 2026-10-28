@@ -449,6 +449,20 @@ impl ConsentStore {
         device: Option<&str>,
         now: i64,
     ) -> Result<Option<AccessMutation>> {
+        self.access_answer_from_operator(id, answer, device, false, now)
+    }
+
+    /// Answer with operator authority established by the caller's trusted route
+    /// stamp. This qualifies a user-leg answer without changing its audit principal
+    /// or device; it does not authorize head-leg answers.
+    pub fn access_answer_from_operator(
+        &self,
+        id: &str,
+        answer: AccessAnswer,
+        device: Option<&str>,
+        operator_authorized: bool,
+        now: i64,
+    ) -> Result<Option<AccessMutation>> {
         self.transaction(|tx| {
             let Some(mut record) = load(tx, id)? else { return Ok(None); };
             let code = if !record.pending() { Some("conflict") }
@@ -466,7 +480,7 @@ impl ConsentStore {
                     else if answer.answered_by.as_ref() != record.identity.head.as_ref() { Some("access_wrong_head") }
                     else if matches!(answer.answer.as_str(), "allow_once" | "allow_scope") && record.request.head_policy() != Some("allow") { Some("access_head_not_held") }
                     else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None }
-                } else if answer.surface != "user" || answer.principal != "reserved:callosum" || record.state != "pending:user" { Some("access_wrong_leg") }
+                } else if answer.surface != "user" || (answer.principal != "reserved:callosum" && !operator_authorized) || record.state != "pending:user" { Some("access_wrong_leg") }
                 else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None };
             record.attempts.push(AnswerAttempt { device: device.map(str::to_owned), malformed_params: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
             if code.is_none() {
