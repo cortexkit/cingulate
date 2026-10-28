@@ -7,6 +7,8 @@ use std::{
     sync::atomic::{AtomicBool, AtomicI64, AtomicUsize},
 };
 
+mod projects;
+
 #[derive(Default)]
 struct TestClock(AtomicI64);
 impl TestClock {

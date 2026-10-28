@@ -277,12 +277,17 @@ impl Fixture {
     }
 
     async fn sync(&mut self, generation: u64, epoch: u64) {
+        self.sync_project(generation, epoch, None).await;
+    }
+
+    async fn sync_project(&mut self, generation: u64, epoch: u64, project_id: Option<&str>) {
         let record = ScopeRecord::new("head-session", epoch, ScopeKind::Head)
             .with_carriers(vec![
                 ScopeCarrier::new(principal("plexus")).with_targets(Some(vec!["cingulate".into()])),
                 ScopeCarrier::new(principal("aft")).with_targets(Some(vec!["cingulate".into()])),
             ])
-            .with_attributes(ScopeAttributes::new().with_agent_id(Some("agent-live".into())));
+            .with_attributes(ScopeAttributes::new().with_agent_id(Some("agent-live".into())))
+            .with_project_id(project_id.map(str::to_owned));
         let reply = control(
             &mut self.owner,
             FrameType::Request,
@@ -619,7 +624,8 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent-no-expiry/v1",
             "rich-ui-approval/v1",
             "secret-use-approval/v1",
-            "flow-install-secrets/v1"
+            "flow-install-secrets/v1",
+            "scope-workdir/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
@@ -727,6 +733,29 @@ async fn live_daemon_scope_stamp_owns_card_and_separates_epochs() {
         fixture.request(&next_epoch, "consent.get", params).await,
         "elicitation_not_owner",
     );
+    fixture.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_forwards_project_stamp_to_consent_subject() {
+    let mut fixture = Fixture::start().await;
+    fixture.sync_project(1, 7, Some("pj-live")).await;
+    let route = fixture.scoped(7, "project-carrier").await;
+    let mut request = card();
+    request["scope"] = json!({"project_id":"pj-forged", "name":"Forged project"});
+    let id = fixture
+        .request(&route, "consent.request", request)
+        .await
+        .unwrap()["elicitation_id"]
+        .clone();
+    let record = fixture
+        .request(&route, "consent.get", json!({"elicitation_id": id}))
+        .await
+        .unwrap();
+    assert_eq!(record["subject"]["label"], "agent-live in project pj-live");
+    let stored: cingulate_store::ElicitationRecord =
+        fixture.stored("elicitation_records", id.as_str().unwrap());
+    assert_eq!(stored.subject.label, "agent-live in project pj-live");
     fixture.stop().await;
 }
 

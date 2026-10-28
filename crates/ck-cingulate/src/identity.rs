@@ -7,6 +7,8 @@ use cortexkit_agent_identity::{
 use subc_client_rs::consumer::{CallError, CallOptions, CloseRouteOptions, SubcConsumer};
 use subc_protocol::{BindIdentity, RouteTarget};
 
+mod projects;
+
 const LOOKUP_TIMEOUT: Duration = Duration::from_millis(500);
 // Leave half the overall deadline for status when a name read stalls.
 const NAME_LOOKUP_TIMEOUT: Duration = Duration::from_millis(250);
@@ -111,6 +113,7 @@ pub struct EntorhinalResolver {
     roster: Mutex<Roster>,
     cache: StdMutex<HashMap<String, CachedAgent>>,
     warnings: StdMutex<HashMap<Failure, i64>>,
+    projects: projects::ProjectNames,
 }
 
 impl Default for EntorhinalResolver {
@@ -123,6 +126,7 @@ impl EntorhinalResolver {
     pub fn new(clock: Arc<dyn Clock>) -> Self {
         let runtime = Arc::new(StdMutex::new(None));
         Self {
+            projects: projects::ProjectNames::new(clock.clone()),
             clock,
             runtime: runtime.clone(),
             names: Arc::new(DaemonNames { runtime }),
@@ -134,6 +138,7 @@ impl EntorhinalResolver {
 
     /// Bind after serving starts, since the daemon supplies the module handle then.
     pub fn set_runtime(&self, runtime: Arc<DaemonAccessRuntime>) {
+        self.projects.set_runtime(runtime.clone());
         *self.runtime.lock().expect("identity runtime lock") = Some(runtime);
     }
 
@@ -229,6 +234,10 @@ impl EntorhinalResolver {
 
 #[async_trait]
 impl Resolver for EntorhinalResolver {
+    async fn project_name(&self, project_id: &str) -> Option<String> {
+        self.projects.name(project_id).await
+    }
+
     async fn resolve(&self, agent_id: &str) -> Result<Option<ResolvedAgent>, String> {
         let now = self.clock.now_ms();
         {
@@ -329,6 +338,10 @@ impl DaemonAccessRuntime {
         method: &str,
         params: P,
     ) -> Result<T, Failure> {
+        decode_reply(&self.identity_request(Request::new(method, params)).await?)
+    }
+
+    async fn identity_request<P: serde::Serialize>(&self, request: P) -> Result<Vec<u8>, Failure> {
         let consumer = self.consumer().await.map_err(|_| Failure::Transport)?;
         let options = CallOptions {
             timeout: LOOKUP_TIMEOUT,
@@ -355,8 +368,7 @@ impl DaemonAccessRuntime {
             let bytes = consumer
                 .request(
                     &handle,
-                    serde_json::to_vec(&Request::new(method, params))
-                        .map_err(|_| Failure::Decode)?,
+                    serde_json::to_vec(&request).map_err(|_| Failure::Decode)?,
                     options,
                 )
                 .await
@@ -364,7 +376,7 @@ impl DaemonAccessRuntime {
                     CallError::Module(_) => Failure::Refused,
                     _ => Failure::Transport,
                 })?;
-            decode_reply(&bytes)
+            Ok(bytes)
         }
         .await;
         consumer

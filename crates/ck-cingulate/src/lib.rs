@@ -173,6 +173,7 @@ pub fn manifest() -> ModuleManifest {
                 "rich-ui-approval/v1".into(),
                 "secret-use-approval/v1".into(),
                 "flow-install-secrets/v1".into(),
+                "scope-workdir/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -364,6 +365,11 @@ pub struct ResolvedAgent {
 #[async_trait]
 pub trait Resolver: Send + Sync {
     async fn resolve(&self, agent_id: &str) -> Result<Option<ResolvedAgent>, String>;
+
+    /// Best-effort display name for a daemon-stamped project id; not an authorization input.
+    async fn project_name(&self, _project_id: &str) -> Option<String> {
+        None
+    }
 }
 pub struct UnavailableResolver;
 #[async_trait]
@@ -844,17 +850,44 @@ impl Handler {
                 return Err(invalid("at_console must match the daemon's machine_id"));
             }
         }
-        let mut resolved_name = None;
-        let subject = if carrier
+        let has_agent = carrier
             || worker_head.is_some()
             || (from_scope && !agent_id.trim().is_empty())
             || (request.kind == "secret_use"
                 && stamp
                     .scope
                     .as_ref()
-                    .is_some_and(|s| s.attributes.agent_id.is_some()))
-        {
-            if let Ok(Some(agent)) = self.inner.options.resolver.resolve(agent_id).await {
+                    .is_some_and(|s| s.attributes.agent_id.is_some()));
+        // Resolve both display names together so project reads add no serial timeout.
+        let (agent, project) = tokio::join!(
+            async {
+                if has_agent {
+                    self.inner
+                        .options
+                        .resolver
+                        .resolve(agent_id)
+                        .await
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                }
+            },
+            async {
+                let project_id = stamp.scope.as_ref()?.project_id.as_deref()?;
+                Some(
+                    self.inner
+                        .options
+                        .resolver
+                        .project_name(project_id)
+                        .await
+                        .unwrap_or_else(|| project_id.to_owned()),
+                )
+            }
+        );
+        let mut resolved_name = None;
+        let mut subject = if has_agent {
+            if let Some(agent) = agent {
                 if agent.retired {
                     return Err(Refusal::new("consent_retired", "subject agent is retired"));
                 }
@@ -879,6 +912,11 @@ impl Handler {
                 .into(),
             }
         };
+        if let Some(project) = project {
+            subject.label = format!("{} in project {project}", subject.label);
+            // The store uses this display value for both new cards and dedup refreshes.
+            resolved_name = Some(subject.label.clone());
+        }
         Ok(RequestIdentity {
             owner: stamp.owner(),
             requester: stamp.label().into(),
@@ -1714,7 +1752,8 @@ mod tests {
         let scope = serde_json::from_value(json!({
             "owner":{"kind":"reserved","module_id":"prefrontal-core"},
             "ref":"head:alf", "scope_epoch":7, "kind":"head",
-            "attributes":{"agent_id":"agent-alf"}, "owner_authorized":true
+            "attributes":{"agent_id":"agent-alf"}, "owner_authorized":true,
+            "project_id":"pj-cingulate"
         }))
         .unwrap();
         let req = bind("plexus", "fed-mac:ignored").with_scope(scope);
@@ -1725,6 +1764,10 @@ mod tests {
             json!([{"kind":"reserved","module_id":"prefrontal-core"}, "head:alf", 7]).to_string()
         );
         assert_eq!(stamp.carried_agent_id, "agent-alf");
+        assert_eq!(
+            stamp.scope.as_ref().unwrap().project_id.as_deref(),
+            Some("pj-cingulate")
+        );
         assert!(stamp.console_machine_id.is_none());
         let mut changed = req.clone();
         changed.scope.as_mut().unwrap().scope_epoch += 1;

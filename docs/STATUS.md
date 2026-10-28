@@ -67,6 +67,7 @@ no request field names a requester or subject. The owner of a card is the pair
 `[principal, bind session]` (`Stamp::owner`, `lib.rs:101-103`). Carrier
 requesters (`reserved:cerebellum`, `reserved:plexus`, `reserved:entorhinal`) must
 carry an agent on the stamp, or they are refused (`lib.rs:498-504`).
+Since 0.13.3, subjects append `in project <name>` using only the filing route's daemon-stamped `project_id` and Entorhinal's registry (aliases followed; if the project is gone or no name can be read, show the raw stamped id); card `scope` stays opaque, and unstamped subjects are unchanged.
 
 ### Package cards and bounded feeds
 

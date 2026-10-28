@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.3 (ck-cingulate)
+
+- Show `<agent> in project <name>` on consent subjects when the filing route's
+  daemon stamp carries a project id. Entorhinal resolves aliases before the name
+  lookup; gone projects and unavailable reads show the raw stamped id. Card
+  `scope` remains opaque filer text, and subjects without a stamped project are
+  unchanged. Store and serve the same composed subject in the existing string.
+- Cache the registry's project names for one minute. Cap the whole project-name
+  lookup at 500 ms while running it alongside the agent-name lookup. A failed
+  project lookup falls back to the stamped id without refusing the card; the
+  project name is display-only and does not affect authorization.
+- Opt into `scope-workdir/v1` so the daemon forwards `project_id` (and `workdir`)
+  on bind stamps; this changes attribution only, not route admission. Upgrade
+  protocol 0.32.5 → 0.33.5 and client 0.30.1 → 0.32.12 for the stamp, with control
+  0.32.1 → 0.33.4 transitively. Test against daemon 0.38.0 (from 0.36.14) and
+  transport 0.14.1 (from 0.13.0), matching their compatible dependency lines.
+
 ## 0.13.2 (ck-cingulate)
 
 - Open ordinary operator cards to daemon-stamped `Principal::Direct` local
