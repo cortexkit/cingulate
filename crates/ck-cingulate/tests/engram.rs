@@ -8,7 +8,7 @@
 use std::{
     fs::{self, FileTimes},
     io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
@@ -69,7 +69,7 @@ impl Start {
 }
 
 #[cfg(unix)]
-fn mode(path: &Path) -> u32 {
+fn mode(path: &std::path::Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     fs::metadata(path)
         .expect("catalog metadata")
@@ -86,6 +86,8 @@ async fn startup_on_an_empty_data_folder_creates_the_catalog() {
     assert_eq!(handler.health_report().status, HealthStatus::Ok);
     let bytes = fs::read(start.catalog()).expect("startup writes the catalog");
     assert_eq!(String::from_utf8(bytes).expect("utf8 catalog"), EXPECTED);
+    // Windows has no mode bits; the catalog's privacy there is the folder's ACL.
+    #[cfg(unix)]
     assert_eq!(mode(&start.catalog()), 0o600);
 }
 
@@ -136,6 +138,8 @@ async fn stale_catalog_is_replaced_with_the_expected_bytes() {
 
     let bytes = fs::read(start.catalog()).expect("catalog rewritten");
     assert_eq!(String::from_utf8(bytes).expect("utf8 catalog"), EXPECTED);
+    // Windows has no mode bits; the catalog's privacy there is the folder's ACL.
+    #[cfg(unix)]
     assert_eq!(mode(&start.catalog()), 0o600);
 }
 
