@@ -44,6 +44,10 @@ impl AccessRuntime for Runtime {
     }
     async fn notice_json(&self, body: &str) -> NoticeResult {
         self.sent.lock().unwrap().push(body.to_owned());
+        // Script failures for late answers only, not phone lifecycle notices.
+        if !body.contains(r#""purpose":"consent_answered""#) {
+            return NoticeResult::Delivered;
+        }
         let mut replies = self.replies.lock().unwrap();
         if replies.is_empty() {
             NoticeResult::Delivered
@@ -335,23 +339,26 @@ async fn late_answer_reaches_the_stamped_session_once_in_pinned_key_order() {
     let id = f.raise(body).await;
     f.detach(&id).await;
     f.deliver().await;
-    assert!(f.sent().is_empty(), "detach alone sends nothing");
+    assert!(
+        f.late_sent().is_empty(),
+        "detach alone sends no late answer"
+    );
     f.clock.0.send_replace(1500);
     assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
     f.deliver().await;
     assert_eq!(
-        f.sent(),
+        f.late_sent(),
         vec![format!(
             r#"{{"elicitation_id":"{id}","purpose":"consent_answered","asker":{{"scope_ref":"sc_head_alf","scope_epoch":3}},"fields":{{"requester":"cerebellum","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":1500}}}}"#
         )]
     );
-    assert!(!f.sent()[0].contains("requester_ref"));
-    assert!(!f.sent()[0].contains("tool-call-42"));
+    assert!(!f.late_sent()[0].contains("requester_ref"));
+    assert!(!f.late_sent()[0].contains("tool-call-42"));
     assert_eq!(f.outbox_status(&id), Some(("delivered".into(), 1)));
     // Deduplicated: a repeat detach or a later delivery pass sends nothing more.
     f.detach(&id).await;
     f.deliver().await;
-    assert_eq!(f.sent().len(), 1);
+    assert_eq!(f.late_sent().len(), 1);
 }
 
 #[tokio::test]
@@ -368,7 +375,7 @@ async fn plexus_late_answer_notice_names_plexus_as_requester() {
     assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
     f.deliver().await;
     assert_eq!(
-        f.sent(),
+        f.late_sent(),
         vec![format!(
             r#"{{"elicitation_id":"{id}","purpose":"consent_answered","asker":{{"scope_ref":"sc_head_alf","scope_epoch":3}},"fields":{{"requester":"plexus","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":1500}}}}"#
         )]
@@ -389,7 +396,7 @@ async fn broca_late_answer_notice_names_broca_as_requester() {
     assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
     f.deliver().await;
     assert_eq!(
-        f.sent(),
+        f.late_sent(),
         vec![format!(
             r#"{{"elicitation_id":"{id}","purpose":"consent_answered","asker":{{"scope_ref":"sc_head_alf","scope_epoch":3}},"fields":{{"requester":"broca","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":1500}}}}"#
         )]
@@ -496,7 +503,7 @@ async fn missing_session_records_unclaimed_without_blocking_settlement() {
         );
         f.clock.0.send_replace(1_000_000);
         f.deliver().await;
-        assert_eq!(f.sent().len(), 1, "{refusal}: no retry");
+        assert_eq!(f.late_sent().len(), 1, "{refusal}: no retry");
         assert_eq!(
             f.ok(&cerebellum(), "consent.get", json!({"elicitation_id":id}))
                 .await["state"],

@@ -255,8 +255,12 @@ async fn execution_backstop_bounds_unreachable_scope_probe_time() {
         async fn describe(&self, _: &cingulate_store::ScopeIdentity) -> Result<ScopeLife, String> {
             std::future::pending().await
         }
-        async fn notice(&self, _: serde_json::Value) -> ck_cingulate::NoticeResult {
-            unreachable!("no notices are queued")
+        async fn notice(&self, body: serde_json::Value) -> ck_cingulate::NoticeResult {
+            assert!(matches!(
+                body["purpose"].as_str(),
+                Some("escalated" | "settled")
+            ));
+            ck_cingulate::NoticeResult::Delivered
         }
     }
     let fixture = Fixture::open(None).await;

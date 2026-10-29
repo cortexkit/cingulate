@@ -185,7 +185,14 @@ async fn detached_worker_late_answer_notice_targets_worker_scope() {
     tokio::task::yield_now().await;
     fixture.handler.deliver_access_notices().await.unwrap();
     assert_eq!(
-        *runtime.notices.lock().unwrap(),
+        runtime
+            .notices
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|notice| notice["purpose"] == "consent_answered")
+            .cloned()
+            .collect::<Vec<_>>(),
         vec![
             json!({"elicitation_id":id,"purpose":"consent_answered","asker":{"scope_ref":"sc_worker","scope_epoch":3},"fields":{"requester":"cerebellum","outcome":"answered","choice_id":"allow_once","choice_label":"Allow once","settled_at_ms":ANSWERED}})
         ]

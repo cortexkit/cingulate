@@ -78,7 +78,7 @@ fn head() -> ScopeIdentity {
     }
 }
 fn stamp(module: &str, kind: ScopeKind) -> Stamp {
-    let scope = ScopeStamp::new(
+    let mut scope = ScopeStamp::new(
         principal("prefrontal-core"),
         format!("{kind:?}-session"),
         3,
@@ -94,6 +94,8 @@ fn stamp(module: &str, kind: ScopeKind) -> Stamp {
         ScopeAttributes::new().with_agent_id(Some("agent-head".into()))
     })
     .with_owner_authorized(true);
+    scope.parent_state =
+        (kind == ScopeKind::Worker).then_some(subc_protocol::scope::ParentState::Linked);
     Stamp::from_bind(
         &RouteBindRequest::new(
             RouteHandle::detached(1, 1),
@@ -140,6 +142,13 @@ fn request(policy: Option<&str>) -> Value {
     }
     value
 }
+
+fn consent_card() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
+    ))
+    .unwrap()
+}
 struct Fixture {
     _dir: tempfile::TempDir,
     path: std::path::PathBuf,
@@ -149,7 +158,70 @@ struct Fixture {
     hook: Arc<WaitHook>,
     phone_notices: Arc<PhoneNotices>,
 }
+
+#[tokio::test]
+async fn person_consent_filing_enqueues_exact_notice_without_requester_text() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("cerebellum", ScopeKind::Head), consent_card())
+        .await;
+    f.deliver().await;
+    let expected = format!(
+        r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"consent","subject":"agent-head","expires_at_ms":61000}}}}"#
+    );
+    let db = rusqlite::Connection::open(&f.path).unwrap();
+    let bodies: Vec<String> = db
+        .prepare("SELECT body_json FROM access_notices WHERE elicitation_id=?1 ORDER BY rowid")
+        .unwrap()
+        .query_map([&id], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(bodies, vec![expected.clone()]);
+    assert_eq!(
+        *f.runtime.notices.lock().unwrap(),
+        vec![serde_json::from_str::<Value>(&expected).unwrap()]
+    );
+}
+
+#[tokio::test]
+async fn unscoped_person_card_files_normally_without_a_notice() {
+    let f = Fixture::new(true).await;
+    let id = f.ask(&local_operator(), consent_card()).await;
+    assert!(id.starts_with("el_"));
+    let card = f
+        .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+        .await;
+    assert_eq!(card["state"], "pending");
+    f.deliver().await;
+    assert!(f.card_notices(&id).is_empty());
+    assert!(f.runtime.notices.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn person_card_with_unconfirmed_parent_is_attributed_only_to_asker() {
+    let f = Fixture::new(true).await;
+    let mut owner = stamp("cerebellum", ScopeKind::Worker);
+    owner.scope.as_mut().unwrap().parent_state = None;
+    let id = f.ask(&owner, consent_card()).await;
+    let notice: Value = serde_json::from_str(&f.card_notices(&id)[0].2).unwrap();
+    assert_eq!(
+        notice["asker"],
+        json!({"scope_ref":"Worker-session","scope_epoch":3})
+    );
+    assert!(notice.get("head").is_none());
+}
 impl Fixture {
+    fn card_notices(&self, id: &str) -> Vec<(String, String, String)> {
+        rusqlite::Connection::open(&self.path)
+            .unwrap()
+            .prepare("SELECT purpose,status,body_json FROM access_notices WHERE elicitation_id=?1 ORDER BY rowid")
+            .unwrap()
+            .query_map([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
     async fn new(macos: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("store.sqlite");
@@ -272,6 +344,188 @@ impl Fixture {
             )
             .unwrap();
     }
+}
+
+#[tokio::test]
+async fn person_card_answer_and_withdraw_pin_exact_retraction_bytes() {
+    let f = Fixture::new(true).await;
+    *f.runtime.replies.lock().unwrap() = vec![NoticeResult::Transport("offline".into()); 8];
+    let owner = stamp("cerebellum", ScopeKind::Worker);
+    let id = f.ask(&owner, consent_card()).await;
+    f.deliver().await;
+    f.ok(
+        &phone(),
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"deny"}),
+    )
+    .await;
+    f.deliver().await;
+    let rows = f.card_notices(&id);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].1, "superseded");
+    assert_eq!(rows[1].0, "settled");
+    assert_eq!(
+        rows[1].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"settled","asker":{{"scope_epoch":3,"scope_ref":"Worker-session"}},"head":{{"scope_epoch":7,"scope_ref":"head-session"}},"fields":{{"outcome":"answered"}}}}"#
+        )
+    );
+    let card = f
+        .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+        .await;
+    assert!(card.get("head").is_none());
+    assert!(card.get("asker").is_none());
+
+    let id = f.ask(&owner, consent_card()).await;
+    f.deliver().await;
+    f.ok(&owner, "consent.withdraw", json!({"elicitation_id":id}))
+        .await;
+    f.deliver().await;
+    let rows = f.card_notices(&id);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].1, "superseded");
+    assert_eq!(rows[1].0, "withdrawn");
+    assert_eq!(
+        rows[1].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"withdrawn","asker":{{"scope_epoch":3,"scope_ref":"Worker-session"}},"head":{{"scope_epoch":7,"scope_ref":"head-session"}}}}"#
+        )
+    );
+    assert!(f
+        .runtime
+        .notices
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|n| n["purpose"] == "withdrawn"));
+}
+
+#[tokio::test]
+async fn person_card_expiry_settles_and_supersedes_undelivered_escalation() {
+    let f = Fixture::new(true).await;
+    *f.runtime.replies.lock().unwrap() = vec![NoticeResult::Transport("offline".into()); 8];
+    let id = f
+        .ask(&stamp("cerebellum", ScopeKind::Head), consent_card())
+        .await;
+    f.deliver().await;
+    assert_eq!(f.card_notices(&id)[0].1, "pending");
+    f.clock.0.send_replace(61001);
+    f.ok(&phone(), "consent.list_pending", json!({})).await;
+    f.deliver().await;
+    let rows = f.card_notices(&id);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].1, "superseded");
+    assert_eq!(
+        rows[1].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"settled","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"outcome":"expired"}}}}"#
+        )
+    );
+}
+
+#[tokio::test]
+async fn person_secret_use_filing_enqueues_only_safe_fields() {
+    let f = Fixture::new(true).await;
+    let mut owner = stamp("cerebellum", ScopeKind::Head);
+    owner.scope.as_mut().unwrap().attributes.agent_id = Some("agent-A".into());
+    owner.carried_agent_id = "agent-A".into();
+    let vector: Value = serde_json::from_str(include_str!(
+        "../../../test-vectors/secret-use-approval-v2/filer-request.json"
+    ))
+    .unwrap();
+    let id = f.ask(&owner, vector["params"].clone()).await;
+    f.deliver().await;
+    let expected = format!(
+        r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"secret_use","subject":"agent-A","expires_at_ms":1700000600000}}}}"#
+    );
+    assert_eq!(f.card_notices(&id)[0].2, expected);
+    assert_eq!(
+        *f.runtime.notices.lock().unwrap(),
+        vec![serde_json::from_str::<Value>(&expected).unwrap()]
+    );
+}
+
+#[tokio::test]
+async fn person_flow_install_with_secrets_enqueues_only_safe_fields() {
+    let f = Fixture::new(true).await;
+    let vector: Value = serde_json::from_str(include_str!(
+        "../../../test-vectors/flow-install-secrets-v2/filing.json"
+    ))
+    .unwrap();
+    let id = f
+        .ask(
+            &stamp("prefrontal-core", ScopeKind::Head),
+            vector["params"].clone(),
+        )
+        .await;
+    f.deliver().await;
+    assert_eq!(
+        f.card_notices(&id)[0].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"flow_install","subject":"agent-head","expires_at_ms":1700000600000}}}}"#
+        )
+    );
+}
+
+#[tokio::test]
+async fn person_package_and_basal_decision_are_consent_notices() {
+    let f = Fixture::new(true).await;
+    let mut decision = consent_card();
+    decision["kind"] = json!("flow_decision");
+    decision["flow_decision"] = json!({"private":"do not send"});
+    decision["options"][0]["effect"] = json!("choose");
+    let id = f.ask(&stamp("basal", ScopeKind::Head), decision).await;
+    let notice: Value = serde_json::from_str(&f.card_notices(&id)[0].2).unwrap();
+    assert_eq!(
+        notice["fields"],
+        json!({"card_kind":"consent","subject":"operator decision","expires_at_ms":61000})
+    );
+
+    let mut package = consent_card();
+    package["kind"] = json!("package");
+    package["package"] = json!({"package":"example","version":1,"code_hash":"a".repeat(64),"script":"private script","manifest_json":"{}"});
+    let id = f
+        .ask(&stamp("prefrontal-core", ScopeKind::Head), package)
+        .await;
+    let notice: Value = serde_json::from_str(&f.card_notices(&id)[0].2).unwrap();
+    assert_eq!(
+        notice["fields"],
+        json!({"card_kind":"consent","subject":"agent-head","expires_at_ms":61000})
+    );
+}
+
+#[tokio::test]
+async fn person_rich_ui_device_and_revoke_keep_first_settlement() {
+    let f = Fixture::new(true).await;
+    let owner = stamp("occipital", ScopeKind::Head);
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let device = "300c9c9603b92a4b39ed3958bf924011";
+    let mut body = consent_card();
+    body["kind"] = json!("rich_ui_approval");
+    body["rich_ui_approval"] = json!({"approvalDigest":digest,"manifestDigest":digest,"capabilityDigest":digest,"provider":"weather-tools","device":device});
+    body.as_object_mut().unwrap().remove("expires_in_ms");
+    let id = f.ask(&owner, body).await;
+    f.deliver().await;
+    assert_eq!(
+        f.card_notices(&id)[0].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"rich_ui","subject":"reserved:occipital","device":"fed-phone:{device}"}}}}"#
+        )
+    );
+    let mut bound_phone = phone();
+    bound_phone.harness = format!("fed-phone:{device}");
+    f.ok(&bound_phone, "consent.answer", json!({"elicitationId":id,"choiceId":"allow_once","bindDigest":digest,"clientFeatures":["rich-ui-approval"]})).await;
+    f.deliver().await;
+    let before = f.card_notices(&id);
+    f.ok(&owner, "consent.revoke", json!({"elicitationId":id}))
+        .await;
+    f.deliver().await;
+    assert_eq!(f.card_notices(&id), before);
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[0].0, "escalated");
+    assert_eq!(before[1].0, "settled");
+    let settled: Value = serde_json::from_str(&before[1].2).unwrap();
+    assert_eq!(settled["fields"], json!({"outcome":"answered"}));
 }
 
 #[tokio::test]

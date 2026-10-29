@@ -14,11 +14,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 mod access;
+mod person_notice;
 mod record;
 pub use access::{
     AccessAnswer, AccessIdentity, AccessMutation, AccessRecord, AnswerAttempt, Notice,
     ScopeIdentity,
 };
+use person_notice::enqueue_person_notice;
 pub use record::{ElicitationRecord, State, Subject, LATE_ANSWER_PURPOSE};
 
 pub const RETENTION_MS: i64 = 86_400_000;
@@ -139,6 +141,8 @@ pub struct RequestIdentity {
     /// The agent session the daemon stamped on the requester's route, if any.
     /// A late answer on a detached card is addressed to this session.
     pub asker: Option<ScopeIdentity>,
+    /// The requesting worker's daemon-stamped parent, never a body-supplied session.
+    pub head: Option<ScopeIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +279,7 @@ impl ConsentStore {
             change_log_rows: CHANGE_LOG_ROWS,
         };
         let settlements = store.sweep(now_ms)?;
+        store.backfill_person_notices()?;
         Ok((store, settlements))
     }
 
@@ -464,6 +469,7 @@ impl ConsentStore {
                 detached: false,
                 late: false,
                 asker: identity.asker.clone(),
+                head: identity.head.clone(),
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
@@ -488,6 +494,7 @@ impl ConsentStore {
                     tx.execute("INSERT INTO secret_use_requests(request_id,elicitation_id) VALUES (?1,?2)", params![item.request_id, record.elicitation_id])?;
                 }
             }
+            enqueue_person_notice(tx, &record, "escalated")?;
             Ok(CreateResult {
                 record,
                 created: true,
@@ -737,6 +744,8 @@ impl ConsentStore {
             }
             record.state = State::Revoked;
             record.revoked_at_ms = Some(now_ms);
+            // The answer's durable settlement notice already retracts the phone
+            // push. Revocation must not replace it or enqueue a second notice.
             save(tx, &record)?;
             Ok(Mutation {
                 settlements: vec![record.clone()],
@@ -1142,6 +1151,16 @@ fn terminal(
     record.answered_choice_id = choice;
     record.answered_at_ms = Some(at);
     record.late = record.detached;
+    conn.execute("UPDATE access_notices SET status='superseded' WHERE elicitation_id=?1 AND status='pending' AND purpose='escalated'", [&record.elicitation_id])?;
+    enqueue_person_notice(
+        conn,
+        record,
+        if state == State::Withdrawn {
+            "withdrawn"
+        } else {
+            "settled"
+        },
+    )?;
     save(conn, record)?;
     conn.execute(
         "INSERT INTO elicitation_answers(elicitation_id,owner,settled_at_ms) \

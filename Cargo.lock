@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "cingulate-store"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "cingulate-decode",
  "cortexkit-lease",
@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "cingulate-vectors"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "async-trait",
  "base64",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "async-trait",
  "cingulate-decode",

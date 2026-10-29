@@ -650,6 +650,7 @@ impl Handler {
         self.note_writes(&store);
         *self.inner.store.lock().await = Some(store);
         self.inner.health.store(2, Ordering::Release);
+        self.spawn_pending_notices().await;
         if self.inner.options.sweep_timer {
             self.start_timer();
         }
@@ -768,11 +769,29 @@ impl Handler {
             self.wake(&record.elicitation_id);
             self.pointer(record, true).await;
         }
-        // A detached card's settlement queued its late-answer notice in the
-        // settling transaction. Send it off the request path, like the
-        // permission-ask notices; the maintenance tick retries failures.
-        if settlements.iter().any(|record| record.detached) {
-            self.spawn_notice_delivery();
+        // Settlement notices share the durable outbox with late answers. Send
+        // them off the request path; the maintenance tick retries failures.
+        if !settlements.is_empty() {
+            self.spawn_pending_notices().await;
+        }
+    }
+
+    async fn spawn_pending_notices(&self) {
+        let notices = {
+            let store = self.inner.store.lock().await;
+            let Some(store) = store.as_ref() else {
+                return;
+            };
+            store.access_notices(self.inner.options.clock.now_ms())
+        };
+        // An empty delivery task would keep the handler and its store lease
+        // alive after shutdown, despite having no durable work to finish.
+        match notices {
+            Ok(notices) if !notices.is_empty() => self.spawn_notice_delivery(),
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, "notice outbox read failed; maintenance will retry")
+            }
         }
     }
 
@@ -927,6 +946,19 @@ impl Handler {
                 scope_epoch: scope.scope_epoch,
                 agent_id: scope.attributes.agent_id.clone(),
             }),
+            head: stamp.scope.as_ref().and_then(|scope| {
+                // Attribution only: an unconfirmed parent could name the wrong head, so attribute the card to its asker.
+                (scope.kind == subc_protocol::scope::ScopeKind::Worker
+                    && scope.parent_state == Some(subc_protocol::scope::ParentState::Linked))
+                .then_some(scope.parent.as_ref())
+                .flatten()
+                .filter(|parent| parent.owner == scope.owner)
+                .map(|parent| ScopeIdentity {
+                    scope_ref: parent.scope_ref.clone(),
+                    scope_epoch: parent.scope_epoch,
+                    agent_id: None,
+                })
+            }),
         })
     }
 
@@ -1018,7 +1050,11 @@ impl Handler {
             self.settlements(&result.settlements).await;
             self.wake(&result.record.elicitation_id);
             if result.created {
+                if stamp.scope.is_none() && result.record.request.at_console.is_none() {
+                    tracing::info!(elicitation_id=%result.record.elicitation_id, principal=%stamp.label(), "person card filed without an attested asker; no core notice queued");
+                }
                 self.pointer(&result.record, false).await;
+                self.spawn_pending_notices().await;
             }
             return Ok(json!({"elicitation_id": result.record.elicitation_id}));
         }

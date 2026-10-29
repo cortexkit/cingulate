@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.13.4 (ck-cingulate)
+
+- Notify core when a phone-answerable card with a daemon-stamped asker is filed,
+  answered, withdrawn or expired, so consent, secret-use, flow-install and rich UI
+  cards can push to the person. Include only the attested subject and routing
+  metadata, never card text or vault statements. Console-only cards do not push.
+- Leave unscoped card filing unchanged and log its id and attested principal once,
+  without request text; those cards have no session to address for a core notice.
+- Deliver pending cards from before the upgrade once on startup through the
+  existing durable outbox. Permission-ask notice bytes and routing are unchanged.
+- Attribute a worker's notice to a head only when the daemon confirms the
+  same-owner parent link. Do not start empty delivery tasks that keep a stopped
+  module's store lease alive, or open a backfill write transaction with no missing
+  notices.
+
+## 0.5.2 (cingulate-store)
+
+- Queue person-card notices in the filing and settlement transactions, supersede
+  undelivered opening notices, and backfill pending cards idempotently on open.
+  Keep the worker's attested parent privately for notice routing. No schema change;
+  older binaries can still open the store.
+
+## 0.6.3 (cingulate-vectors)
+
+- Adapt the record test identity to the optional attested parent field. Existing
+  phone projections and permission notice goldens remain unchanged.
+
 ## 0.13.3 (ck-cingulate)
 
 - Show `<agent> in project <name>` on consent subjects when the filing route's

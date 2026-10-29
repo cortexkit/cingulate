@@ -86,6 +86,7 @@ fn identity(principal: &str, session: &str) -> RequestIdentity {
         },
         resolved_name: None,
         asker: None,
+        head: None,
     }
 }
 
@@ -1333,6 +1334,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         detached: false,
         late: false,
         asker: None,
+        head: None,
     };
     old.with_conn(|conn| {
         conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,expires_at_ms) VALUES (?1,?2,?3,'pending',50000)",params![legacy.elicitation_id,identity("direct","s").owner,serde_json::to_string(&legacy).unwrap()])?;
@@ -1494,8 +1496,13 @@ fn no_deadline_survives_future_sweep_refresh_restart_and_late_answer() {
     assert_eq!(answered.settlements.len(), 1);
     assert!(answered.settlements[0].late);
     let notices = store.access_notices(future + 2).unwrap();
-    assert_eq!(notices.len(), 1);
-    assert_eq!(notices[0].purpose, "consent_answered");
+    assert_eq!(
+        notices
+            .iter()
+            .map(|notice| notice.purpose.as_str())
+            .collect::<Vec<_>>(),
+        vec!["settled", "consent_answered"]
+    );
     let other = store.create(&owner, req, future + 3).unwrap().record;
     let withdrawn = store
         .withdraw(&owner.owner, &other.elicitation_id, future + RETENTION_MS)
@@ -1610,6 +1617,109 @@ fn scoped_identity() -> RequestIdentity {
         }),
         ..identity("direct", "s")
     }
+}
+
+#[test]
+fn person_notice_subject_is_bounded_by_characters_and_keeps_attested_project() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    for (label, expected) in [
+        (
+            "ALF in project Test".to_owned(),
+            "ALF in project Test".to_owned(),
+        ),
+        ("猫".repeat(200), "猫".repeat(200)),
+        ("猫".repeat(201), format!("{}…", "猫".repeat(199))),
+    ] {
+        let mut owner = scoped_identity();
+        owner.subject.label = label;
+        let record = store.create(&owner, request(), 100).unwrap().record;
+        let notice = store
+            .access_notices(100)
+            .unwrap()
+            .into_iter()
+            .find(|notice| notice.elicitation_id == record.elicitation_id)
+            .unwrap();
+        assert_eq!(notice.body["fields"]["subject"], expected);
+        assert!(expected.chars().count() <= 200);
+    }
+}
+
+#[test]
+fn person_notice_backfill_survives_two_starts_and_excludes_unanswerable_cards() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = scoped_identity();
+    let pending = store.create(&owner, request(), 100).unwrap().record;
+    let answered = store.create(&owner, request(), 100).unwrap().record;
+    store
+        .answer(&answered.elicitation_id, "deny", None, 101)
+        .unwrap();
+    let mut console = request();
+    console.at_console = Some("machine".into());
+    let console = store.create(&owner, console, 100).unwrap().record;
+    assert!(!store
+        .access_notices(101)
+        .unwrap()
+        .iter()
+        .any(|notice| notice.elicitation_id == console.elicitation_id));
+    drop(store);
+    let db = scratch.sql();
+    db.execute("DELETE FROM access_notices", []).unwrap();
+    let mut legacy = serde_json::to_value(&pending).unwrap();
+    legacy.as_object_mut().unwrap().remove("asker");
+    legacy.as_object_mut().unwrap().remove("head");
+    let legacy_owner = json!([
+        "reserved:cerebellum",
+        json!(["reserved:prefrontal-core", "sc_asker", 3]).to_string()
+    ])
+    .to_string();
+    db.execute(
+        "UPDATE elicitation_records SET record_json=?2,owner=?3 WHERE elicitation_id=?1",
+        params![pending.elicitation_id, legacy.to_string(), legacy_owner],
+    )
+    .unwrap();
+    let (store, _) = scratch.open(102);
+    let notices = store.access_notices(102).unwrap();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].elicitation_id, pending.elicitation_id);
+    assert_eq!(notices[0].purpose, "escalated");
+    assert_eq!(
+        notices[0].body["asker"],
+        json!({"scope_ref":"sc_asker","scope_epoch":3})
+    );
+    assert!(notices[0].body.get("head").is_none());
+    let bytes = notices[0].body_json.clone();
+    store.access_notice_result(&notices[0], "ok", 102).unwrap();
+    drop(store);
+    let (store, _) = scratch.open(103);
+    assert!(store.access_notices(103).unwrap().is_empty());
+    let rows: (i64, String) = db
+        .query_row("SELECT count(*),body_json FROM access_notices", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(rows, (1, bytes));
+}
+
+#[test]
+fn person_notice_failure_rolls_back_filing_and_answer() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let db = scratch.sql();
+    db.execute_batch("CREATE TRIGGER reject_notice BEFORE INSERT ON access_notices BEGIN SELECT RAISE(ABORT, 'notice rejected'); END;").unwrap();
+    assert!(store.create(&scoped_identity(), request(), 100).is_err());
+    assert!(store.pending().unwrap().is_empty());
+    db.execute_batch("DROP TRIGGER reject_notice").unwrap();
+    let id = store
+        .create(&scoped_identity(), request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    db.execute_batch("CREATE TRIGGER reject_notice BEFORE INSERT ON access_notices WHEN NEW.purpose='settled' BEGIN SELECT RAISE(ABORT, 'notice rejected'); END;").unwrap();
+    assert!(store.answer(&id, "deny", None, 101).is_err());
+    assert_eq!(store.get(&id, 101).unwrap().unwrap().state, State::Pending);
+    assert_eq!(store.access_notices(101).unwrap()[0].purpose, "escalated");
 }
 
 #[test]

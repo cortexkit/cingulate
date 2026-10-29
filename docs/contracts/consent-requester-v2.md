@@ -230,6 +230,49 @@ same `ok:false` form. Invalid options use `elicitation_invalid_choice`.
 
 ## Notices and audit
 
+### Person-facing elicitation cards (`el_`)
+
+Phone-answerable cards with a daemon-stamped asker scope queue an `escalated`
+notice in their filing transaction, regardless of the filing module. Cards
+requiring `at_console` do not push: a phone has no attested console-machine identity.
+The existing subject string supplies the agent name (or resolved fallback), plus
+`in project <name>` when the daemon stamp identifies a project. It is truncated
+to at most 200 Unicode characters, including a trailing `…` when shortened.
+
+The exact stored JSON has this stable key order (optional keys are omitted):
+
+```json
+{"elicitation_id":"el_1","purpose":"escalated","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"},"fields":{"card_kind":"secret_use","subject":"ALF in project Example","expires_at_ms":1700000600000}}
+{"elicitation_id":"el_1","purpose":"settled","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"},"fields":{"outcome":"answered"}}
+{"elicitation_id":"el_1","purpose":"withdrawn","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"}}
+```
+
+Unscoped person cards still file normally but enqueue no notice; Cingulate logs
+their id and attested principal once at INFO, without request text.
+
+- `asker` and optional `head` come only from daemon-attested owner scopes. A
+  worker's `head` requires a same-owner parent with daemon-confirmed `Linked`
+  state; otherwise attribution stays with its asker. Older cards without a saved
+  parent omit `head`; no body-supplied session is used.
+- `escalated.fields` contains only `card_kind`, `subject`, optional
+  `expires_at_ms`, and optional `device`, in that order. `card_kind` is `consent`
+  for consent, package and flow-decision cards, `secret_use` for secret use,
+  `flow_install` for installs (including those carrying secrets), and `rich_ui`
+  for rich UI approvals. Only device-bound rich UI cards include `device`, as
+  `fed-phone:<fingerprint>`. Cards with no expiry omit `expires_at_ms`.
+- `settled.fields` contains only `outcome`: `answered` or `expired`. Withdrawal
+  has no `fields` key. No notice contains requester titles, prompts, scope text,
+  statements, vault bytes or choice details. Revoking an already-answered rich
+  UI grant emits nothing: its push was already retracted by the answer.
+- Settlement supersedes any pending `escalated` row in the same transaction,
+  including expiry sweeps. Startup backfills still-pending cards with
+  `INSERT OR IGNORE` on `(elicitation_id, purpose)`; a delivered or superseded
+  notice is never replaced. This uses the existing shared `access_notices`
+  outbox and delivery loop, without a schema migration.
+  An already-backfilled startup reads first and opens no backfill write transaction.
+
+### Permission asks (`acc_`)
+
 A transaction enqueues each notice uniquely on `(elicitation_id, purpose)`.
 Cingulate calls core's `session.notice` as `reserved:cingulate`, with the exact
 [design wire](../designs/tool-permission-asks.md#the-sessionnotice-wire):

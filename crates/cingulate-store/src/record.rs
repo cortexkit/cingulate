@@ -79,6 +79,9 @@ pub struct ElicitationRecord {
     /// and the session-ended execution backstop. No projection shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asker: Option<ScopeIdentity>,
+    /// Parent scope attested when the card was filed; older cards have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<ScopeIdentity>,
 }
 
 impl ElicitationRecord {
@@ -92,6 +95,7 @@ impl ElicitationRecord {
         object.remove("requester");
         object.remove("detached");
         object.remove("asker");
+        object.remove("head");
         object.remove("late");
         for (key, value) in serde_json::to_value(&self.request)
             .expect("request serialization")

@@ -120,6 +120,7 @@ fn cerebellum() -> RequestIdentity {
         },
         resolved_name: Some("ALF".into()),
         asker: Some(asker()),
+        head: None,
     }
 }
 
@@ -178,6 +179,7 @@ fn pinned_record(id: &str, state: State, choice: Option<&str>, at: i64) -> Elici
         detached: true,
         late: true,
         asker: Some(asker()),
+        head: None,
     }
 }
 
@@ -573,8 +575,12 @@ fn shared_outbox_migration_upgrades_version_four_keeping_rows_and_order() {
             .iter()
             .map(|n| (n.elicitation_id.as_str(), n.purpose.as_str()))
             .collect::<Vec<_>>(),
-        vec![("acc_1", "settled"), (id.as_str(), "consent_answered")]
+        vec![
+            ("acc_1", "settled"),
+            (id.as_str(), "settled"),
+            (id.as_str(), "consent_answered")
+        ]
     );
-    assert_eq!(notices[1].body_json, scratch.late_notices()[0].1);
+    assert_eq!(notices[2].body_json, scratch.late_notices()[0].1);
     let _ = params![];
 }

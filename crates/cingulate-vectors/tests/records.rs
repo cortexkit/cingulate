@@ -42,6 +42,7 @@ async fn stored_phone_projections_match_all_record_vectors() {
         },
         resolved_name: Some("ALF".into()),
         asker: None,
+        head: None,
     };
     let head = store
         .create(
