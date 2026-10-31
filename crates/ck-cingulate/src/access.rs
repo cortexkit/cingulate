@@ -407,12 +407,6 @@ impl Handler {
             async {
                 match method {
                     "consent.answer" => {
-                        if params.get("bindDigest").is_some() {
-                            return Err(Refusal::new(
-                                "invalid_params",
-                                "bindDigest is only valid for rich_ui_approval",
-                            ));
-                        }
                         let surface = if operator_surface {
                             "user"
                         } else if stamp.label() == "reserved:prefrontal-core" {

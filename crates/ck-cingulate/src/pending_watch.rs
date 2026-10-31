@@ -287,14 +287,9 @@ impl Handler {
             for change in page.changes {
                 // Advance over hidden changes without emitting even a removal id.
                 position = change.version;
-                let hidden = change.rich_ui_device.as_deref().is_some_and(|device| {
-                    stamp.answering_device() != Some(device)
-                        || !feature_declared(params, "rich-ui-approval")
-                });
-                if hidden
-                    || (change.secret_use
-                        && (stamp.secret_use_phone().is_none()
-                            || !feature_declared(params, "secret-use-approval")))
+                if change.secret_use
+                    && (stamp.secret_use_phone().is_none()
+                        || !feature_declared(params, "secret-use-approval"))
                 {
                     continue;
                 }

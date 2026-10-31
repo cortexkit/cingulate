@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.14.0 (ck-cingulate), 0.7.0 (cingulate-decode), 0.6.0 (cingulate-store), 0.7.0 (cingulate-vectors)
+
+- Retire rich UI approval cards. Installing a tool provider is now the consent
+  for its rich UI (the operator's decision of 31 October 2026), so there is no
+  separate rich UI approval. Remove the `rich_ui_approval` kind, its requester
+  admission, approval-specific answer validation, device visibility,
+  notifications, the revocation operation and the advertised capability. There is
+  no compatibility handling: a request naming the retired kind meets the ordinary
+  requester admission and request validation, so an admitted requester gets
+  `elicitation_unknown_kind` and Occipital, no longer admitted, gets
+  `elicitation_requester_refused`. Unknown client feature tokens are still
+  ignored, so released phones can continue sending `rich-ui-approval`.
+- Migrate the store schema from 9 to 10 in one forward migration: drop
+  `rich_ui_device` from records and watch history and remove the `revoked`
+  state. Remaining records, answer cursors, secret-use visibility and watch
+  history are preserved. The migration converts nothing: it requires that the
+  store holds no `revoked` row and no rich UI approval payload, pruned
+  tombstones included. A store that does fails the migration and Cingulate
+  doesn't start. Both production stores were checked on 31 October 2026 and
+  hold neither.
+- Remove the rich UI vector generator, support, tests and corpus from the working
+  tree. The published `rich-ui-approval-v1` tag keeps them. Remove the
+  corresponding requester and phone contract sections. Decoder public types
+  change incompatibly. On 31 October 2026 no other CortexKit repository depended
+  on `cingulate-decode`, and it had never been published to crates.io.
+
 ## 0.13.5 (ck-cingulate)
 
 - Notify core about person cards filed without a session scope too, such as the
@@ -187,7 +213,8 @@
   triggers, and retains device visibility on change-log rows even after pruning.
   Record fed-route answering fingerprints for generic cards and permission attempts.
 - Pin complete served states, feature gates and bound-answer/refusal samples in
-  `test-vectors/rich-ui-approval-v1/`; document phone and requester contracts.
+  `test-vectors/rich-ui-approval-v1/` (removed in 0.14.0; kept at the
+  `rich-ui-approval-v1` tag); document phone and requester contracts.
 
 ## 0.10.0 (ck-cingulate)
 

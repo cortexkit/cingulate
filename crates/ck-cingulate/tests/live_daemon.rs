@@ -622,7 +622,6 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent-single-use/v1",
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
-            "rich-ui-approval/v1",
             "secret-use-approval/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1"
@@ -657,7 +656,6 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent.outcomes",
             "consent.report_execution",
             "consent.request",
-            "consent.revoke",
             "consent.watch_pending",
             "consent.withdraw",
             "permissions.list_all",
@@ -830,44 +828,6 @@ async fn live_daemon_direct_operator_follows_development_switch_without_phone_id
                 "pending"
             }
         );
-    }
-    if DEVELOPMENT_LOCAL_OPERATOR {
-        let occipital = fixture.open(Some("occipital"), "provider").await;
-        let digest = format!("sha256:{}", "a".repeat(64));
-        let id = fixture.request(&occipital, "consent.request", json!({
-            "kind":"rich_ui_approval", "title":"Approve provider", "prompt":"Review on this phone",
-            "default":"deny", "on_expiry":"deny", "urgency":"normal", "material_damage":false,
-            "late_execution":"notify_only", "scope":{}, "target":{"kind":"provider","label":"Weather"},
-            "options":[{"id":"approve","label":"Approve","effect":"grant"},{"id":"deny","label":"Decline","effect":"decline"}],
-            "rich_ui_approval":{"provider":"weather", "device":device, "manifestDigest":digest,
-                "capabilityDigest":digest, "approvalDigest":digest}
-        })).await.unwrap()["elicitation_id"].clone();
-        let forged = fixture.open(None, &format!("fed-phone:{device}")).await;
-        let params = json!({"elicitationId":id,"clientFeatures":["rich-ui-approval"]});
-        refused(
-            fixture
-                .request(&forged, "consent.get", params.clone())
-                .await,
-            "elicitation_not_found",
-        );
-        let mut answer = params;
-        answer["choiceId"] = json!("deny");
-        assert_eq!(
-            fixture
-                .request(&forged, "consent.answer", answer)
-                .await
-                .unwrap(),
-            json!({"ok":false,"code":"not_found"})
-        );
-        let pending = fixture
-            .request(
-                &forged,
-                "consent.list_pending",
-                json!({"clientFeatures":["rich-ui-approval"]}),
-            )
-            .await
-            .unwrap();
-        assert_eq!(pending["records"], json!([]));
     }
     fixture.stop().await;
 }

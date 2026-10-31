@@ -28,8 +28,6 @@ enum PersonFields<'a> {
         subject: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         expires_at_ms: Option<i64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        device: Option<String>,
     },
     Settled {
         outcome: &'a str,
@@ -49,7 +47,6 @@ impl ElicitationRecord {
             "consent" | "package" | "flow_decision" => "consent",
             "secret_use" => "secret_use",
             "flow_install" => "flow_install",
-            "rich_ui_approval" => "rich_ui",
             _ => return None,
         };
         let fields = match purpose {
@@ -63,11 +60,6 @@ impl ElicitationRecord {
                     card_kind,
                     subject,
                     expires_at_ms: self.expires_at_ms,
-                    device: self
-                        .request
-                        .rich_ui_approval
-                        .as_ref()
-                        .map(|body| format!("fed-phone:{}", body.device)),
                 })
             }
             "settled" => Some(PersonFields::Settled {

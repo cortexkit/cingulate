@@ -15,7 +15,6 @@ pub enum State {
     Answered,
     Expired,
     Withdrawn,
-    Revoked,
 }
 
 impl State {
@@ -25,7 +24,6 @@ impl State {
             Self::Answered => "answered",
             Self::Expired => "expired",
             Self::Withdrawn => "withdrawn",
-            Self::Revoked => "revoked",
         }
     }
 }
@@ -56,8 +54,6 @@ pub struct ElicitationRecord {
     pub answered_choice_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answered_at_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revoked_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered_device: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,7 +196,6 @@ impl ElicitationRecord {
             State::Answered => "answered",
             State::Expired => "expired",
             State::Withdrawn => "withdrawn",
-            State::Revoked => "revoked",
         };
         // Only an operator's answer names a choice; expiry and withdrawal do not.
         let choice = (self.state == State::Answered)

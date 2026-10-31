@@ -50,7 +50,7 @@ pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, W
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 15] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 14] = [
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
     ("consent.await", ManagementOperationKind::Query),
@@ -60,7 +60,6 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 15] = [
     ("consent.withdraw", ManagementOperationKind::Mutate),
     ("consent.detach", ManagementOperationKind::Mutate),
     ("consent.answer", ManagementOperationKind::Mutate),
-    ("consent.revoke", ManagementOperationKind::Mutate),
     ("consent.list_pending", ManagementOperationKind::Query),
     (WATCH_PENDING, ManagementOperationKind::Query),
     ("consent.outcomes", ManagementOperationKind::Query),
@@ -93,12 +92,6 @@ struct RequesterAdmission {
 // legacy generic-consent caller without a stable human identity, so it has no
 // display name and must never be shown as a raw principal.
 const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
-    RequesterAdmission {
-        principal: "reserved:occipital",
-        requester_name: Some("Occipital"),
-        kinds: &["rich_ui_approval"],
-        agent: SubjectAgent::Never,
-    },
     RequesterAdmission {
         principal: "reserved:cerebellum",
         requester_name: Some("Cerebellum"),
@@ -170,7 +163,6 @@ pub fn manifest() -> ModuleManifest {
                 "consent-single-use/v1".into(),
                 "consent-outcomes-late/v1".into(),
                 "consent-no-expiry/v1".into(),
-                "rich-ui-approval/v1".into(),
                 "secret-use-approval/v1".into(),
                 "flow-install-secrets/v1".into(),
                 "scope-workdir/v1".into(),
@@ -292,25 +284,15 @@ impl Stamp {
         .then_some(fingerprint)
     }
 
-    fn rich_ui_device_matches(&self, record: &ElicitationRecord) -> bool {
-        record
-            .request
-            .rich_ui_approval
-            .as_ref()
-            .is_none_or(|body| self.answering_device() == Some(body.device.as_str()))
-    }
     fn secret_use_phone(&self) -> Option<&str> {
         let fingerprint = self.harness.strip_prefix("fed-phone:")?;
         (self.label() == "reserved:callosum" && cingulate_decode::lowercase_hex(fingerprint, 32))
             .then_some(fingerprint)
     }
     fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
-        self.rich_ui_device_matches(record)
-            && (record.request.kind != "rich_ui_approval"
-                || feature_declared(params, "rich-ui-approval"))
-            && (!record.request.is_secret_card()
-                || (self.secret_use_phone().is_some()
-                    && feature_declared(params, "secret-use-approval")))
+        !record.request.is_secret_card()
+            || (self.secret_use_phone().is_some()
+                && feature_declared(params, "secret-use-approval"))
     }
     fn owner(&self) -> String {
         json!([self.label(), self.bind_session]).to_string()
@@ -751,9 +733,6 @@ impl Handler {
         }
     }
     async fn pointer(&self, record: &ElicitationRecord, retraction: bool) {
-        if record.request.kind == "rich_ui_approval" {
-            return;
-        }
         let mut value = json!({"elicitationId": record.elicitation_id,
             "kind": if retraction { "retraction" } else { "elicitation" },
             "eventAtMs": if retraction { record.answered_at_ms.expect("settlement time") } else { record.created_at_ms }});
@@ -1057,7 +1036,7 @@ impl Handler {
         }
         let id = match method {
             "consent.get" if operator_surface => Some(text(&params, "elicitationId")?),
-            "consent.answer" | "consent.revoke" => Some(text(&params, "elicitationId")?),
+            "consent.answer" => Some(text(&params, "elicitationId")?),
             "consent.get"
             | "consent.await"
             | "consent.withdraw"
@@ -1083,7 +1062,6 @@ impl Handler {
             "consent.get"
                 | "consent.await"
                 | "consent.withdraw"
-                | "consent.revoke"
                 | "consent.detach"
                 | "consent.report_execution"
         ) && !(method == "consent.get" && operator_surface)
@@ -1150,23 +1128,12 @@ impl Handler {
             .as_ref()
             .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?;
         let now = self.inner.options.clock.now_ms();
-        let rich_ui = feature_declared(&params, "rich-ui-approval");
         let secret_use = feature_declared(&params, "secret-use-approval");
         if method == "consent.answer" || (method == "consent.get" && operator_surface) {
             if let Some(record) = store
                 .get_phone(id.expect("phone id"), now)
                 .map_err(store_error)?
             {
-                if !stamp.rich_ui_device_matches(&record) {
-                    return if method == "consent.answer" {
-                        Ok(json!({"ok":false,"code":"not_found"}))
-                    } else {
-                        Err(Refusal::new(
-                            "elicitation_not_found",
-                            "elicitation not found",
-                        ))
-                    };
-                }
                 if record.request.is_secret_card()
                     && (!secret_use || stamp.secret_use_phone().is_none())
                 {
@@ -1182,40 +1149,6 @@ impl Handler {
                             "elicitation not found"
                         },
                     ));
-                }
-                if record.request.kind == "rich_ui_approval" && !rich_ui {
-                    return if method == "consent.answer" {
-                        Err(Refusal::new(
-                            "elicitation_rich_ui_approval_required",
-                            "declare clientFeatures rich-ui-approval",
-                        ))
-                    } else {
-                        Err(Refusal::new(
-                            "elicitation_not_found",
-                            "elicitation not found",
-                        ))
-                    };
-                }
-                if method == "consent.answer" {
-                    if let Some(body) = &record.request.rich_ui_approval {
-                        let binding = params.get("bindDigest");
-                        let grant = record.request.options.iter().any(|option| {
-                            Some(option.id.as_str()) == choice && option.effect == "grant"
-                        });
-                        if (grant || binding.is_some())
-                            && binding.and_then(Value::as_str) != Some(&body.approval_digest)
-                        {
-                            return Err(Refusal::new(
-                                "approval_digest_mismatch",
-                                "bindDigest must equal approvalDigest",
-                            ));
-                        }
-                    } else if params.get("bindDigest").is_some() {
-                        return Err(Refusal::new(
-                            "invalid_params",
-                            "bindDigest is only valid for rich_ui_approval",
-                        ));
-                    }
                 }
             }
         }
@@ -1246,7 +1179,6 @@ impl Handler {
                 | "consent.list_pending"
                 | "consent.answer"
                 | "consent.withdraw"
-                | "consent.revoke"
                 | "consent.detach"
         ) {
             store.sweep(now).map_err(store_error)?
@@ -1299,13 +1231,6 @@ impl Handler {
                 "consent.withdraw" => {
                     let mutation = store
                         .withdraw(&stamp.owner(), id.expect("withdraw id"), now)
-                        .map_err(store_error)?;
-                    events.extend(mutation.settlements);
-                    self.project(&mutation.value, false)
-                }
-                "consent.revoke" => {
-                    let mutation = store
-                        .revoke(&stamp.owner(), id.expect("revoke id"), now)
                         .map_err(store_error)?;
                     events.extend(mutation.settlements);
                     self.project(&mutation.value, false)
@@ -1379,12 +1304,6 @@ impl Handler {
                     // for a fresh list that includes them (or vice versa).
                     if option_group {
                         revision.push_str(":option-group");
-                    }
-                    if rich_ui {
-                        revision.push_str(&format!(
-                            ":rich-ui:device={}",
-                            stamp.answering_device().unwrap_or("none")
-                        ));
                     }
                     if secret_use && stamp.secret_use_phone().is_some() {
                         revision.push_str(":secret-use");
@@ -1624,11 +1543,6 @@ mod tests {
         assert_eq!(
             admissions,
             [
-                (
-                    "reserved:occipital",
-                    Some("Occipital"),
-                    vec!["rich_ui_approval"]
-                ),
                 (
                     "reserved:cerebellum",
                     Some("Cerebellum"),
@@ -2033,7 +1947,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod rich_ui_device_tests {
+mod answering_device_tests {
     use super::*;
 
     #[test]
@@ -2073,9 +1987,9 @@ mod rich_ui_device_tests {
         assert_eq!(stamp.answering_device(), None);
     }
 
-    /// A computer answers as its fingerprint under both the `computer` class and
-    /// the older `mac` spelling, so a card bound to it stays answerable across
-    /// Callosum's rename; an unknown class still yields no device.
+    /// Answer audits retain the fingerprint under both the `computer` class and
+    /// the older `mac` spelling across Callosum's rename; an unknown class still
+    /// yields no device.
     #[test]
     fn the_computer_class_answers_under_both_spellings() {
         let fingerprint = "300c9c9603b92a4b39ed3958bf924011";

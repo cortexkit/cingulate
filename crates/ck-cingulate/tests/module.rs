@@ -515,7 +515,6 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-single-use/v1",
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
-            "rich-ui-approval/v1",
             "secret-use-approval/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1"
@@ -541,7 +540,6 @@ async fn manifest_envelope_health_and_unknown_ops() {
         ("consent.withdraw", true),
         ("consent.detach", true),
         ("consent.answer", true),
-        ("consent.revoke", true),
         ("consent.list_pending", false),
         ("consent.watch_pending", false),
         ("consent.outcomes", false),
@@ -681,7 +679,6 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-single-use/v1",
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
-            "rich-ui-approval/v1",
             "secret-use-approval/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1"
@@ -1051,22 +1048,10 @@ async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_
     ))
     .unwrap();
     let device = "300c9c9603b92a4b39ed3958bf924011";
-    let digest = format!("sha256:{}", "a".repeat(64));
-    let rich_ui = json!({
-        "kind":"rich_ui_approval", "title":"Approve provider interface",
-        "prompt":"Review on this phone", "default":"deny", "on_expiry":"deny",
-        "options":[{"id":"approve","label":"Approve","effect":"grant"},
-                   {"id":"deny","label":"Decline","effect":"decline"}],
-        "urgency":"normal", "material_damage":false, "late_execution":"notify_only",
-        "scope":{"provider":"weather-tools"}, "target":{"kind":"provider","label":"Weather tools"},
-        "rich_ui_approval":{"provider":"weather-tools", "device":device,
-            "manifestDigest":digest, "capabilityDigest":digest, "approvalDigest":digest}
-    });
-    let features = json!(["secret-use-approval", "rich-ui-approval"]);
+    let features = json!(["secret-use-approval"]);
     for (module, request, decline) in [
         ("aft", secret["params"].clone(), "decline"),
         ("prefrontal-core", flow["params"].clone(), "decline"),
-        ("occipital", rich_ui, "deny"),
     ] {
         let f = Fixture::open(None).await;
         f.clock.set(1_700_000_000_000);
@@ -1138,35 +1123,14 @@ async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_
             "elicitation_not_found",
         )
         .await;
-        for choice in [
-            decline,
-            if module == "occipital" {
-                "approve"
-            } else if module == "aft" {
-                "allow"
-            } else {
-                "install"
-            },
-        ] {
-            let mut answer =
-                json!({"elicitationId":hidden_id,"choiceId":choice,"clientFeatures":features});
-            if module == "occipital" {
-                answer["bindDigest"] = json!(digest);
-                let before = f.rows();
-                assert_eq!(
-                    ok(&f.handler, &local, "consent.answer", answer).await,
-                    json!({"ok":false,"code":"not_found"})
-                );
-                assert_eq!(f.rows(), before);
-            } else {
-                f.unchanged_error(
-                    &local,
-                    "consent.answer",
-                    answer,
-                    "elicitation_secret_use_approval_required",
-                )
-                .await;
-            }
+        for choice in [decline, if module == "aft" { "allow" } else { "install" }] {
+            f.unchanged_error(
+                &local,
+                "consent.answer",
+                json!({"elicitationId":hidden_id,"choiceId":choice,"clientFeatures":features}),
+                "elicitation_secret_use_approval_required",
+            )
+            .await;
         }
         let ordinary_id = f.request(&carrier(), body()).await;
         let changed = next_operator_item(&mut items).await;
@@ -1196,6 +1160,33 @@ async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_
             items.try_recv().is_err(),
             "phone-only changes must not leak"
         );
+    }
+}
+
+#[tokio::test]
+async fn retired_rich_ui_approval_is_refused_like_any_unknown_kind_without_writes() {
+    let f = Fixture::open(None).await;
+    for (requester, code, message) in [
+        (
+            direct(),
+            "elicitation_unknown_kind",
+            "only consent is supported",
+        ),
+        (
+            stamp("reserved:occipital"),
+            "elicitation_requester_refused",
+            "requester reserved:occipital is refused",
+        ),
+    ] {
+        for kind in ["unknown_kind", "rich_ui_approval"] {
+            let mut request = body();
+            request["kind"] = json!(kind);
+            assert_eq!(
+                f.unchanged_error(&requester, "consent.request", request, code)
+                    .await,
+                message
+            );
+        }
     }
 }
 
@@ -1239,6 +1230,7 @@ async fn allowlist_table_identity_and_order() {
         ),
         ("unverified", None, "", ""),
         ("reserved:other", None, "", ""),
+        ("reserved:occipital", None, "", ""),
     ] {
         let stamp = Stamp {
             carried_agent_id: carried.into(),

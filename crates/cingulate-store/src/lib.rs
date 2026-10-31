@@ -28,7 +28,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 9] = [
+pub const MIGRATIONS: [Migration; 10] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -64,6 +64,10 @@ pub const MIGRATIONS: [Migration; 9] = [
     Migration {
         version: 9,
         statements: include_str!("../migrations/009_secret_use.sql"),
+    },
+    Migration {
+        version: 10,
+        statements: include_str!("../migrations/010_retire_rich_ui_approval.sql"),
     },
 ];
 
@@ -206,9 +210,11 @@ pub struct ConsentStore {
 /// because a watch item always carries the card's current projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
+    /// Whether the card is secret-bearing: a vault secret-use card or a flow
+    /// install that carries secrets (`ConsentRequest::is_secret_card`). Kept
+    /// after payload pruning, because a watch that may not see secret cards must
+    /// not see their ids either, not even as a removal.
     pub secret_use: bool,
-    /// Kept after payload pruning so a watch never reveals a private removal id.
-    pub rich_ui_device: Option<String>,
     pub version: i64,
     pub elicitation_id: String,
 }
@@ -320,14 +326,13 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id,MAX(rich_ui_device),MAX(secret_use) FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(secret_use) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
                 .query_map(params![version, limit as i64], |row| {
                     Ok(Change {
-                        secret_use: row.get(3)?,
-                        rich_ui_device: row.get(2)?,
+                        secret_use: row.get(2)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
                     })
@@ -375,7 +380,12 @@ impl ConsentStore {
             let secret_expiry = if let Some(body) = &flow_secrets {
                 Some(body.expires_at_ms().map_err(Error::Refused)?)
             } else {
-                request.secret_use.as_ref().map(|body| body.expires_at_ms()).transpose().map_err(Error::Refused)?
+                request
+                    .secret_use
+                    .as_ref()
+                    .map(|body| body.expires_at_ms())
+                    .transpose()
+                    .map_err(Error::Refused)?
             };
             let filed_expiry = request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl));
             let deadline = if flow_secrets.is_some() {
@@ -384,21 +394,36 @@ impl ConsentStore {
                 secret_expiry.or(filed_expiry)
             };
             if secret_expiry.is_some_and(|expiry| expiry <= now_ms) {
-                return Err(refuse("elicitation_expired", "secret use request has expired"));
+                return Err(refuse(
+                    "elicitation_expired",
+                    "secret use request has expired",
+                ));
             }
             if let Some(body) = &request.secret_use {
                 for item in &body.items {
-                    let existing: Option<String> = tx.query_row(
-                        "SELECT elicitation_id FROM secret_use_requests WHERE request_id=?1",
-                        [&item.request_id], |row| row.get(0),
-                    ).optional()?;
+                    let existing: Option<String> = tx
+                        .query_row(
+                            "SELECT elicitation_id FROM secret_use_requests WHERE request_id=?1",
+                            [&item.request_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
                     if let Some(id) = existing {
                         if let Some(old) = load(tx, &id)? {
-                            if check_owner(tx, &identity.owner, &id).is_ok() && old.request.secret_use.as_ref() == Some(body) {
-                                return Ok(CreateResult { record: old, created: false, settlements: vec![] });
+                            if check_owner(tx, &identity.owner, &id).is_ok()
+                                && old.request.secret_use.as_ref() == Some(body)
+                            {
+                                return Ok(CreateResult {
+                                    record: old,
+                                    created: false,
+                                    settlements: vec![],
+                                });
                             }
                         }
-                        return Err(refuse("elicitation_request_conflict", "secret request id is already used"));
+                        return Err(refuse(
+                            "elicitation_request_conflict",
+                            "secret request id is already used",
+                        ));
                     }
                 }
             }
@@ -460,7 +485,6 @@ impl ConsentStore {
                 requester: identity.requester.clone(),
                 state: State::Pending,
                 answered_at_ms: None,
-                revoked_at_ms: None,
                 answered_device: None,
                 secret_use_answer: None,
                 answered_choice_id: None,
@@ -473,25 +497,23 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,rich_ui_device,secret_use) \
-                  VALUES (?1,?2,?3,?4,'pending',?5,?6,?7)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use) \
+                  VALUES (?1,?2,?3,?4,'pending',?5,?6)",
                 params![
                     record.elicitation_id,
                     identity.owner,
                     record.request.dedup_key,
                     serde_json::to_string(&record)?,
                     record.expires_at_ms,
-                    record
-                        .request
-                        .rich_ui_approval
-                        .as_ref()
-                        .map(|body| &body.device),
                     record.request.is_secret_card()
                 ],
             )?;
             if let Some(body) = &record.request.secret_use {
                 for item in &body.items {
-                    tx.execute("INSERT INTO secret_use_requests(request_id,elicitation_id) VALUES (?1,?2)", params![item.request_id, record.elicitation_id])?;
+                    tx.execute(
+                        "INSERT INTO secret_use_requests(request_id,elicitation_id) VALUES (?1,?2)",
+                        params![item.request_id, record.elicitation_id],
+                    )?;
                 }
             }
             enqueue_person_notice(tx, &record, "escalated")?;
@@ -704,53 +726,6 @@ impl ConsentStore {
                 AnswerOutcome::Answered(record)
             };
             Ok(Mutation { value, settlements })
-        })
-    }
-
-    pub fn revoke(
-        &self,
-        owner: &str,
-        id: &str,
-        now_ms: i64,
-    ) -> Result<Mutation<ElicitationRecord>> {
-        self.transaction(|tx| {
-            let mut record = owned_retained(tx, owner, id, now_ms)?;
-            if record.request.kind != "rich_ui_approval" {
-                return Err(refuse(
-                    "elicitation_unknown_kind",
-                    "revoke requires rich_ui_approval",
-                ));
-            }
-            if record.state == State::Revoked {
-                return Ok(Mutation {
-                    value: record,
-                    settlements: vec![],
-                });
-            }
-            let granted = record.request.options.iter().any(|option| {
-                Some(option.id.as_str()) == record.answered_choice_id.as_deref()
-                    && option.effect == "grant"
-            });
-            if record.state != State::Answered || !granted {
-                let state = if record.state == State::Answered {
-                    "declined"
-                } else {
-                    record.state.as_str()
-                };
-                return Err(refuse(
-                    "elicitation_not_granted",
-                    &format!("revoke requires a granted card; this card is {state}"),
-                ));
-            }
-            record.state = State::Revoked;
-            record.revoked_at_ms = Some(now_ms);
-            // The answer's durable settlement notice already retracts the phone
-            // push. Revocation must not replace it or enqueue a second notice.
-            save(tx, &record)?;
-            Ok(Mutation {
-                settlements: vec![record.clone()],
-                value: record,
-            })
         })
     }
 

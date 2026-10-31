@@ -516,40 +516,6 @@ async fn person_package_and_basal_decision_are_consent_notices() {
 }
 
 #[tokio::test]
-async fn person_rich_ui_device_and_revoke_keep_first_settlement() {
-    let f = Fixture::new(true).await;
-    let owner = stamp("occipital", ScopeKind::Head);
-    let digest = format!("sha256:{}", "a".repeat(64));
-    let device = "300c9c9603b92a4b39ed3958bf924011";
-    let mut body = consent_card();
-    body["kind"] = json!("rich_ui_approval");
-    body["rich_ui_approval"] = json!({"approvalDigest":digest,"manifestDigest":digest,"capabilityDigest":digest,"provider":"weather-tools","device":device});
-    body.as_object_mut().unwrap().remove("expires_in_ms");
-    let id = f.ask(&owner, body).await;
-    f.deliver().await;
-    assert_eq!(
-        f.card_notices(&id)[0].2,
-        format!(
-            r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"rich_ui","subject":"reserved:occipital","device":"fed-phone:{device}"}}}}"#
-        )
-    );
-    let mut bound_phone = phone();
-    bound_phone.harness = format!("fed-phone:{device}");
-    f.ok(&bound_phone, "consent.answer", json!({"elicitationId":id,"choiceId":"allow_once","bindDigest":digest,"clientFeatures":["rich-ui-approval"]})).await;
-    f.deliver().await;
-    let before = f.card_notices(&id);
-    f.ok(&owner, "consent.revoke", json!({"elicitationId":id}))
-        .await;
-    f.deliver().await;
-    assert_eq!(f.card_notices(&id), before);
-    assert_eq!(before.len(), 2);
-    assert_eq!(before[0].0, "escalated");
-    assert_eq!(before[1].0, "settled");
-    let settled: Value = serde_json::from_str(&before[1].2).unwrap();
-    assert_eq!(settled["fields"], json!({"outcome":"answered"}));
-}
-
-#[tokio::test]
 async fn only_aft_can_raise_permission_kinds() {
     let f = Fixture::new(true).await;
     for module in [

@@ -11,8 +11,7 @@ During development, no caller check may block an app or module being built, so
 version 0.13.2 opens the operator surface to daemon-stamped plain local programs
 (`Principal::Direct`) through the single code switch `DEVELOPMENT_LOCAL_OPERATOR`.
 Local answers have no device fingerprint; permission answer audits retain `direct`.
-Secret-use cards, flow
-installs carrying secrets and device-bound rich UI approvals remain hidden and
+Secret-use cards and flow installs carrying secrets remain hidden and
 unanswerable locally. Set the switch to false before public release; it is not a
 configuration setting.
 
@@ -45,7 +44,7 @@ duration and per-item decisions. Late answers after statement expiry are refused
 ### Operations
 
 The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
-`consent/v1` and fifteen management operations (`OPERATIONS` and `manifest()`,
+`consent/v1` and fourteen management operations (`OPERATIONS` and `manifest()`,
 `crates/ck-cingulate/src/lib.rs:36-71`):
 
 | Operation | Kind | Who may call (`dispatch`, `lib.rs:585-594`) |
@@ -56,8 +55,7 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | `consent.answers`, `consent.ack` | query, mutate | The owner's cursor feed of settled cards. |
 | `consent.report_execution` | mutate | The owner, after a granted card was acted on. |
 | `consent.withdraw` | mutate | The owner settles its own pending card. |
-| `consent.revoke` | mutate | The owner revokes a granted `rich_ui_approval`. Only `reserved:occipital` may request this kind. |
-| `consent.watch_pending` | query/watch | Operator routes (including local `direct` during development), filtered by feature and device for `rich_ui_approval` and, for `secret_use`, only `reserved:callosum` routes whose harness is `fed-phone:` plus 32 lowercase hex and whose client advertises `secret-use-approval`. |
+| `consent.watch_pending` | query/watch | Operator routes (including local `direct` during development); secret-use cards and flow installs carrying secrets are visible only to `reserved:callosum` routes whose harness is `fed-phone:` plus 32 lowercase hex and whose client advertises `secret-use-approval`. |
 | `consent.answer` | mutate | Operator surfaces only (`operator`, `lib.rs:279-288`). |
 | `consent.list_pending` | query | Operator surfaces only. |
 | `consent.outcomes` | query | `reserved:prefrontal-core` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |

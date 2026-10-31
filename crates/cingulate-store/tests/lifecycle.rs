@@ -198,7 +198,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7,8,9"
+        "1,2,3,4,5,6,7,8,9,10"
     );
     let answer_schema: String = conn
         .query_row(
@@ -286,14 +286,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,10,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,11,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 10"));
-    assert!(error.to_string().contains("migration 9"));
+    assert!(error.to_string().contains("version 11"));
+    assert!(error.to_string().contains("migration 10"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1276,7 +1276,6 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
         DROP TRIGGER cingulate_pending_insert;
         DROP TRIGGER cingulate_pending_update;
         DROP TRIGGER cingulate_pending_delete;
-        ALTER TABLE elicitation_records DROP COLUMN rich_ui_device;
         DROP TABLE cingulate_pending_revision;
         DELETE FROM cortexkit_schema_version WHERE namespace='cingulate' AND version=3;",
         )
@@ -1325,7 +1324,6 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         requester: "direct".into(),
         state: State::Pending,
         answered_at_ms: None,
-        revoked_at_ms: None,
         answered_device: None,
         secret_use_answer: None,
         answered_choice_id: None,
@@ -1344,7 +1342,6 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
     drop(old);
     let mut before = rows(&scratch.sql(), "elicitation_records");
     for row in &mut before {
-        row.push(Value::Null);
         row.push(json!(0));
     }
     let (store, settlements) = scratch.open(100);
@@ -1556,7 +1553,6 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
     drop(old);
     let mut before = snapshot(&scratch);
     for row in &mut before.records {
-        row.push(Value::Null);
         row.push(json!(0));
     }
     let notices = rows(&scratch.sql(), "access_notices");
@@ -1999,69 +1995,6 @@ fn change_log_records_every_card_change_and_compacts_with_a_stale_boundary() {
 }
 
 #[test]
-fn rich_ui_migration_preserves_v7_records_cursors_and_change_triggers() {
-    let conn = Connection::open_in_memory().unwrap();
-    conn.pragma_update(None, "foreign_keys", true).unwrap();
-    for migration in &cingulate_store::MIGRATIONS[..7] {
-        conn.execute_batch(migration.statements).unwrap();
-    }
-    conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state) VALUES('old','owner','{}','answered')", []).unwrap();
-    conn.execute("INSERT INTO elicitation_answers(cursor,elicitation_id,owner,settled_at_ms) VALUES(42,'old','owner',100)", []).unwrap();
-    conn.execute_batch(cingulate_store::MIGRATIONS[7].statements)
-        .unwrap();
-    assert_eq!(
-        conn.query_row(
-            "SELECT cursor FROM elicitation_answers WHERE elicitation_id='old'",
-            [],
-            |r| r.get::<_, i64>(0)
-        )
-        .unwrap(),
-        42
-    );
-    assert_eq!(
-        conn.query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
-            .optional()
-            .unwrap(),
-        None
-    );
-    let before: i64 = conn
-        .query_row("SELECT MAX(version) FROM cingulate_changes", [], |r| {
-            r.get(0)
-        })
-        .unwrap();
-    conn.execute("UPDATE elicitation_records SET state='revoked',record_json='{\"revokedAtMs\":200}' WHERE elicitation_id='old'", []).unwrap();
-    assert!(
-        conn.query_row("SELECT MAX(version) FROM cingulate_changes", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap()
-            > before
-    );
-    conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,rich_ui_device) VALUES('new','owner','{}','pending','device')", []).unwrap();
-    assert_eq!(
-        conn.query_row("SELECT value FROM cingulate_pending_revision", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-    conn.execute("INSERT INTO elicitation_answers(elicitation_id,owner,settled_at_ms) VALUES('new','owner',200)", []).unwrap();
-    assert_eq!(
-        conn.query_row(
-            "SELECT cursor FROM elicitation_answers WHERE elicitation_id='new'",
-            [],
-            |r| r.get::<_, i64>(0)
-        )
-        .unwrap(),
-        43
-    );
-    conn.execute(
-        "UPDATE elicitation_records SET record_json=NULL WHERE elicitation_id='new'",
-        [],
-    )
-    .unwrap();
-    assert_eq!(conn.query_row("SELECT rich_ui_device FROM cingulate_changes WHERE elicitation_id='new' ORDER BY version DESC LIMIT 1", [], |r| r.get::<_,String>(0)).unwrap(), "device");
-}
-
-#[test]
 fn secret_use_migration_preserves_v8_rows_cursors_and_private_removals() {
     let conn = Connection::open_in_memory().unwrap();
     conn.pragma_update(None, "foreign_keys", true).unwrap();
@@ -2120,4 +2053,147 @@ fn secret_use_migration_preserves_v8_rows_cursors_and_private_removals() {
         .unwrap(),
         3
     );
+}
+
+#[test]
+fn retirement_migrates_v9_without_device_columns_or_revoked_state() {
+    for retain_answers in [false, true] {
+        let scratch = Scratch::new();
+        let old = cortexkit_store::open_sqlite(&scratch.descriptor).unwrap();
+        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..9])
+            .unwrap();
+        let conn = scratch.sql();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,dedup_key,record_json,state,settled_at_ms,acknowledged,notice_delivered,secret_use) VALUES('old','owner','key','{}','answered',100,1,1,1)", []).unwrap();
+        conn.execute("INSERT INTO elicitation_answers(cursor,elicitation_id,owner,settled_at_ms) VALUES(42,'old','owner',100)", []).unwrap();
+        conn.execute(
+            "INSERT INTO secret_use_requests(request_id,elicitation_id) VALUES('request','old')",
+            [],
+        )
+        .unwrap();
+        if !retain_answers {
+            conn.execute("DELETE FROM elicitation_answers", []).unwrap();
+        }
+        let before_records = rows(&conn, "elicitation_records");
+        let before_answers = rows(&conn, "elicitation_answers");
+        let revision: i64 = conn
+            .query_row("SELECT value FROM cingulate_pending_revision", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let changes: i64 = conn
+            .query_row("SELECT MAX(version) FROM cingulate_changes", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let schema_version = || {
+            conn.query_row(
+                "SELECT MAX(version) FROM cortexkit_schema_version WHERE namespace='cingulate'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(schema_version(), 9);
+        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS)
+            .unwrap();
+        assert_eq!(schema_version(), 10);
+        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS)
+            .unwrap();
+        assert_eq!(schema_version(), 10);
+        for table in ["elicitation_records", "cingulate_changes"] {
+            let names: Vec<String> = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |r| r.get(1))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert!(!names.iter().any(|name| name == "rich_ui_device"));
+        }
+        let mut expected_records = before_records;
+        for row in &mut expected_records {
+            // The retired device column preceded secret_use in schema version 9.
+            row.remove(row.len() - 2);
+        }
+        assert_eq!(rows(&conn, "elicitation_records"), expected_records);
+        assert_eq!(rows(&conn, "elicitation_answers"), before_answers);
+        assert_eq!(
+            conn.query_row("SELECT value FROM cingulate_pending_revision", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            revision
+        );
+        assert_eq!(
+            conn.query_row("SELECT MAX(version) FROM cingulate_changes", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            changes
+        );
+        assert!(conn
+            .query_row(
+                "SELECT secret_use FROM cingulate_changes WHERE elicitation_id='old'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert_eq!(
+            conn.query_row(
+                "SELECT elicitation_id FROM secret_use_requests WHERE request_id='request'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "old"
+        );
+        assert!(conn
+            .execute(
+                "UPDATE elicitation_records SET state='revoked' WHERE elicitation_id='old'",
+                []
+            )
+            .is_err());
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
+                .optional()
+                .unwrap(),
+            None
+        );
+        conn.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,secret_use) VALUES('new','owner','{}','pending',1)", []).unwrap();
+        conn.execute("INSERT INTO elicitation_answers(elicitation_id,owner,settled_at_ms) VALUES('new','owner',200)", []).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT cursor FROM elicitation_answers WHERE elicitation_id='new'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            43
+        );
+        conn.execute(
+            "UPDATE elicitation_records SET record_json=NULL WHERE elicitation_id='new'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "DELETE FROM elicitation_records WHERE elicitation_id='new'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM cingulate_changes WHERE elicitation_id='new' AND secret_use=1", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(
+            conn.query_row("SELECT value FROM cingulate_pending_revision", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            revision + 2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM elicitation_answers WHERE elicitation_id='new'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
 }
