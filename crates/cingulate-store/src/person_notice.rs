@@ -9,7 +9,11 @@ use crate::{ids, load, ConsentStore, ElicitationRecord, Result, ScopeIdentity, S
 struct PersonNotice<'a> {
     elicitation_id: &'a str,
     purpose: &'a str,
-    asker: Value,
+    // Absent when the card was filed without a daemon-stamped session scope,
+    // such as an install card core files itself. Core then pushes the card
+    // with no agent label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asker: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     head: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,7 +40,7 @@ impl ElicitationRecord {
     fn person_notice<'a>(
         &'a self,
         purpose: &'a str,
-        asker: &ScopeIdentity,
+        asker: Option<&ScopeIdentity>,
     ) -> Option<PersonNotice<'a>> {
         if self.request.at_console.is_some() {
             return None;
@@ -79,7 +83,7 @@ impl ElicitationRecord {
         Some(PersonNotice {
             elicitation_id: &self.elicitation_id,
             purpose,
-            asker: asker.target(),
+            asker: asker.map(ScopeIdentity::target),
             head: self.head.as_ref().map(|head| head.target()),
             fields,
         })
@@ -104,7 +108,8 @@ fn person_notice_body(
 ) -> Result<Option<String>> {
     // Older records predate the stored asker field. Their owner still contains
     // the daemon's scope coordinates; a bare requester-supplied session is not
-    // sufficient to address a notice.
+    // sufficient to address a notice. A card with no attested scope at all still
+    // queues its notices, with `asker` omitted, so the person's phone is told.
     let asker = match &record.asker {
         Some(asker) => Some(asker.clone()),
         None => {
@@ -125,9 +130,8 @@ fn person_notice_body(
                 })
         }
     };
-    asker
-        .as_ref()
-        .and_then(|asker| record.person_notice(purpose, asker))
+    record
+        .person_notice(purpose, asker.as_ref())
         .map(|body| serde_json::to_string(&body).map_err(crate::Error::from))
         .transpose()
 }

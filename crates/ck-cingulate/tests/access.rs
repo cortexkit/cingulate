@@ -184,18 +184,39 @@ async fn person_consent_filing_enqueues_exact_notice_without_requester_text() {
     );
 }
 
+// A card filed outside any session scope (core's own install cards, a local
+// app) has no asker to name, but the person must still be told about it.
 #[tokio::test]
-async fn unscoped_person_card_files_normally_without_a_notice() {
+async fn unscoped_person_card_notices_core_without_an_asker() {
     let f = Fixture::new(true).await;
     let id = f.ask(&local_operator(), consent_card()).await;
     assert!(id.starts_with("el_"));
-    let card = f
-        .ok(&phone(), "consent.get", json!({"elicitationId":id}))
-        .await;
-    assert_eq!(card["state"], "pending");
     f.deliver().await;
-    assert!(f.card_notices(&id).is_empty());
-    assert!(f.runtime.notices.lock().unwrap().is_empty());
+    let rows = f.card_notices(&id);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, "escalated");
+    assert_eq!(
+        rows[0].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"escalated","fields":{{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":61000}}}}"#
+        )
+    );
+    f.ok(
+        &phone(),
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"deny"}),
+    )
+    .await;
+    f.deliver().await;
+    let rows = f.card_notices(&id);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].0, "settled");
+    assert_eq!(
+        rows[1].2,
+        format!(
+            r#"{{"elicitation_id":"{id}","purpose":"settled","fields":{{"outcome":"answered"}}}}"#
+        )
+    );
 }
 
 #[tokio::test]

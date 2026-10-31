@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.5 (ck-cingulate)
+
+- Notify core about person cards filed without a session scope too, such as the
+  install cards core files for its own flows. Their `escalated`, `settled` and
+  `withdrawn` notices omit `asker` and `head`; everything else is unchanged, and
+  scoped cards' notices keep their exact bytes. Until now these cards queued
+  nothing, so they never pushed to the phone. Pending ones get their notice once
+  on startup. Requires a core that accepts a notice without `asker`.
+
+## 0.5.3 (cingulate-store)
+
+- Make a person-card notice's `asker` optional and omit it for cards with no
+  stamped scope. Scoped bodies are byte-identical to 0.5.2.
+
 ## 0.13.4 (ck-cingulate)
 
 - Notify core when a phone-answerable card with a daemon-stamped asker is filed,

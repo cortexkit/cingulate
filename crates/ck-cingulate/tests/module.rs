@@ -283,6 +283,14 @@ impl Fixture {
             self._dir.path().to_str().unwrap(),
         );
         drop(std::mem::replace(&mut self.handler, replacement));
+        // A card filed without a session scope queues a person notice, and the
+        // old handler spawned a task to deliver it. That task holds a handler
+        // clone, and so the store lease, until it runs. A stopped process ends
+        // such tasks with it; here, let it finish on this single-threaded
+        // runtime before the new handler opens the store.
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
         self.handler.hello_ack(&self.ack(machine)).await;
         assert_eq!(self.handler.health_report().status, HealthStatus::Ok);
     }

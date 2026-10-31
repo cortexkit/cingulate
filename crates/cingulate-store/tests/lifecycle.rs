@@ -1378,8 +1378,22 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
             .elicitation_id,
         "acc_2"
     );
-    assert_eq!(store.access_notices(200).unwrap().len(), 1);
-    assert_eq!(store.access_notices(200).unwrap()[0].purpose, "user_ask");
+    // The legacy pending card has no stamped scope, so opening the upgraded
+    // store gives it its one person notice; the access ask keeps its own.
+    let mut notices: Vec<_> = store
+        .access_notices(200)
+        .unwrap()
+        .into_iter()
+        .map(|notice| (notice.elicitation_id, notice.purpose))
+        .collect();
+    notices.sort();
+    assert_eq!(
+        notices,
+        vec![
+            ("acc_2".to_string(), "user_ask".to_string()),
+            ("el_1".to_string(), "escalated".to_string()),
+        ]
+    );
 }
 
 #[test]
@@ -1549,7 +1563,21 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
     let (store, events) = scratch.open(102);
     assert!(events.is_empty());
     assert_eq!(snapshot(&scratch), before);
-    assert_eq!(rows(&scratch.sql(), "access_notices"), notices);
+    // The one pending card has no stamped scope; opening the upgraded store
+    // queues its person notice once, ahead of the rows already there.
+    let mut expected = vec![vec![
+        json!("el_1"),
+        json!("escalated"),
+        json!(
+            r#"{"elicitation_id":"el_1","purpose":"escalated","fields":{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":60100}}"#
+        ),
+        json!("pending"),
+        json!(0),
+        json!(0),
+        Value::Null,
+    ]];
+    expected.extend(notices);
+    assert_eq!(rows(&scratch.sql(), "access_notices"), expected);
     assert!(rows(&scratch.sql(), "pragma_foreign_key_check").is_empty());
     let info = rows(&scratch.sql(), "pragma_table_info('elicitation_records')");
     assert_eq!(

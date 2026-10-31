@@ -1050,9 +1050,6 @@ impl Handler {
             self.settlements(&result.settlements).await;
             self.wake(&result.record.elicitation_id);
             if result.created {
-                if stamp.scope.is_none() && result.record.request.at_console.is_none() {
-                    tracing::info!(elicitation_id=%result.record.elicitation_id, principal=%stamp.label(), "person card filed without an attested asker; no core notice queued");
-                }
                 self.pointer(&result.record, false).await;
                 self.spawn_pending_notices().await;
             }

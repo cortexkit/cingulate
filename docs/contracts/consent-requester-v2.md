@@ -247,10 +247,20 @@ The exact stored JSON has this stable key order (optional keys are omitted):
 {"elicitation_id":"el_1","purpose":"withdrawn","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"}}
 ```
 
-Unscoped person cards still file normally but enqueue no notice; Cingulate logs
-their id and attested principal once at INFO, without request text.
+A person card filed without a daemon-stamped session scope (an install card core
+files itself, or a local app's card) queues the same notices with `asker` and
+`head` omitted, so the person is still told; core pushes it with no agent label:
 
-- `asker` and optional `head` come only from daemon-attested owner scopes. A
+```json
+{"elicitation_id":"el_1","purpose":"escalated","fields":{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":1700000600000}}
+{"elicitation_id":"el_1","purpose":"settled","fields":{"outcome":"answered"}}
+```
+
+Core must accept a missing `asker` on these `el_` notices before a Cingulate
+that sends them is deployed.
+
+- `asker`, when present, and optional `head` come only from daemon-attested
+  owner scopes. A
   worker's `head` requires a same-owner parent with daemon-confirmed `Linked`
   state; otherwise attribution stays with its asker. Older cards without a saved
   parent omit `head`; no body-supplied session is used.
