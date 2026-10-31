@@ -109,7 +109,6 @@ impl PermissionsRuntime for DaemonAccessRuntime {
                 module_id: module.into(),
             },
             identity: BindIdentity::new(
-                "/",
                 "cingulate",
                 format!("permissions:{}", NEXT_ROUTE.fetch_add(1, Ordering::Relaxed)),
             ),

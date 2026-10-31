@@ -102,7 +102,7 @@ fn stamp(module: &str, kind: ScopeKind) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/tmp", "test-harness", "untrusted-session"),
+            BindIdentity::new("test-harness", "untrusted-session"),
         )
         .with_principal(principal(module))
         .with_scope(scope),
@@ -115,7 +115,7 @@ fn phone() -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/tmp", "fed-phone:test", "phone"),
+            BindIdentity::new("fed-phone:test", "phone"),
         )
         .with_principal(principal("callosum")),
     )
@@ -127,7 +127,7 @@ fn local_operator() -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", "alfonso-desktop", "desktop"),
+            BindIdentity::new("alfonso-desktop", "desktop"),
         )
         .with_principal(Principal::Direct),
     )

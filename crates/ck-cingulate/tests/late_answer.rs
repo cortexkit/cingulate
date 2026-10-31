@@ -82,7 +82,7 @@ fn stamped(module: &str, handle: u16) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/tmp", "test-harness", "untrusted-session"),
+            BindIdentity::new("test-harness", "untrusted-session"),
         )
         .with_principal(principal(module))
         .with_scope(
@@ -113,7 +113,7 @@ fn phone() -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/tmp", "fed-phone:test", "phone"),
+            BindIdentity::new("fed-phone:test", "phone"),
         )
         .with_principal(principal("callosum")),
     )

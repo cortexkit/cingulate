@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "cktui",
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "presence_device_not_allowed",
+      "message": "presence device is not allowed"
+    }
+  },
+  "route": {
+    "harness": "core",
+    "principal": "reserved:prefrontal-core"
+  }
+}

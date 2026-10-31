@@ -158,7 +158,7 @@ pub fn mac_stamp() -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", "fed-mac:vector-device", "ignored-session"),
+            BindIdentity::new("fed-mac:vector-device", "ignored-session"),
         )
         .with_principal(Principal::Reserved {
             module_id: "callosum".into(),

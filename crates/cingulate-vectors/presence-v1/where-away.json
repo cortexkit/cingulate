@@ -1,0 +1,15 @@
+{
+  "result": {
+    "devices": [
+      {
+        "device_id": "phone:0123456789abcdef0123456789abcdef",
+        "device_kind": "phone",
+        "expires_at_ms": 1700000002250,
+        "reported_at_ms": 1700000001250,
+        "state": "locked"
+      }
+    ],
+    "watching": [],
+    "where": "away"
+  }
+}

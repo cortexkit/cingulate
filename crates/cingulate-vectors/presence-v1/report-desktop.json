@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "body-cannot-override",
+      "device_kind": "phone",
+      "focus": [
+        "agent-a",
+        "agent-b"
+      ],
+      "shows_inline": [
+        "ask",
+        "card"
+      ],
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "result": {
+      "device_id": "computer:alfonso-desktop",
+      "expires_at_ms": 1700000001000
+    }
+  },
+  "route": {
+    "harness": "desktop",
+    "operator_app": "alfonso-desktop",
+    "principal": "direct"
+  }
+}

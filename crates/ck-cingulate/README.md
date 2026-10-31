@@ -1,10 +1,25 @@
 # ck-cingulate
 
-Supervised subc consent module, id `cingulate`, providing `consent/v1` without
+Supervised subc consent module, id `cingulate`, providing `consent/v1` and `presence/v1` without
 requiring an orchestrator, identity, presence or notification provider. Run the
-`ck-cingulate` binary under subc. Its management manifest declares precisely ten
-consent operations and module-managed concurrency. `health.check` is also handled
+`ck-cingulate` binary under subc. Its management manifest declares seventeen
+management operations and module-managed concurrency. `health.check` is also handled
 by the SDK's control plane and reads only an atomic readiness status.
+
+## Presence
+
+`presence.report` replaces one device's in-memory activity. The route admits the
+reporter and sets its kind; only a development-switch `direct` caller names its
+own app.
+`presence.get` reads fresh devices and the shared summary; `presence.watch`
+streams that summary, coalescing changes within 250 ms and waking on the nearest
+expiry. These paths never acquire the consent-store lock and work before the
+store opens. Core and local operator-standing callers can read; only paired
+phone routes and local operator-standing apps can report. The verified
+`operator_app` stamp overrides the body's app; development `direct` uses a
+validated app code. See the [complete contract](../../docs/contracts/presence-v1.md)
+and [generated samples](../cingulate-vectors/presence-v1). The manifest declares
+the capability and all three operations; this module has no `role.describe` handler.
 
 ## Integration and test seams
 
@@ -73,8 +88,10 @@ prevent settlement/refresh wakes from being lost between a read and a wait.
 Pointer delivery is awaited in order, including retraction before replacement,
 and notification errors cannot reverse a committed state or fail an operation.
 
-The module uses subc-client-rs 0.27.0, subc-protocol 0.30.0 and the SDK's
-subc-transport 0.11.0. The SDK refuses undecodable control requests without
+The module uses subc-client-rs 0.33.1, subc-protocol 0.34.0 and the SDK's
+subc-transport 0.15.0 to receive the daemon's verified operator-app stamp.
+Bind identities now contain harness and session, not a project-root claim.
+The SDK refuses undecodable control requests without
 terminating the serve loop. Cingulate does not handle flows or manage agent-run
 scopes and declares neither `flow-scopes/v1` nor `agent-run-scopes/v1`.
 `tests/live_daemon.rs` runs the real daemon router and the SDK-served module in

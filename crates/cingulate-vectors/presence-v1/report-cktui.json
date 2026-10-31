@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "cktui",
+      "focus": [
+        "agent-b",
+        "agent-c"
+      ],
+      "shows_inline": [
+        "mention",
+        "future_kind"
+      ],
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "result": {
+      "device_id": "computer:cktui",
+      "expires_at_ms": 1700000001000
+    }
+  },
+  "route": {
+    "harness": "terminal",
+    "operator_app": null,
+    "principal": "direct"
+  }
+}

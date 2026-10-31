@@ -48,7 +48,7 @@ pub fn filer(module: &str, agent: Option<&str>) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", "sender", "ignored"),
+            BindIdentity::new("sender", "ignored"),
         )
         .with_principal(Principal::Reserved {
             module_id: module.into(),
@@ -75,7 +75,7 @@ pub fn phone(device: &str) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", format!("fed-phone:{device}"), "ignored"),
+            BindIdentity::new(format!("fed-phone:{device}"), "ignored"),
         )
         .with_principal(Principal::Reserved {
             module_id: "callosum".into(),

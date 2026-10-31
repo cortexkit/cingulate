@@ -1,0 +1,170 @@
+[
+  {
+    "agent_id": "agent-a",
+    "deliver": "none",
+    "kind": "ask",
+    "now_ms": 1700000000000,
+    "summary": {
+      "watching": [
+        {
+          "agent_id": "agent-a",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card"
+          ]
+        },
+        {
+          "agent_id": "agent-b",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card",
+            "future_kind",
+            "mention"
+          ]
+        },
+        {
+          "agent_id": "agent-c",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "future_kind",
+            "mention"
+          ]
+        }
+      ],
+      "where": "phone"
+    }
+  },
+  {
+    "agent_id": "agent-a",
+    "deliver": "phone",
+    "kind": "mention",
+    "now_ms": 1700000000000,
+    "summary": {
+      "watching": [
+        {
+          "agent_id": "agent-a",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card"
+          ]
+        },
+        {
+          "agent_id": "agent-b",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card",
+            "future_kind",
+            "mention"
+          ]
+        },
+        {
+          "agent_id": "agent-c",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "future_kind",
+            "mention"
+          ]
+        }
+      ],
+      "where": "phone"
+    }
+  },
+  {
+    "agent_id": "agent-a",
+    "deliver": "phone",
+    "kind": "ask",
+    "now_ms": 1700000060001,
+    "summary": {
+      "watching": [
+        {
+          "agent_id": "agent-a",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card"
+          ]
+        },
+        {
+          "agent_id": "agent-b",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card",
+            "future_kind",
+            "mention"
+          ]
+        },
+        {
+          "agent_id": "agent-c",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "future_kind",
+            "mention"
+          ]
+        }
+      ],
+      "where": "phone"
+    }
+  },
+  {
+    "agent_id": "agent-a",
+    "deliver": "desktop",
+    "kind": "other",
+    "now_ms": 1700000000000,
+    "summary": {
+      "watching": [
+        {
+          "agent_id": "agent-a",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card"
+          ]
+        },
+        {
+          "agent_id": "agent-b",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "ask",
+            "card",
+            "future_kind",
+            "mention"
+          ]
+        },
+        {
+          "agent_id": "agent-c",
+          "seen_at_ms": 1700000000000,
+          "shows_inline": [
+            "future_kind",
+            "mention"
+          ]
+        }
+      ],
+      "where": "computer"
+    }
+  },
+  {
+    "agent_id": "agent-a",
+    "deliver": "phone",
+    "kind": "ask",
+    "now_ms": 1700000001250,
+    "summary": {
+      "watching": [],
+      "where": "away"
+    }
+  },
+  {
+    "agent_id": "agent-a",
+    "deliver": "phone",
+    "kind": "ask",
+    "now_ms": 1700000000000,
+    "summary": {
+      "watching": [],
+      "where": "unknown"
+    }
+  }
+]

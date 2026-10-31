@@ -7,6 +7,12 @@ contract is written ahead of implementation. Cingulate serves the aggregator
 side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
 serve the capability itself.
 
+Version 0.15.0 adds [presence/v1](contracts/presence-v1.md), a separate memory-only
+map of phone and local-app activity. It does not alter card authorization or
+add delivery fields to consent streams. The pure `cingulate-presence` crate
+shares summaries and routing decisions with core. Generated samples
+and their checksum manifest live in `crates/cingulate-vectors/presence-v1`.
+
 During development, no caller check may block an app or module being built, so
 version 0.13.2 opens the operator surface to daemon-stamped plain local programs
 (`Principal::Direct`) through the single code switch `DEVELOPMENT_LOCAL_OPERATOR`.
@@ -44,11 +50,14 @@ duration and per-item decisions. Late answers after statement expiry are refused
 ### Operations
 
 The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
-`consent/v1` and fourteen management operations (`OPERATIONS` and `manifest()`,
-`crates/ck-cingulate/src/lib.rs:36-71`):
+`consent/v1`, `presence/v1` and seventeen management operations (`OPERATIONS` and
+`manifest()` in `crates/ck-cingulate/src/lib.rs`):
 
-| Operation | Kind | Who may call (`dispatch`, `lib.rs:585-594`) |
+| Operation | Kind | Who may call (`Handler::dispatch` in `lib.rs`; presence gates in `presence.rs`) |
 |---|---|---|
+| `presence.report` | mutate | Callosum's paired-phone route, verified local operator app, or local `direct` while the development switch is enabled. The route decides who may report and the device kind; only a development-switch `direct` caller names its own app. |
+| `presence.get` | query | Core (`reserved:prefrontal-core`) and local operator-standing callers. |
+| `presence.watch` | query/watch | Same readers as get; current summary followed by coalesced changes, including expiry. |
 | `consent.request` | mutate | An allowlisted requester for its card kind (`Stamp::allowed_kind`, `lib.rs:104-113`; checked in `identity`, `lib.rs:495-497`). |
 | `consent.get` | query | The owner (snake_case requester projection), or an operator surface (camelCase surface projection by `elicitationId`). |
 | `consent.await` | query | The owner. Bounded wait, at most 120 s (`lib.rs:626`). |
@@ -151,8 +160,9 @@ system temp directory.
   switch to cingulate's notifier follows the consent push runbook: the Mac's
   notification key moves to Claustrum, the phone ships Auth-mode opening, then the
   sender switches and Callosum admits `reserved:cingulate` on `push_submit`.
-- **Not built:** `presence/v1` (cingulate serves it; tagged samples come before
-  the phone builds) and holding `at_console` cards until unlock.
+- **Not built:** the phone and desktop presence reporters (Cingulate serves
+  `presence/v1` from 0.15.0, with tagged samples to build against) and holding
+  `at_console` cards until unlock.
 
 ## Who consumes which operations
 

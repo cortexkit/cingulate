@@ -164,7 +164,7 @@ impl AccessRuntime for DaemonAccessRuntime {
                 RouteTarget::ManagementSurface {
                     module_id: "prefrontal-core".into(),
                 },
-                BindIdentity::new("/", "cingulate", "permission-notices"),
+                BindIdentity::new("cingulate", "permission-notices"),
                 request.into_bytes(),
                 CallOptions {
                     timeout: Duration::from_secs(5),

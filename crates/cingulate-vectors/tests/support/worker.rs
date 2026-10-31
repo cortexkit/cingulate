@@ -32,7 +32,7 @@ pub fn stamp(module: &str, kind: ScopeKind) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", "test-harness", "untrusted-session"),
+            BindIdentity::new("test-harness", "untrusted-session"),
         )
         .with_principal(if module == "direct" {
             Principal::Direct

@@ -44,13 +44,17 @@ pub use identity::EntorhinalResolver;
 mod permissions;
 pub use permissions::{PermissionsCallError, PermissionsRuntime};
 mod pending_watch;
+mod presence;
 pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, WATCH_PENDING};
 
 /// The module id the subc daemon registers. The backup catalog records the same
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 14] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 17] = [
+    ("presence.report", ManagementOperationKind::Mutate),
+    ("presence.get", ManagementOperationKind::Query),
+    ("presence.watch", ManagementOperationKind::Query),
     ("consent.request", ManagementOperationKind::Mutate),
     ("consent.get", ManagementOperationKind::Query),
     ("consent.await", ManagementOperationKind::Query),
@@ -156,6 +160,11 @@ pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder(MODULE_ID, env!("CARGO_PKG_VERSION"))
         .capabilities(Some(CapabilityDeclarations {
             provides: vec![
+                "presence/v1".into(),
+                subc_protocol::peer::OPERATOR_APP_CAPABILITY.into(),
+                // Cingulate takes a project only from a session scope's stamp,
+                // never from the connection, so the daemon needn't fill one.
+                subc_protocol::scope::BIND_NO_PROJECT_CAPABILITY.into(),
                 "consent/v1".into(),
                 "agent-run-scopes/v1".into(),
                 "consent-card-text/v1".into(),
@@ -184,12 +193,11 @@ pub fn manifest() -> ModuleManifest {
             identity_scope: vec![],
             concurrency: Concurrency::ModuleManaged,
         }])
-        // The watch holds its request open and streams card changes until the
-        // caller unsubscribes, the route closes or the module stops.
-        .operation_delivery(BTreeMap::from([(
-            WATCH_PENDING.to_owned(),
-            OperationDelivery::WATCH,
-        )]))
+        // Watches stream until unsubscribe, route close or module shutdown.
+        .operation_delivery(BTreeMap::from([
+            (WATCH_PENDING.to_owned(), OperationDelivery::WATCH),
+            ("presence.watch".to_owned(), OperationDelivery::WATCH),
+        ]))
         .build()
 }
 
@@ -210,6 +218,8 @@ pub struct Stamp {
     pub operator_surface: bool,
     /// Operator authority supplied by the development opening, not by a phone.
     pub local_operator: bool,
+    /// Verified local app identifier supplied only by the daemon's peer stamp.
+    pub operator_app: Option<String>,
     pub sim_surface: bool,
     pub console_machine_id: Option<String>,
 }
@@ -236,6 +246,7 @@ impl Stamp {
         let mut stamp = Self::from_principal(req.principal.as_ref());
         stamp.scope = req.scope.clone();
         stamp.harness = req.identity.harness.clone();
+        stamp.operator_app = req.peer.operator_app.as_ref().map(|app| app.app.clone());
         if let Some(scope) = &req.scope {
             // A scope reference can be reused for a new session. Including its
             // owner and epoch prevents that session from reading the previous session's cards.
@@ -452,6 +463,8 @@ struct Inner {
     /// Set once the module is stopping; open watches end and new ones are refused.
     stopping: watch::Sender<bool>,
     watch_slots: Arc<tokio::sync::Semaphore>,
+    presence: StdMutex<BTreeMap<String, cingulate_presence::Device>>,
+    presence_changes: watch::Sender<()>,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -548,6 +561,8 @@ impl Handler {
                 changes: watch::channel(()).0,
                 stopping: watch::channel(false).0,
                 watch_slots: pending_watch::watch_slots(),
+                presence: StdMutex::new(BTreeMap::new()),
+                presence_changes: watch::channel(()).0,
             }),
         }
     }
@@ -979,6 +994,9 @@ impl Handler {
                 "unknown_method",
                 format!("unknown method {method}"),
             ));
+        }
+        if let Some(reply) = self.presence_dispatch(stamp, method, &params) {
+            return reply;
         }
         if let Some(reply) = self.permissions_dispatch(stamp, method, &params).await {
             return reply;
@@ -1493,6 +1511,13 @@ impl ModuleHandler for Handler {
             // The watch watches ctx.cancelled() itself and ends with Streamed.
             return self.handle_watch_stamped(&stamp, &body, &ctx).await;
         }
+        if serde_json::from_slice::<Method>(&body)
+            .is_ok_and(|request| request.method == "presence.watch")
+        {
+            return self
+                .handle_presence_watch_stamped(&stamp, &body, &ctx)
+                .await;
+        }
         tokio::select! {
             result = self.handle_stamped(&stamp, &body) => result,
             _ = ctx.cancelled() => HandlerOutcome::Error { code: "cancelled".into(), message: "request cancelled".into() },
@@ -1635,7 +1660,7 @@ mod tests {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", harness, "untrusted-session"),
+            BindIdentity::new(harness, "untrusted-session"),
         )
         .with_principal(Principal::Reserved {
             module_id: principal.into(),
@@ -1726,7 +1751,7 @@ mod tests {
         changed.scope.as_mut().unwrap().owner = Principal::Direct;
         assert_ne!(Stamp::from_bind(&changed).owner(), stamp.owner());
         changed = req.clone();
-        changed.identity = BindIdentity::new("/different", "other", "forged-session");
+        changed.identity = BindIdentity::new("other", "forged-session");
         assert_eq!(Stamp::from_bind(&changed).owner(), stamp.owner());
         handler.on_route_gone(&req.handle).await;
         assert!(!handler

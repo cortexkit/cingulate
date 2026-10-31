@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": 42,
+      "device_kind": "computer",
+      "focus": [
+        "agent-a"
+      ],
+      "shows_inline": [],
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "result": {
+      "device_id": "phone:0123456789abcdef0123456789abcdef",
+      "expires_at_ms": 1700000001000
+    }
+  },
+  "route": {
+    "harness": "fed-phone:0123456789abcdef0123456789abcdef",
+    "operator_app": null,
+    "principal": "reserved:callosum"
+  }
+}

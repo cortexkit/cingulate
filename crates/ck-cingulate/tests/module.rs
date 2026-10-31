@@ -414,7 +414,7 @@ fn bound_surface(principal: Principal, harness: &str) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", harness, "desktop-session"),
+            BindIdentity::new(harness, "desktop-session"),
         )
         .with_principal(principal),
     )
@@ -508,6 +508,9 @@ async fn manifest_envelope_health_and_unknown_ops() {
     assert_eq!(
         capabilities.provides,
         [
+            "presence/v1",
+            "operator-app/v1",
+            "bind-no-project/v1",
             "consent/v1",
             "agent-run-scopes/v1",
             "consent-card-text/v1",
@@ -531,6 +534,9 @@ async fn manifest_envelope_health_and_unknown_ops() {
     };
     assert_eq!(*concurrency, Concurrency::ModuleManaged);
     let expected = [
+        ("presence.report", true),
+        ("presence.get", false),
+        ("presence.watch", false),
         ("consent.request", true),
         ("consent.get", false),
         ("consent.await", false),
@@ -566,7 +572,11 @@ async fn manifest_envelope_health_and_unknown_ops() {
             &Stamp::default(),
             method,
             Value::Null,
-            if method.starts_with("permissions.") {
+            if method == "presence.report" {
+                "presence_device_not_allowed"
+            } else if method.starts_with("presence.") {
+                "presence_read_not_allowed"
+            } else if method.starts_with("permissions.") {
                 "permissions_operator_required"
             } else {
                 "consent_unavailable"
@@ -672,6 +682,9 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
     assert_eq!(
         ck_cingulate::manifest().capabilities.unwrap().provides,
         [
+            "presence/v1",
+            "operator-app/v1",
+            "bind-no-project/v1",
             "consent/v1",
             "agent-run-scopes/v1",
             "consent-card-text/v1",
@@ -2517,7 +2530,7 @@ async fn attested_carrier_routes_store_subject_and_isolate_scope_epochs() {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", "ignored", "forged-session"),
+            BindIdentity::new("ignored", "forged-session"),
         )
         .with_principal(Principal::Reserved {
             module_id: principal.into(),

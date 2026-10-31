@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "cktui",
+      "state": "away",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "invalid_params",
+      "message": "{\"field\":\"state\"}"
+    }
+  }
+}

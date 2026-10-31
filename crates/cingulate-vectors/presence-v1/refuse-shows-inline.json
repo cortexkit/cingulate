@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "cktui",
+      "shows_inline": [
+        "ask-card"
+      ],
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "invalid_params",
+      "message": "{\"field\":\"shows_inline\"}"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "cktui",
+      "focus": [
+        "agent a"
+      ],
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "invalid_params",
+      "message": "{\"field\":\"focus\"}"
+    }
+  }
+}

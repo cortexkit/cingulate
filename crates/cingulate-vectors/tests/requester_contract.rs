@@ -142,7 +142,7 @@ async fn basal_requests_need_no_phone_harness_but_remain_owner_bound() {
         RouteTarget::ManagementSurface {
             module_id: "cingulate".into(),
         },
-        BindIdentity::new("/scratch", "not-a-phone", "not-attested-session"),
+        BindIdentity::new("not-a-phone", "not-attested-session"),
     )
     .with_principal(Principal::Reserved {
         module_id: "basal".into(),

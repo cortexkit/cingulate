@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "presence.get",
+    "params": {
+      "app": "cktui",
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "presence_read_not_allowed",
+      "message": "presence reader is not allowed"
+    }
+  },
+  "route": {
+    "harness": "fed-phone:0123456789abcdef0123456789abcdef",
+    "principal": "reserved:callosum"
+  }
+}

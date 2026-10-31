@@ -125,11 +125,13 @@ fn watch_pending_manifest_is_pinned_and_covers_exact_bytes() {
 }
 
 #[test]
-fn manifest_declares_only_the_watch_with_watch_delivery() {
+fn manifest_declares_card_and_presence_watches_with_watch_delivery() {
     let manifest = ck_cingulate::manifest();
     assert!(manifest.is_watch_operation("consent.watch_pending"));
     for (name, _) in ck_cingulate::OPERATIONS {
-        if name != "consent.watch_pending" {
+        if name == "presence.watch" {
+            assert!(manifest.is_watch_operation(name));
+        } else if name != "consent.watch_pending" {
             assert!(!manifest.is_watch_operation(name), "{name}");
         }
     }

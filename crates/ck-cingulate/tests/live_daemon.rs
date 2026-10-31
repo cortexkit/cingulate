@@ -65,7 +65,6 @@ struct Fixture {
     tasks: Vec<Task>,
     consumer: SubcConsumer,
     owner: TcpStream,
-    project: PathBuf,
     connection_path: PathBuf,
     store_path: PathBuf,
     _scratch: ScratchDir,
@@ -152,7 +151,7 @@ impl Fixture {
             key: connection_file::generate_key().unwrap(),
             daemon_id: connection_file::generate_daemon_id().unwrap(),
             pid: std::process::id(),
-            daemon_ver: "0.33.0".into(),
+            daemon_ver: "0.39.0".into(),
         };
         connection_file::write_atomic(&connection_path, &info).unwrap();
         let published = connection_file::read_for_client(&connection_path).unwrap();
@@ -252,7 +251,6 @@ impl Fixture {
             tasks,
             consumer,
             owner,
-            project,
             connection_path,
             store_path: store_path.into(),
             _scratch: scratch,
@@ -260,11 +258,7 @@ impl Fixture {
     }
 
     fn identity(&self, harness: &str) -> BindIdentity {
-        BindIdentity::new(
-            self.project.to_str().unwrap(),
-            harness,
-            format!("untrusted-{harness}"),
-        )
+        BindIdentity::new(harness, format!("untrusted-{harness}"))
     }
 
     async fn open(&self, caller: Option<&str>, harness: &str) -> RouteHandle {
@@ -615,6 +609,9 @@ async fn live_daemon_catalog_contains_consent_manifest() {
     assert_eq!(
         capabilities.provides,
         [
+            "presence/v1",
+            "operator-app/v1",
+            "bind-no-project/v1",
             "consent/v1",
             "agent-run-scopes/v1",
             "consent-card-text/v1",
@@ -660,6 +657,9 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent.withdraw",
             "permissions.list_all",
             "permissions.revoke",
+            "presence.get",
+            "presence.report",
+            "presence.watch",
         ]
     );
     let route = fixture.open(None, "local").await;
@@ -670,6 +670,41 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             .unwrap()["status"],
         "ok"
     );
+    fixture.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_presence_report_then_get() {
+    let fixture = Fixture::start().await;
+    let reporter = fixture.open(None, "plain-direct").await;
+    let report = fixture
+        .request(
+            &reporter,
+            "presence.report",
+            json!({
+                "app":"cktui", "device_kind":"phone", "state":"active", "ttl_ms":120_000,
+                "focus":["agent-a"], "shows_inline":["ask"]
+            }),
+        )
+        .await;
+    if DEVELOPMENT_LOCAL_OPERATOR {
+        let report = report.unwrap();
+        assert_eq!(report["device_id"], "computer:cktui");
+        let reader = fixture.open(Some(OWNER), "core").await;
+        let get = fixture
+            .request(&reader, "presence.get", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(get["where"], "computer");
+        assert_eq!(get["devices"].as_array().unwrap().len(), 1);
+        assert_eq!(get["devices"][0]["device_id"], "computer:cktui");
+        assert_eq!(get["devices"][0]["device_kind"], "computer");
+        assert_eq!(get["devices"][0]["expires_at_ms"], report["expires_at_ms"]);
+        assert_eq!(get["watching"][0]["agent_id"], "agent-a");
+        assert_eq!(get["watching"][0]["shows_inline"], json!(["ask"]));
+    } else {
+        refused(report, "presence_device_not_allowed");
+    }
     fixture.stop().await;
 }
 

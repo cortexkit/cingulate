@@ -1,0 +1,65 @@
+{
+  "result": {
+    "devices": [
+      {
+        "device_id": "computer:alfonso-desktop",
+        "device_kind": "computer",
+        "expires_at_ms": 1700000001000,
+        "focus": [
+          "agent-a",
+          "agent-b"
+        ],
+        "reported_at_ms": 1700000000000,
+        "shows_inline": [
+          "ask",
+          "card"
+        ],
+        "state": "active"
+      },
+      {
+        "device_id": "computer:cktui",
+        "device_kind": "computer",
+        "expires_at_ms": 1700000001000,
+        "focus": [
+          "agent-b",
+          "agent-c"
+        ],
+        "reported_at_ms": 1700000000000,
+        "shows_inline": [
+          "mention",
+          "future_kind"
+        ],
+        "state": "active"
+      }
+    ],
+    "watching": [
+      {
+        "agent_id": "agent-a",
+        "seen_at_ms": 1700000000000,
+        "shows_inline": [
+          "ask",
+          "card"
+        ]
+      },
+      {
+        "agent_id": "agent-b",
+        "seen_at_ms": 1700000000000,
+        "shows_inline": [
+          "ask",
+          "card",
+          "future_kind",
+          "mention"
+        ]
+      },
+      {
+        "agent_id": "agent-c",
+        "seen_at_ms": 1700000000000,
+        "shows_inline": [
+          "future_kind",
+          "mention"
+        ]
+      }
+    ],
+    "where": "computer"
+  }
+}

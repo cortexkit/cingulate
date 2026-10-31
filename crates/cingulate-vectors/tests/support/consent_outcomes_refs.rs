@@ -22,7 +22,7 @@ fn scoped_requester() -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", "test-harness", "untrusted-session"),
+            BindIdentity::new("test-harness", "untrusted-session"),
         )
         .with_principal(Principal::Reserved {
             module_id: "cerebellum".into(),

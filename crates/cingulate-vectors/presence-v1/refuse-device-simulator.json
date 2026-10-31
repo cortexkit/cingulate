@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "presence.report",
+    "params": {
+      "app": "cktui",
+      "state": "active",
+      "ttl_ms": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "presence_device_not_allowed",
+      "message": "presence device is not allowed"
+    }
+  },
+  "route": {
+    "harness": "fed-sim:0123456789abcdef0123456789abcdef",
+    "principal": "reserved:callosum"
+  }
+}

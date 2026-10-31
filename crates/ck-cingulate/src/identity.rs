@@ -351,7 +351,6 @@ impl DaemonAccessRuntime {
         let mut route = AgentRoute {
             consumer: consumer.clone(),
             identity: BindIdentity::new(
-                "/",
                 "cingulate",
                 format!(
                     "agent-identity:{}",

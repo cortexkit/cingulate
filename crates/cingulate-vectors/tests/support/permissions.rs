@@ -147,7 +147,7 @@ pub fn bound(principal: &str, harness: &str) -> Stamp {
             RouteTarget::ManagementSurface {
                 module_id: "cingulate".into(),
             },
-            BindIdentity::new("/scratch", harness, "surface"),
+            BindIdentity::new(harness, "surface"),
         )
         .with_principal(Principal::Reserved {
             module_id: principal.into(),

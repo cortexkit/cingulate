@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.15.0 (ck-cingulate), 0.1.0 (cingulate-presence), 0.8.0 (cingulate-vectors)
+
+- Apps can report where the person is through `presence.report`. Reports replace
+  the previous report for that phone or local app, expire within two minutes,
+  and stay only in memory. The daemon route decides who may report and the
+  device kind; only a local app under the development switch names itself. No presence data reaches the consent store, outbox or backups.
+- Core and local operator apps can read `presence.get` or stream
+  `presence.watch`. Active phones take precedence over computers. Watched chats
+  merge inline item kinds and newest report times across active apps. Changes
+  coalesce for 250 ms; timestamp-only refreshes do not emit a frame. Expiry uses
+  the nearest deadline, not polling.
+- The new pure `cingulate-presence` crate shares summaries and delivery routing
+  with core, including recent inline suppression. Consent card streams are
+  unchanged. Production-generated, checksum-pinned samples cover the contract.
+- Upgrade the subc SDK to 0.33.1 and protocol to 0.34.0 so verified operator-app
+  stamps reach the handler; migrate bind constructors to harness/session and
+  the real-daemon fixture to daemon 0.39.0. `cingulate-decode` is unchanged.
+- Declare `bind-no-project/v1`. Cingulate takes a project only from a session
+  scope's stamp, never from the connection, so the daemon no longer fills a
+  placeholder folder on routes to it. Cingulate's own routes send no folder,
+  as before: the daemon fills `/` for targets that haven't declared
+  `bind-no-project/v1`, the value Cingulate used to send itself.
+
 ## 0.14.0 (ck-cingulate), 0.7.0 (cingulate-decode), 0.6.0 (cingulate-store), 0.7.0 (cingulate-vectors)
 
 - Retire rich UI approval cards. Installing a tool provider is now the consent

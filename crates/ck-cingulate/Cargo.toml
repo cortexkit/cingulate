@@ -1,11 +1,12 @@
 [package]
 name = "ck-cingulate"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
 cingulate-decode = { path = "../cingulate-decode" }
+cingulate-presence = { path = "../cingulate-presence" }
 cingulate-store = { path = "../cingulate-store" }
 cortexkit-agent-identity = "=0.1.1"
 cortexkit-lease = "=0.1.2"
@@ -14,8 +15,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
-subc-client-rs = "=0.32.12"
-subc-protocol = "=0.33.5"
+subc-client-rs = "=0.33.1"
+subc-protocol = "=0.34.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 
@@ -23,7 +24,7 @@ tracing = "0.1"
 tokio = { version = "1", features = ["test-util"] }
 cortexkit-test-support = "=0.1.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
-subc-daemon = { version = "=0.38.0", features = ["test-support"] }
-subc-transport = "=0.14.1"
+subc-daemon = { version = "=0.39.0", features = ["test-support"] }
+subc-transport = "=0.15.0"
 tempfile = "3"
 tracing-subscriber = "0.3"

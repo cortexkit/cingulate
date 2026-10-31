@@ -1,6 +1,6 @@
 [package]
 name = "cingulate-vectors"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 publish = false
 
@@ -10,11 +10,12 @@ async-trait = "0.1"
 cingulate-decode = { path = "../cingulate-decode" }
 cingulate-store = { path = "../cingulate-store" }
 ck-cingulate = { path = "../ck-cingulate" }
+cingulate-presence = { path = "../cingulate-presence" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
-subc-client-rs = "=0.32.12"
-subc-protocol = "=0.33.5"
+subc-client-rs = "=0.33.1"
+subc-protocol = "=0.34.0"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
