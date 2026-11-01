@@ -23,8 +23,8 @@ The module serves the `consent/v1` capability. Requesters bind to the capability
 The design and its review rulings are in [docs/design.md](docs/design.md).
 
 Version 0.15.0 also provides [presence/v1](docs/contracts/presence-v1.md):
-`presence.report`, `presence.get` and streaming `presence.watch`. The pure
-`cingulate-presence` crate shares summary and routing rules with core; generated
+`presence.report`, `presence.get` and streaming `presence.watch`. The published
+`cortexkit-presence` crate holds the summary and routing rules core uses too; generated
 samples are in [presence-v1](crates/cingulate-vectors/presence-v1).
 
 ## Status

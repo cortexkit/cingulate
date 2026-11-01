@@ -463,7 +463,7 @@ struct Inner {
     /// Set once the module is stopping; open watches end and new ones are refused.
     stopping: watch::Sender<bool>,
     watch_slots: Arc<tokio::sync::Semaphore>,
-    presence: StdMutex<BTreeMap<String, cingulate_presence::Device>>,
+    presence: StdMutex<BTreeMap<String, cortexkit_presence::Device>>,
     presence_changes: watch::Sender<()>,
 }
 impl Drop for Inner {

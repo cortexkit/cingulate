@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.1 (ck-cingulate), 0.8.1 (cingulate-vectors)
+
+- Presence summaries and routing now come from `cortexkit-presence` 0.1.0 on
+  crates.io, which core also uses, so both read one copy of the rules. The
+  in-repository `cingulate-presence` crate is removed. Its code moved
+  unchanged, and every presence sample regenerates byte for byte, so the
+  `presence-v1` folder and its checksums are untouched. Its README still names
+  the old crate, which is where those bytes were first generated.
+
 ## 0.15.0 (ck-cingulate), 0.1.0 (cingulate-presence), 0.8.0 (cingulate-vectors)
 
 - Apps can report where the person is through `presence.report`. Reports replace

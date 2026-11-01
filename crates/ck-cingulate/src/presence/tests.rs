@@ -282,7 +282,7 @@ async fn watch_coalesces_and_emits_on_expiry_without_refresh_spam() {
     assert_eq!(task.await.unwrap(), HandlerOutcome::Streamed);
     assert_eq!(
         handler().presence_snapshot().1.location,
-        cingulate_presence::Where::Unknown
+        cortexkit_presence::Where::Unknown
     );
 }
 

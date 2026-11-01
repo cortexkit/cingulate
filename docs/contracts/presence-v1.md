@@ -97,9 +97,10 @@ mutex, never the consent-store lock, and never awaits while holding it.
 
 ## Shared routing crate
 
-`cingulate-presence` is pure Rust with serde types and no I/O, async runtime or
-store dependency. Cingulate uses `summarize(reports, now_ms)` for both get and
-watch. Core can depend on the crate by release git pin and call
+`cortexkit-presence` (crates.io, published from the shared commons library) is
+pure Rust with serde types and no I/O, async runtime or store dependency.
+Cingulate uses `summarize(reports, now_ms)` for both get and watch. Core
+depends on the same crate by version and calls
 `route(summary, kind, agent_id, now_ms) -> Deliver`:
 
 1. `none` if that agent's watching entry lists the kind and

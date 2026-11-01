@@ -1,9 +1,0 @@
-[package]
-name = "cingulate-presence"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-description = "Pure presence summaries and notification routing for CortexKit"
-
-[dependencies]
-serde = { version = "1", features = ["derive"] }

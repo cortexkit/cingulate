@@ -2,7 +2,7 @@
 //! watches share the module's watch slots with consent watches.
 
 use cingulate_decode::Refusal;
-use cingulate_presence::{summarize, Device, DeviceKind, Report, State, Summary};
+use cortexkit_presence::{summarize, Device, DeviceKind, Report, State, Summary};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use subc_client_rs::HandlerOutcome;

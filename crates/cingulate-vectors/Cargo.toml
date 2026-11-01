@@ -1,6 +1,6 @@
 [package]
 name = "cingulate-vectors"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 publish = false
 
@@ -10,7 +10,7 @@ async-trait = "0.1"
 cingulate-decode = { path = "../cingulate-decode" }
 cingulate-store = { path = "../cingulate-store" }
 ck-cingulate = { path = "../ck-cingulate" }
-cingulate-presence = { path = "../cingulate-presence" }
+cortexkit-presence = "0.1.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 serde_jcs = "0.2"

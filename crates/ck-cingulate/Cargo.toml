@@ -1,12 +1,12 @@
 [package]
 name = "ck-cingulate"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
 cingulate-decode = { path = "../cingulate-decode" }
-cingulate-presence = { path = "../cingulate-presence" }
+cortexkit-presence = "0.1.0"
 cingulate-store = { path = "../cingulate-store" }
 cortexkit-agent-identity = "=0.1.1"
 cortexkit-lease = "=0.1.2"

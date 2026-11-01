@@ -9,8 +9,8 @@ serve the capability itself.
 
 Version 0.15.0 adds [presence/v1](contracts/presence-v1.md), a separate memory-only
 map of phone and local-app activity. It does not alter card authorization or
-add delivery fields to consent streams. The pure `cingulate-presence` crate
-shares summaries and routing decisions with core. Generated samples
+add delivery fields to consent streams. Summaries and routing decisions come
+from the published `cortexkit-presence` crate, which core uses too. Generated samples
 and their checksum manifest live in `crates/cingulate-vectors/presence-v1`.
 
 During development, no caller check may block an app or module being built, so
