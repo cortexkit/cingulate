@@ -175,8 +175,14 @@ Cingulate calls `permissions.list {agent_id?}` on every module that provides
   faulted) or `unsupported` (the module declares the capability but does not
   serve `permissions.list`). A module that could not be read is named by its
   status and carries no `grants`; it is never returned as an empty list.
-- `version` is the lowercase hex SHA-256 of the RFC 8785 bytes of `modules`.
-  Clients treat it as opaque. When `since_version` equals the current version the
+- For a row whose holder kind is `module` and that carries no `holder.label`,
+  Cingulate fills `holder.label` from that module's `display_name` in the
+  daemon's `catalog.list`, when the module is registered and declares one. A
+  label the provider wrote always wins. A surface therefore reads only
+  `holder.label` and falls back to the bare `module_id`.
+- `version` is the lowercase hex SHA-256 of the RFC 8785 bytes of `modules`,
+  after labels are filled, so a module renaming itself changes it. Clients
+  treat it as opaque. When `since_version` equals the current version the
   reply is `{version, unchanged: true}` without `modules`.
 
 Vectors: [`list-all-ok`](../../test-vectors/permissions-v1/list-all-ok.json),
