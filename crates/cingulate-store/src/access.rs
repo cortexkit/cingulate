@@ -433,6 +433,17 @@ impl ConsentStore {
             rows.into_iter().map(|s| serde_json::from_str(&s).map_err(Into::into)).collect()
         })
     }
+    pub fn access_pending_page(
+        &self,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AccessRecord>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare("SELECT record_json FROM access_asks WHERE state LIKE 'pending:%' AND elicitation_id>COALESCE(?1,'') ORDER BY elicitation_id LIMIT ?2")?;
+            let rows = stmt.query_map(params![after, limit as i64], |r| r.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            rows.into_iter().map(|s| serde_json::from_str(&s).map_err(Into::into)).collect()
+        })
+    }
     pub fn access_answer(
         &self,
         id: &str,
@@ -542,6 +553,22 @@ impl ConsentStore {
             }
             settle(tx, &mut record, "access_head_gone", now)?;
             Ok(Some(record))
+        })
+    }
+    pub fn access_asker_gone(&self, id: &str, now: i64) -> Result<Option<AccessMutation>> {
+        self.transaction(|tx| {
+            let Some(mut record) = load(tx, id)? else {
+                return Ok(None);
+            };
+            if !record.pending() {
+                return Ok(None);
+            }
+            settle(tx, &mut record, "access_asker_gone", now)?;
+            Ok(Some(AccessMutation {
+                record,
+                changed: true,
+                code: None,
+            }))
         })
     }
 }

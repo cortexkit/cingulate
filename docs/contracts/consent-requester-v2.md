@@ -122,8 +122,13 @@ not route disappearance or a core lookup. The daemon's `not_live` while its
 configured owner has not re-synced is unknown, not proof of death. Unknown or
 failed liveness at creation refuses `access_unavailable`; for an already-open
 ask it leaves the ask pending. The existing maintenance sweep checks pending
-head legs and settles definitive head loss as `access_head_gone`. It never
-compares an ask's age or a reply deadline. No answer leg expires.
+head legs and settles definitive head loss as `access_head_gone`. It also
+checks the stamped asking session itself, including worker scopes, for every
+pending answer leg. Definitive asker loss settles as `access_asker_gone`,
+retracts the user card and queues the usual `settled` notice. Asker probes are
+paged and time-bounded; unknown liveness, errors and timeouts keep asks pending
+with bounded exponential backoff. Neither sweep compares an ask's age or a
+reply deadline. No answer leg expires.
 
 ## Request bodies
 
@@ -175,7 +180,8 @@ and optional `note`. Refusals have no `answered_by` and have their `access_*`
 `outcome` and `code`. Explicit `deny` has outcome `deny`, code `access_declined`.
 
 States are `pending:head`, `pending:user`, `settled`,
-`refused:access_head_gone`, or `refused:access_withdrawn`. An answer never changes
+`refused:access_head_gone`, `refused:access_asker_gone`, or
+`refused:access_withdrawn`. An answer never changes
 the recorded asker scope. A user's `allow_scope` on an escalated ask applies to
 the worker, not its head. Cingulate stores no grants and performs no operation.
 

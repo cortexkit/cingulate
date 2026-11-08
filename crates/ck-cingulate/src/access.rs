@@ -21,6 +21,17 @@ pub enum ScopeLife {
     Gone,
     Unknown,
 }
+
+const ASKER_BATCH_SIZE: usize = 16;
+const ASKER_PASS_BUDGET: Duration = Duration::from_secs(1);
+const ASKER_PROBE_BUDGET: Duration = Duration::from_millis(250);
+
+#[derive(Default)]
+pub(super) struct Maintenance {
+    after: Option<String>,
+    retry_at_ms: i64,
+    attempts: u32,
+}
 #[derive(Debug, Clone)]
 pub enum NoticeResult {
     Delivered,
@@ -665,7 +676,65 @@ impl Handler {
                 }
             }
         }
+        self.access_asker_maintenance().await?;
         self.deliver_access_notices().await
+    }
+    async fn access_asker_maintenance(&self) -> Result<(), Refusal> {
+        // Manual ticks share the cursor and retry delay with the timer.
+        let Ok(mut state) = self.inner.access_maintenance.try_lock() else {
+            return Ok(());
+        };
+        let now = self.inner.options.clock.now_ms();
+        if now < state.retry_at_ms {
+            return Ok(());
+        }
+        let records = self
+            .with_store(|store| store.access_pending_page(state.after.as_deref(), ASKER_BATCH_SIZE))
+            .await?;
+        if records.is_empty() {
+            state.after = None;
+            return Ok(());
+        }
+        let deadline = tokio::time::Instant::now() + ASKER_PASS_BUDGET;
+        let mut unavailable = false;
+        for record in records {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let life = tokio::time::timeout(
+                remaining.min(ASKER_PROBE_BUDGET),
+                self.access_runtime().describe_asker(&record.identity.asker),
+            )
+            .await;
+            match life {
+                Ok(Ok(ScopeLife::Gone)) => {
+                    if let Some(mutation) = self
+                        .with_store(|store| {
+                            store.access_asker_gone(
+                                &record.elicitation_id,
+                                self.inner.options.clock.now_ms(),
+                            )
+                        })
+                        .await?
+                    {
+                        self.access_changed(&mutation).await;
+                    }
+                }
+                Ok(Ok(ScopeLife::Live(_))) => {}
+                Ok(Ok(ScopeLife::Unknown)) | Ok(Err(_)) | Err(_) => unavailable = true,
+            }
+            state.after = Some(record.elicitation_id);
+        }
+        if unavailable {
+            state.retry_at_ms =
+                now.saturating_add(cingulate_store::maintenance_backoff_ms(state.attempts));
+            state.attempts = state.attempts.saturating_add(1);
+        } else {
+            state.attempts = 0;
+            state.retry_at_ms = now;
+        }
+        Ok(())
     }
     async fn await_access(&self, id: &str, timeout: i64) -> Reply {
         let deadline = self.inner.options.clock.now_ms().saturating_add(timeout);

@@ -225,7 +225,7 @@ What each purpose does in core:
 | `reason` | string, at most 160 characters |
 | `head_policy` | `allow` \| `not_held`; worker asks only |
 | `answers` | array of `allow_once` \| `allow_scope` \| `deny` \| `escalate`: what the head may answer now |
-| `outcome` | `allow_once` \| `allow_scope` \| `deny` \| `access_head_gone` \| `access_no_head` |
+| `outcome` | `allow_once` \| `allow_scope` \| `deny` \| `access_head_gone` \| `access_asker_gone` \| `access_no_head` |
 | `answered_by` | `head` \| `user`; absent for a refusal |
 | `note` | string, at most 160 characters, optional |
 
@@ -249,7 +249,8 @@ What Cingulate does with each refusal:
 ## Refusals (keeps D8)
 
 Every refusal has a name, and none grants: `access_no_head` (no parent head, or its scope not
-live), `access_head_gone`, `access_not_placed` (no surface can answer now),
+live), `access_head_gone`, `access_asker_gone` (the stamped asking session ended),
+`access_not_placed` (no surface can answer now),
 `access_withdrawn` (the call was cancelled), `access_declined` (with the note),
 `access_unavailable` (Cingulate unreachable, returned by AFT). A head answering an ask that is not
 its own worker's, or allowing one when `head_policy` is `not_held`, is refused to the relay and the
@@ -263,7 +264,8 @@ One record per ask, in Cingulate's store:
 request ─┬─ worker ask ─▶ [pending:head] ─escalate─▶ [pending:user] ─first answer─▶ [settled]
          │                      │ answer ─────────────────────────────────────────▶ [settled]
          └─ head ask ──────────────────────▶ [pending:user] ─first answer─▶ [settled]
-any pending state ─ head gone / call withdrawn ─▶ [refused: access_head_gone | access_withdrawn]
+pending:head ─ head gone ─▶ [refused: access_head_gone]
+any pending state ─ asker gone / call withdrawn ─▶ [refused: access_asker_gone | access_withdrawn]
 (no timed transitions: a pending ask waits until one of the above happens)
 ```
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.2 (ck-cingulate)
+
+- Pending permission asks now settle as `access_asker_gone` when the daemon
+  confirms the stamped asking session has ended, including asks already on the
+  user surface. Settlement retracts phone cards and uses the existing notice
+  outbox. Asker checks are paged, time-bounded and backed off on uncertain
+  liveness; a live or unreachable session never grants or settles an ask.
+
 ## 0.15.1 (ck-cingulate), 0.8.1 (cingulate-vectors)
 
 - Presence summaries and routing now come from `cortexkit-presence` 0.1.0 on

@@ -5,6 +5,7 @@ use ck_cingulate::{
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use subc_client_rs::{HandlerOutcome, RouteBindRequest, RouteHandle};
 use subc_protocol::{
     scope::{ScopeAttributes, ScopeKind, ScopeParent, ScopeStamp},
@@ -27,6 +28,9 @@ impl Clock for TestClock {
 }
 struct Runtime {
     life: Mutex<ScopeLife>,
+    asker_life: Mutex<Result<ScopeLife, String>>,
+    asker_delay: Mutex<Duration>,
+    asker_probes: Mutex<Vec<ScopeIdentity>>,
     replies: Mutex<Vec<NoticeResult>>,
     notices: Mutex<Vec<Value>>,
     macos: bool,
@@ -51,6 +55,14 @@ impl AwaitHook for WaitHook {
 impl AccessRuntime for Runtime {
     async fn describe(&self, _: &ScopeIdentity) -> Result<ScopeLife, String> {
         Ok(self.life.lock().unwrap().clone())
+    }
+    async fn describe_asker(&self, scope: &ScopeIdentity) -> Result<ScopeLife, String> {
+        self.asker_probes.lock().unwrap().push(scope.clone());
+        let delay = *self.asker_delay.lock().unwrap();
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        self.asker_life.lock().unwrap().clone()
     }
     async fn notice(&self, body: Value) -> NoticeResult {
         self.notices.lock().unwrap().push(body);
@@ -248,6 +260,9 @@ impl Fixture {
         let path = dir.path().join("store.sqlite");
         let runtime = Arc::new(Runtime {
             life: Mutex::new(ScopeLife::Live(head())),
+            asker_life: Mutex::new(Ok(ScopeLife::Live(head()))),
+            asker_delay: Mutex::new(Duration::ZERO),
+            asker_probes: Mutex::new(vec![]),
             replies: Mutex::new(vec![]),
             notices: Mutex::new(vec![]),
             macos,
@@ -1586,6 +1601,237 @@ async fn head_scope_ending_refuses_but_unknown_liveness_waits() {
     *f.runtime.life.lock().unwrap() = ScopeLife::Gone;
     f.handler.timer_tick().await.unwrap();
     assert_eq!(f.get(&id).await["outcome"], "access_head_gone");
+}
+
+async fn assert_access_asker_gone(kind: ScopeKind, escalate: bool) {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(
+            &stamp("aft", kind),
+            request((kind == ScopeKind::Worker).then_some("allow")),
+        )
+        .await;
+    if escalate {
+        f.relay(&id, "escalate").await;
+    }
+    let pending = f.audit(&id);
+    f.deliver().await;
+    *f.runtime.asker_life.lock().unwrap() = Ok(ScopeLife::Gone);
+    f.handler.timer_tick().await.unwrap();
+    f.deliver().await;
+    let settled = f.audit(&id);
+    assert_eq!(settled["state"], "refused:access_asker_gone");
+    assert_eq!(settled["outcome"], "access_asker_gone");
+    assert_eq!(settled["settled_at_ms"], 1000);
+    assert_eq!(settled["withdrawn_by"], Value::Null);
+    assert_eq!(settled["identity"], pending["identity"]);
+    {
+        let probes = f.runtime.asker_probes.lock().unwrap();
+        assert_eq!(probes.len(), 1);
+        assert_eq!(json!(probes[0]), pending["identity"]["asker"]);
+    }
+    let db = rusqlite::Connection::open(&f.path).unwrap();
+    let body: String = db
+        .query_row(
+            "SELECT body_json FROM access_notices WHERE elicitation_id=?1 AND purpose='settled'",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["purpose"], "settled");
+    assert_eq!(body["fields"]["outcome"], "access_asker_gone");
+    assert_eq!(
+        body["asker"]["scope_ref"],
+        pending["identity"]["asker"]["scope_ref"]
+    );
+    if kind == ScopeKind::Worker {
+        assert_eq!(body["head"]["scope_ref"], "head-session");
+    }
+    let retractions = f
+        .phone_notices
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|notice| notice["elicitationId"] == id && notice["kind"] == "retraction")
+        .count();
+    assert_eq!(
+        retractions,
+        usize::from(kind != ScopeKind::Worker || escalate)
+    );
+    f.handler.timer_tick().await.unwrap();
+    assert_eq!(f.audit(&id), settled);
+    let count: i64 = db
+        .query_row(
+            "SELECT count(*) FROM access_notices WHERE elicitation_id=?1 AND purpose='settled'",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn access_asker_gone_settles_pending_user_and_retracts_surface() {
+    assert_access_asker_gone(ScopeKind::Head, false).await;
+    assert_access_asker_gone(ScopeKind::Worker, true).await;
+}
+
+#[tokio::test]
+async fn access_asker_gone_settles_pending_head_and_notifies_head() {
+    assert_access_asker_gone(ScopeKind::Worker, false).await;
+}
+
+#[tokio::test]
+async fn access_asker_gone_retracts_informational_macos_card() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(
+            &stamp("aft", ScopeKind::Worker),
+            json!({
+                "kind":"macos_permission", "folder":"/protected", "program":"Terminal",
+                "steps":"Open System Settings"
+            }),
+        )
+        .await;
+    *f.runtime.asker_life.lock().unwrap() = Ok(ScopeLife::Gone);
+    f.handler.timer_tick().await.unwrap();
+    assert_eq!(f.get(&id).await["outcome"], "access_asker_gone");
+    assert!(f
+        .phone_notices
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|notice| { notice["elicitationId"] == id && notice["kind"] == "retraction" }));
+    assert!(f.card_notices(&id).is_empty());
+}
+
+#[tokio::test]
+async fn access_asker_live_keeps_pending_and_probes_again_without_backoff() {
+    let f = Fixture::new(true).await;
+    let id = f.ask(&stamp("aft", ScopeKind::Head), request(None)).await;
+    for _ in 0..3 {
+        f.handler.timer_tick().await.unwrap();
+    }
+    assert_eq!(f.get(&id).await["state"], "pending:user");
+    assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), 2);
+    assert!(!f
+        .phone_notices
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|notice| notice["kind"] == "retraction"));
+}
+
+#[tokio::test]
+async fn access_asker_uncertain_keeps_pending_with_bounded_backoff() {
+    for life in [Ok(ScopeLife::Unknown), Err("daemon unavailable".into())] {
+        let f = Fixture::new(true).await;
+        let id = f.ask(&stamp("aft", ScopeKind::Head), request(None)).await;
+        *f.runtime.asker_life.lock().unwrap() = life;
+        f.handler.timer_tick().await.unwrap();
+        assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), 1);
+        let mut now = 1000;
+        for (attempt, delay) in [250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000]
+            .into_iter()
+            .enumerate()
+        {
+            f.clock.0.send_replace(now + delay - 1);
+            for _ in 0..2 {
+                f.handler.timer_tick().await.unwrap();
+            }
+            assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), attempt + 1);
+            now += delay;
+            f.clock.0.send_replace(now);
+            // An empty page wraps the cursor; the following pass revisits the ask.
+            for _ in 0..2 {
+                f.handler.timer_tick().await.unwrap();
+            }
+            assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), attempt + 2);
+            assert_eq!(f.get(&id).await["state"], "pending:user");
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn access_asker_timeouts_bound_each_probe_and_pass_and_back_off() {
+    let f = Fixture::new(true).await;
+    let mut ids = Vec::new();
+    for n in 0..10 {
+        let mut params = request(None);
+        params["call_key"] = json!(format!("slow-{n}"));
+        ids.push(f.ask(&stamp("aft", ScopeKind::Head), params).await);
+    }
+    *f.runtime.asker_delay.lock().unwrap() = Duration::from_secs(3600);
+    let start = tokio::time::Instant::now();
+    f.handler.timer_tick().await.unwrap();
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+    assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), 4);
+    f.handler.timer_tick().await.unwrap();
+    assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), 4);
+    for (now, count) in [(1250, 8), (1750, 10)] {
+        f.clock.0.send_replace(now);
+        f.handler.timer_tick().await.unwrap();
+        assert_eq!(f.runtime.asker_probes.lock().unwrap().len(), count);
+    }
+    for id in ids {
+        assert_eq!(f.get(&id).await["state"], "pending:user");
+    }
+}
+
+#[tokio::test]
+async fn access_asker_batch_progress_preserves_other_maintenance_and_unscoped_cards() {
+    let f = Fixture::new(true).await;
+    let unscoped = f.ask(&local_operator(), consent_card()).await;
+    let head_id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    let mut ids = Vec::new();
+    for n in 0..38 {
+        let mut params = request(None);
+        params["call_key"] = json!(format!("batch-{n}"));
+        ids.push(f.ask(&stamp("aft", ScopeKind::Head), params).await);
+    }
+    let mut other_leg = f.audit(&ids[0]);
+    other_leg["state"] = json!("pending:future");
+    rusqlite::Connection::open(&f.path)
+        .unwrap()
+        .execute(
+            "UPDATE access_asks SET state='pending:future',record_json=?2 WHERE elicitation_id=?1",
+            rusqlite::params![ids[0], serde_json::to_string(&other_leg).unwrap()],
+        )
+        .unwrap();
+    *f.runtime.life.lock().unwrap() = ScopeLife::Gone;
+    *f.runtime.asker_life.lock().unwrap() = Ok(ScopeLife::Gone);
+    for (pass, count) in [(1, 16), (2, 32), (3, 38)] {
+        f.handler.timer_tick().await.unwrap();
+        assert_eq!(
+            f.runtime.asker_probes.lock().unwrap().len(),
+            count,
+            "pass {pass}"
+        );
+        assert_eq!(f.get(&head_id).await["outcome"], "access_head_gone");
+        assert_eq!(
+            f.ok(
+                &local_operator(),
+                "consent.get",
+                json!({"elicitation_id":unscoped})
+            )
+            .await["state"],
+            "pending"
+        );
+        let settled: i64 = rusqlite::Connection::open(&f.path).unwrap().query_row(
+            "SELECT count(*) FROM access_notices WHERE purpose='settled' AND status='delivered'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(settled, count as i64 + 1);
+    }
+    for id in ids {
+        assert_eq!(f.get(&id).await["outcome"], "access_asker_gone");
+    }
 }
 #[tokio::test]
 async fn macos_cards_are_informational_and_deduplicate_open_folder_program() {

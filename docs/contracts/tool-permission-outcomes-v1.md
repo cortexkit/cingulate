@@ -13,6 +13,7 @@ A code that can arise both ways lists both stages. Its vectors are `<code>.json`
 | `deny` | The person explicitly declined the ask. | `cingulate` | `outcome` |
 | `access_no_head` | A worker's ask is refused if it does not identify the session that started the worker, or if that session has ended. | `cingulate` | `request` |
 | `access_head_gone` | A pending head-side ask settles refused after its supervising head is confirmed gone. | `cingulate` | `outcome` |
+| `access_asker_gone` | A pending ask on any answer leg settles refused after its stamped asking session is confirmed gone. | `cingulate` | `outcome` |
 | `access_not_placed` | The harness cannot show the ask because there is no person or prompt surface: refused at request time when the host is known up front not to ask, or settled from `consent.await` when that is found only later (no prompt surface attached, it detached mid-wait, or a host rule resolved the prompt without a person). Cingulate's design reserves this meaning, but Cingulate does not emit it today. | `thalamus-harness` | `request`, `outcome` |
 | `access_withdrawn` | The asker withdrew a pending ask. | `cingulate`, `thalamus-harness` | `outcome` |
 | `access_declined` | The person chose `deny`; this is the wire code for outcome `deny` and may carry the person's note. | `cingulate` | `outcome` |
