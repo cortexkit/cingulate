@@ -41,7 +41,7 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 |---|---|
 | `id` | Opaque, stable for the grant's life. |
 | `agent_id?` | The agent the grant belongs to; for a worker grant, the owning head. Absent for an operator-held grant or a flow grant. |
-| `holder` | `{kind: "agent" \| "worker" \| "operator" \| "flow" \| "module" \| "enrolled", agent_id?, scope_ref?, flow_id?, flow_version?, flow_install_id?, module_id?, name?}`. See worker, flow, and module and enrolled grants below. |
+| `holder` | `{kind: "agent" \| "worker" \| "operator" \| "flow" \| "module" \| "enrolled", agent_id?, scope_ref?, flow_id?, flow_version?, flow_install_id?, module_id?, name?, label?}`. See worker, flow, and module and enrolled grants below. |
 | `module` | The provider's module id, so the page can address a revoke. |
 | `subject_label` | What the grant covers, for display: an app name, a site, "Whole computer". |
 | `scope` | A token from the provider's declared vocabulary. Cerebellum declares exactly `app`, `whole_computer`, `site` and `all_sites`. |
@@ -139,6 +139,7 @@ names no agent, so it carries neither the top-level `agent_id` nor
 |---|---|
 | `module_id` | With `module`: the bare id of a supervised module whose identity the daemon verifies at launch (the attested principal `reserved:<module_id>`, written without the prefix). |
 | `name` | With `enrolled`: the name of a program the person approved by enrolment, such as a login plugin inside OpenCode or Pi (the principal `enrolled:<name>`, written without the prefix). The daemon does not supervise it, so its name is only what the person approved. |
+| `label` | Optional, with either kind: a display name the provider writes, such as "Thalamus" or "Claude sign-in for Pi". Plain text, at most 80 characters. A surface shows it when present and otherwise shows the bare `module_id` or `name`; it never keeps its own table of names. |
 
 Like flow rows, module and enrolled rows appear only in an unfiltered
 `permissions.list`, never in a `permissions.list {agent_id}` reply. The row's
