@@ -41,7 +41,7 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 |---|---|
 | `id` | Opaque, stable for the grant's life. |
 | `agent_id?` | The agent the grant belongs to; for a worker grant, the owning head. Absent for an operator-held grant or a flow grant. |
-| `holder` | `{kind: "agent" \| "worker" \| "operator" \| "flow", agent_id?, scope_ref?, flow_id?, flow_version?, flow_install_id?}`. See worker grants and flow grants below. |
+| `holder` | `{kind: "agent" \| "worker" \| "operator" \| "flow" \| "module" \| "enrolled", agent_id?, scope_ref?, flow_id?, flow_version?, flow_install_id?, module_id?, name?}`. See worker, flow, and module and enrolled grants below. |
 | `module` | The provider's module id, so the page can address a revoke. |
 | `subject_label` | What the grant covers, for display: an app name, a site, "Whole computer". |
 | `scope` | A token from the provider's declared vocabulary. Cerebellum declares exactly `app`, `whole_computer`, `site` and `all_sites`. |
@@ -122,6 +122,30 @@ Flow rows appear only in an unfiltered `permissions.list`. They are not listed i
 a `permissions.list {agent_id}` reply, even for a flow that an agent installed:
 a caller filtering by agent asks for one agent's grants, and a flow row names no
 agent.
+
+### Module and enrolled grants
+
+A grant can be held by a program rather than an agent, such as a vault
+category grant that lets a module read the user's provider logins. Such a row
+names no agent, so it carries neither the top-level `agent_id` nor
+`holder.agent_id`. Its holder is one of:
+
+```json
+{"kind": "module", "module_id": "broca"}
+{"kind": "enrolled", "name": "claustrum-auth-pi"}
+```
+
+| Holder field | Meaning |
+|---|---|
+| `module_id` | With `module`: the bare id of a supervised module whose identity the daemon verifies at launch (the attested principal `reserved:<module_id>`, written without the prefix). |
+| `name` | With `enrolled`: the name of a program the person approved by enrolment, such as a login plugin inside OpenCode or Pi (the principal `enrolled:<name>`, written without the prefix). The daemon does not supervise it, so its name is only what the person approved. |
+
+Like flow rows, module and enrolled rows appear only in an unfiltered
+`permissions.list`, never in a `permissions.list {agent_id}` reply. The row's
+`module` is the provider that enforces the grant and answers the revoke. A
+surface labels a `module` holder as a CortexKit module and an `enrolled` holder
+as a program the person approved. A provider lists only grants a person can
+safely revoke; keys a provider needs to run at all stay out of the list.
 
 ### Holder kinds a reader does not know
 
