@@ -51,6 +51,7 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | `expires_at_ms?` | Absent for a grant without expiry ("always"). |
 | `granted_at_ms` | When the current form of the grant was minted. |
 | `card_ref?` | The id of the Cingulate card whose answer minted it: an `elicitation_id` (`el_…`) for a consent card, or an access ask id (`acc_…`) for a folder or permission ask. Absent when no card minted it, for example a grant from a worker's launch plan. Surfaces treat it as opaque. |
+| `effect?` | `"deny"` for a [standing denial](#standing-denials). Absent for every grant. Providers emit it only after the readers-first step in that section. |
 
 Row rules:
 
@@ -278,6 +279,85 @@ Handler-generated vectors: `federated-holders`,
 `federated-holders-agent-filtered`, `federated-provider-liveness-unavailable`,
 and `federated-revoke`. Cingulate only relays provider rows; declaring the scope
 capability does not itself create a federated grant or row.
+
+### Standing denials
+
+A standing denial is a row that refuses a federated caller instead of admitting
+it. It lets the person answer an ask with "don't allow, and don't ask again" and
+see and undo that choice on the Permissions page next to their grants. Calls
+that wait for an offline computer need this: they never wait for a card, so
+without a lasting answer the same ask would come back on every call.
+
+```json
+{"id":"grt_09","effect":"deny",
+ "holder":{"kind":"federated","peer_fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "pairing_id":"pairing-invented-1","peer_class":"computer",
+   "selector":"exact_claim","claim":{"kind":"agent","agent_id":"Sage"},
+   "label":"Juniper · Sage"},
+ "module":"plexus","subject_label":"Mail","scope":"mail_read",
+ "scope_label":"never read your mail","granted_at_ms":1000000,"card_ref":"el_9"}
+```
+
+Rows:
+
+- **Federated holders only.** A provider sends `effect: "deny"` only on a
+  `federated` holder. Denials for other holder kinds are not defined.
+- **Same row rules as a grant.** A denial has an opaque `id`, is listed while
+  live, may carry `expires_at_ms`, and is revoked with `permissions.revoke {id}`.
+  It never carries `group: "danger"`. The [liveness rules](#liveness-belongs-to-the-grant-holding-provider)
+  apply unchanged, so a re-pair starts with no denials, just as it starts with
+  no grants.
+- **One row per subject per holder.** Turning an allow into a deny, or the
+  reverse, removes the old row and mints a new `id`. A revoke is addressed to
+  the row the person saw, and that row no longer describes the authority.
+- **Revoking a denial** removes it. The subject then has no standing answer for
+  that holder, so the provider asks again as its own contract says. It never
+  turns into a grant.
+- **Minted only by an explicit choice.** A provider records a denial only when
+  the person picks a standing deny option on a card. A card that expires, times
+  out, is withdrawn or is dismissed never mints a denial, even though its
+  default answer is decline. The option's label says the answer is lasting, for
+  example "Don't allow, and don't ask again".
+- **`scope_label`** is the provider's sentence for the denial, such as "never
+  read your mail". Surfaces show it as given.
+- **Names** follow the federated rules above: display only, never part of the
+  row's identity or matching.
+
+Precedence. For one call, the provider takes its live rows for that pairing,
+peer class and subject whose selector matches the call (see the selector table
+above). Both grants and denials count:
+
+1. A row is **specific** when its selector is `exact_claim` (for a call with a
+   claim) or `claimless` (for a call without one). An `all_claims` row is
+   **broad**.
+2. If any specific row matches, decide from the specific rows only: refuse if
+   one is a denial, otherwise admit.
+3. Otherwise decide from the broad rows: refuse if one is a denial, otherwise
+   admit.
+4. If no row matches, there is no standing answer. The provider asks, or
+   answers `consent_required`, as its own contract says.
+
+So a denial beats a grant at the same or a broader selector, and an
+`exact_claim` grant beats a broader denial. A `run` claim is never covered by
+any row, grant or denial, so a run is never refused or admitted by a standing
+answer. A call refused by a denial answers `consent_denied` and raises no card.
+
+Readers first. A reader that predates this section would show a denial as a
+grant, which tells the person the opposite of the truth. So:
+
+- Phone and desktop Permissions pages MUST show a row with `effect: "deny"` as
+  refused ("Not allowed"), never as access granted, and offer the same revoke.
+- A row with an `effect` value a reader does not know MUST be kept and MUST NOT
+  be shown as granting access.
+- Absent `effect` means a grant, as before.
+- No provider emits `effect` until the Cingulate aggregator, the phone app and
+  the desktop app are confirmed tolerating it in their running builds. Cingulate
+  relays `effect` unchanged, and it is part of the listing `version`.
+
+Vectors: [`provider-list-federated-deny`](../../test-vectors/permissions-v1/provider-list-federated-deny.json)
+(a provider listing with a grant and a denial) and
+[`federated-precedence`](../../test-vectors/permissions-v1/federated-precedence.json)
+(a decision table of rows, call and expected answer for providers to test against).
 
 ### Holder kinds a reader does not know
 
