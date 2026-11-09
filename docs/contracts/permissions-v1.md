@@ -49,7 +49,8 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | `group?` | `"danger"` for grants as broad as the danger option that minted them. Cerebellum sets it on `whole_computer` and `all_sites`, and only there. |
 | `methods?` | A non-empty list of uppercase HTTP method names, such as `["GET"]`. A provider sends it only for grants it limits by method. Surfaces show it as given. |
 | `expires_at_ms?` | Absent for a grant without expiry ("always"). |
-| `granted_at_ms` | When the current form of the grant was minted. |
+| `granted_at_ms` | When the current form of the grant was minted. Always present: a reader drops a row without it, which would hide a grant the person can't then revoke. |
+| `granted_at_bound?` | `"at_or_before"` when the provider doesn't know the real mint time, only that it is no later than `granted_at_ms` (for example, rows a store migration rewrote). Surfaces then show the time as an upper bound, such as "granted before 3 Nov". Absent means `granted_at_ms` is exact. A reader that doesn't know a value shows `granted_at_ms` as given and keeps the row. |
 | `card_ref?` | The id of the Cingulate card whose answer minted it: an `elicitation_id` (`el_…`) for a consent card, or an access ask id (`acc_…`) for a folder or permission ask. Absent when no card minted it, for example a grant from a worker's launch plan. Surfaces treat it as opaque. |
 | `effect?` | `"deny"` for a [standing denial](#standing-denials). Absent for every grant. Providers emit it only after the readers-first step in that section. |
 
