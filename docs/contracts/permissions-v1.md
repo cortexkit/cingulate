@@ -50,7 +50,7 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | `methods?` | A non-empty list of uppercase HTTP method names, such as `["GET"]`. A provider sends it only for grants it limits by method. Surfaces show it as given. |
 | `expires_at_ms?` | Absent for a grant without expiry ("always"). |
 | `granted_at_ms` | When the current form of the grant was minted. |
-| `card_ref?` | The `elicitation_id` of the card whose answer minted it. |
+| `card_ref?` | The id of the Cingulate card whose answer minted it: an `elicitation_id` (`el_…`) for a consent card, or an access ask id (`acc_…`) for a folder or permission ask. Absent when no card minted it, for example a grant from a worker's launch plan. Surfaces treat it as opaque. |
 
 Row rules:
 
