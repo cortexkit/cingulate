@@ -298,6 +298,7 @@ impl Handler {
                 ScopeKind::Head => "head",
                 ScopeKind::Worker => "worker",
                 ScopeKind::Ephemeral => "ephemeral",
+                _ => return Err(stamp.refuse()),
             }
             .into(),
             harness: stamp.harness.clone(),

@@ -7,6 +7,76 @@ and its `SHA256SUMS`; the phone projection is specified in
 retention tombstone, execution report, acknowledgment or settlement-feed entry:
 AFT uses durable request/get/await/withdraw and core receives notices.
 
+## Federated consent carriers
+
+Since ck-cingulate 0.16.0, Cingulate declares `scope-federated/v1`. An admitted
+provider carrying a daemon-stamped `federated` scope may raise `kind: "consent"`
+without a local agent id. The subject comes only from the stamp's
+`attributes.federated`: `peer_name`, `peer_class`, `peer_fingerprint`, `pairing_id`
+and `remote_claim`. No roster fetch, local agent resolution, body-supplied name
+or harness string supplies that identity. A present `parent_state` other than
+`linked` refuses `elicitation_federated_unlinked`. Other request kinds remain
+local-only. Federated routes never inherit local agent, local operator or module
+authority. Callosum operator phones and simulator inventory readers use stamped
+peer class; unstamped Callosum routes keep the existing harness rules and never
+select federated grants.
+
+Only for a card raised on a federated-stamped route, ownership is the admitted
+requester principal plus (`peer_fingerprint`, `pairing_id`, `peer_class`,
+canonical claim identity). Claim identity includes its kind and is:
+
+- no claim: an explicit claimless identity;
+- agent or run: `agent_id` (agent and run remain distinct kinds);
+- worker: `owner_module_id` and `worker_ref`;
+- flow: all four of `flow_id`, `flow_version`, `flow_install_id`, `flow_code_hash`.
+
+The scope ref/epoch, `peer_name`, and worker `on_behalf_of` do not enter that
+identity. A different provider, pairing, class or claim cannot collect the card.
+Pending `el_` records already persist independently of a route; route closure
+cancels its wait, not its card. On a new route with the same paired subject the
+provider can get, await, collect answers and acknowledge them through the normal
+operations. A rename or re-created claim scope does not orphan a card. Local v1
+and v2 ownership remains the principal plus scope owner/ref/epoch, unchanged.
+Remote scopes never become targets for local-agent session-ended checks or
+local-agent notices.
+
+For federated cards only, `prompt` is an **action phrase**, not a whole sentence.
+For example, the provider sends `"prompt":"read your mail."`; for roster name
+`Juniper` and stamped agent id `Sage`, Cingulate displays
+`“Juniper” says agent Sage wants to read your mail.`. Agent and flow ids are
+displayed verbatim, not resolved through this computer's local roster. The
+stored `subject.federated` contains the stamped facts, with nested protocol keys
+unchanged on both phone and requester projections. Its `subject.label` uses the
+[federated permissions label](permissions-v1.md#federated-grants), or just the
+peer name for a run; no local `subject.agent_id` or `head_agent_id` is emitted.
+
+| Claim | Displayed prompt for action `read your mail.` |
+|---|---|
+| agent `Sage` | `“Juniper” says agent Sage wants to read your mail.` |
+| worker with `on_behalf_of: "Sage"` | `“Juniper” says a worker for agent Sage wants to read your mail.` |
+| worker without attribution | `“Juniper” says one of its workers wants to read your mail.` |
+| flow `Morning-digest`, version 3 | `“Juniper” says flow “Morning-digest” (version 3) wants to read your mail.` |
+| run for `Sage` | `“Juniper” says a run for agent Sage wants to read your mail. (this time only)` |
+| no claim | `A program on “Juniper” (no agent named) wants to read your mail.` |
+
+Every card adds the fact `“Juniper” is paired with this computer.`. “Cloud” and
+“hosted” are never added unless present in the person's roster name.
+
+A run card is **one immutable answer per elicitation, for the call that raised
+it**, not a standing grant. The provider binds the elicitation id (and its
+optional `requester_ref` / private `binding`) to that call and MUST NOT reuse its
+answer for another call. Answer recovery remains idempotent until normal ack or
+retention: a lost reply may be read again. `requester_ref` is still correlation,
+not a dedup key or credential. Cingulate sets `single_use: true`, removes
+`duration`, requires exactly one `effect: "grant"` option, and labels that option
+`Allow this time`, with no provider-authored detail. More than one or no grant
+choice is refused. The provider's own `effect: "decline"` options and the card's
+default are passed through as sent, so a run card's default is still a decline;
+silence, expiry and errors never grant. Providers MUST honor single use and
+create no standing grant for runs. Cingulate itself creates no standing grants
+for any card. Selectors and base-scope liveness remain the provider's obligations
+under [permissions/v1](permissions-v1.md#federated-grants).
+
 ## Generic consent and requester correlation
 
 To preserve v1 behavior, the generic-consent rule admits `direct` and

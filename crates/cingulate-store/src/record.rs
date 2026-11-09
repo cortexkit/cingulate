@@ -38,6 +38,10 @@ pub struct Subject {
     pub label: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub via_worker: bool,
+    /// Daemon-attested remote facts, never a local agent identity. Nested keys
+    /// retain their protocol spelling on both phone and requester projections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub federated: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

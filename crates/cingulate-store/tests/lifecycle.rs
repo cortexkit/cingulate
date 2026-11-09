@@ -83,6 +83,7 @@ fn identity(principal: &str, session: &str) -> RequestIdentity {
             head_agent_id: String::new(),
             label: "an unverified local process".into(),
             via_worker: false,
+            federated: None,
         },
         resolved_name: None,
         asker: None,

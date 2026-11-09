@@ -40,8 +40,8 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | Field | Meaning |
 |---|---|
 | `id` | Opaque, stable for the grant's life. |
-| `agent_id?` | The agent the grant belongs to; for a worker grant, the owning head. Absent for an operator-held grant or a flow grant. |
-| `holder` | `{kind: "agent" \| "worker" \| "operator" \| "flow" \| "module" \| "enrolled", agent_id?, scope_ref?, flow_id?, flow_version?, flow_install_id?, module_id?, name?, label?}`. See worker, flow, and module and enrolled grants below. |
+| `agent_id?` | The local agent the grant belongs to; for a local worker grant, its supervising local agent (the head). Absent for operator, flow, module, enrolled and federated grants. |
+| `holder` | An open tagged object: `kind` is `agent`, `worker`, `operator`, `flow`, `module`, `enrolled`, `federated`, or a future kind. See the kind-specific fields below. |
 | `module` | The provider's module id, so the page can address a revoke. |
 | `subject_label` | What the grant covers, for display: an app name, a site, "Whole computer". |
 | `scope` | A token from the provider's declared vocabulary. Cerebellum declares exactly `app`, `whole_computer`, `site` and `all_sites`. |
@@ -148,6 +148,107 @@ surface labels a `module` holder as a CortexKit module and an `enrolled` holder
 as a program the person approved. A provider lists only grants a person can
 safely revoke; keys a provider needs to run at all stay out of the list.
 
+### Federated grants
+
+A federated holder is a separate authority layer, never a local agent or module
+grant. The provider authenticates only daemon-stamped `ScopeKind::Federated`
+facts, refuses a present `parent_state` other than `linked`, and keys on the
+pairing, peer class and selector:
+
+`parent_state` describes the federated claim scope's link to its base scope.
+`linked` means the parent is live at the named epoch and the daemon permitted
+the link. Pending verification after a restart and ended links grant nothing.
+
+```json
+{"kind":"federated","peer_fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "pairing_id":"pairing-invented-1","peer_class":"computer",
+ "selector":"exact_claim","claim":{"kind":"agent","agent_id":"Sage"},
+ "label":"Juniper · Sage"}
+```
+
+`peer_fingerprint` is 32 lowercase hex characters. `pairing_id` is a non-secret
+opaque token, new on every pairing. `peer_class` is the stamped `computer`,
+`phone`, `sim` or `unknown`, not a harness-derived class. Every field must equal
+the current stamp; reclassification never retains a previous class's authority.
+Neither `reserved:callosum` without a federated stamp nor any local scope matches
+a federated grant. On an unstamped Callosum route, harness `callosum-self` means
+Callosum's own local calls; `fed-<class>:<fingerprint>` means a legacy forwarded
+peer call, never Callosum's module authority. Existing phone operator and sim
+inventory rules still apply to those legacy routes, not to stamped ones.
+
+| `selector` | Matching rule |
+|---|---|
+| `exact_claim` | Requires a grantable `claim`, and matches only its canonical identity. |
+| `claimless` | Forbids `claim`; matches only a stamp with no remote claim. |
+| `all_claims` | Forbids `claim`; matches claimless and grantable claims for this pairing. Recorded only after an explicit choice; providers default to not offering it. |
+
+Missing or unknown selectors match nothing. A `run` claim is never grantable and
+is never covered by any selector, including `all_claims`. Remote claims have
+these canonical identities (all fields are compared, including the kind):
+
+- `agent`: `agent_id`.
+- `worker`: `owner_module_id` and `worker_ref` (64 lowercase hex characters).
+  `on_behalf_of` is display only, never authority inherited from that agent.
+- `flow`: `flow_id`, `flow_version` (integer 1..2^53−1), `flow_install_id` and
+  `flow_code_hash` (64 lowercase hex characters).
+
+The remote ids are opaque printable non-space ASCII tokens, 1–256 bytes; worker
+owners use the daemon's module-id grammar: 1–255 UTF-8 bytes, not `.` or `..`,
+with no control characters, `/` or `\\`. The peer name and worker attribution
+are display only. A federated row MUST omit both the top-level `agent_id` and
+`holder.agent_id`; remote ids remain only inside `claim`. These rows appear only
+in an **unfiltered** `permissions.list`, never an agent-filtered list. Selector
+and canonical claim identity are part of row identity and revoke: two different
+selectors are distinct holders and a revoke targets only the opaque row id.
+
+`holder.label` is plain text, at most 80 characters (truncate longer labels to
+80 characters). Use the person's roster name first; never add “cloud” or
+“hosted” unless those words are in that name. With roster name `Juniper`:
+
+| Claim / selector | Label |
+|---|---|
+| agent `Sage` | `Juniper · Sage` |
+| worker attributed to `Sage` | `Juniper · worker for Sage` |
+| worker without attribution | `Juniper · worker` |
+| flow `Morning-digest`, version 3 | `Juniper · flow Morning-digest v3` |
+| claimless | `Juniper · any program` |
+| explicitly chosen `all_claims` | `Juniper · everything on it` |
+| run | No row, no standing-grant label. |
+
+#### Liveness belongs to the grant-holding provider
+
+Before applying a grant, listing it, or committing a consent answer into a grant,
+the provider describes `fed-base:<peer_fingerprint>:<pairing_id>` through
+`scope.describe`. Declaring `scope-federated/v1` admits that description even
+after daemon restart and without having served the scope.
+
+In a describe answer, `owner_synced` means the scope owner has supplied its
+current scope inventory in this daemon incarnation. `owner_configured` means
+that owner is configured to run on this daemon; false may mean maintenance,
+not an ended pairing. An epoch identifies one lifetime of a scope reference.
+
+| Description | Apply | List | Commit answer into grant |
+|---|---|---|---|
+| live | Admit subject to the provider's ceilings and severity rules | List | Commit |
+| ended, or not live with `owner_synced: true` | Refuse | Delete grant | Refuse; no grant |
+| not live with `owner_synced: false`, not live with `owner_configured: false`, or describe fails | Refuse | Fail the whole provider call, never a partial list | Refuse; no grant |
+| any other answer | Refuse | Fail the whole provider call | Refuse; no grant |
+
+A provider with no federated grants makes no liveness check. Cingulate turns a
+failed provider call into `status: "unreachable"`, not an empty or partial list.
+Revoke and apply MUST be serialized at the provider so revocation during a check
+cannot admit work. A re-pair changes the base reference and never inherits old
+grants. Verification loss and its return move the base to fresh epochs, closing
+old routes without ending the base scope: grants remain
+stored and unused while no call can arrive. When a provider first enables
+`scope-federated/v1`, it converts old
+`fed-computer:<fp>` grants to `claimless` for that pairing, never `all_claims`.
+
+Handler-generated vectors: `federated-holders`,
+`federated-holders-agent-filtered`, `federated-provider-liveness-unavailable`,
+and `federated-revoke`. Cingulate only relays provider rows; declaring the scope
+capability does not itself create a federated grant or row.
+
 ### Holder kinds a reader does not know
 
 `holder.kind` is open: a provider may later hold grants under a kind this
@@ -156,6 +257,11 @@ the row, MUST NOT drop it and MUST NOT fail the list, and MUST NOT show it as
 operator-held. Only `holder.kind: "operator"` is operator-held; a reader shows
 an unknown kind as held by something other than the operator, from whatever
 `holder` fields it can read, and never guesses at the missing ones.
+
+Readers ship first: phone and desktop Permissions pages MUST tolerate unknown
+kinds before any provider emits a `federated` row. Ignore unknown kind-specific
+semantics, not the row itself; the keep-row rule above still applies. Cingulate
+relays unknown holder kinds without changing or rejecting them.
 
 ## Cingulate aggregator
 

@@ -199,6 +199,7 @@ mod tests {
                 head_agent_id: String::new(),
                 label: "ALF".into(),
                 via_worker: false,
+                federated: None,
             },
             resolved_name: None,
             asker: Some(ScopeIdentity {

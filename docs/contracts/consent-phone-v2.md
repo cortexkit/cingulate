@@ -19,6 +19,15 @@ remain unchanged.
 
 ## Identity and visibility
 
+Federated generic-consent cards carry `subject.federated` (nested protocol keys
+unchanged), no local agent id, and a computer-first `prompt` built by Cingulate.
+Render that prompt and label as supplied; do not resolve the remote ids as local
+agents. The exact claim wording, paired-computer fact, run single-use behavior
+and route-independent lifecycle are in
+[federated consent carriers](consent-requester-v2.md#federated-consent-carriers).
+For a federated Callosum operator route, the stamped peer class must be `phone`;
+an unstamped route continues to use the harness rule below.
+
 The release operator rule is `reserved:callosum` on a daemon-stamped harness
 starting `fed-phone:`. No body field establishes authority. Permission
 asks appear in `consent.list_pending` **only** while in `pending:user`, projected

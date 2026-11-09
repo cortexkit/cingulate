@@ -3,7 +3,7 @@
 Wire vectors for the `permissions/v1` provider capability and cingulate's
 aggregator operations behind the apps' permissions page. The normative contract
 is `docs/contracts/permissions-v1.md`. Contract-authored cases pin provider and
-aggregator replies. The `served-*` cases and `list-all-holder-labels` are captured
+aggregator replies. The `served-*`, `federated-*` cases and `list-all-holder-labels` are captured
 from Cingulate's real handler with fake daemon catalogs and provider replies.
 
 ## Encoding
@@ -11,7 +11,8 @@ from Cingulate's real handler with fake daemon catalogs and provider replies.
 Same as `../danger-option-group-v1/`: each case is `<case>.json` (pretty, sorted
 keys, one trailing newline), `<case>.jcs` (RFC 8785, no newline, the pinned form)
 and `<case>.sha256` (lowercase hex SHA-256 of the `.jcs` bytes, no newline).
-ASCII strings and integers only. `SHA256SUMS` covers every file except itself,
+Strings are UTF-8 (federated labels include `·`); numbers are integers only.
+`SHA256SUMS` covers every file except itself,
 including this README; verify from this directory with
 `shasum -a 256 -c SHA256SUMS`. `crates/cingulate-vectors/tests/pins.rs` pins its
 SHA-256.
@@ -80,6 +81,10 @@ Aggregator cases (cingulate, called by the phone through Callosum unless noted):
 |---|---|
 | `list-all-ok` | `permissions.list_all`: one module, `ok`, five rows. |
 | `list-all-holder-labels` | Real-handler reply with exactly three rows: a module holder named from the catalog, an enrolled holder with a provider label, and a module holder whose catalog entry declares no name. |
+| `federated-holders` | Real-handler relay of six invented provider rows: exact agent, both worker label forms, flow, claimless and explicitly chosen all-claims. No local agent ids. |
+| `federated-holders-agent-filtered` | Filtering for `Sage` includes none of the remote holders, even when their remote claim names `Sage`. |
+| `federated-provider-liveness-unavailable` | Provider refuses its whole list after an indeterminate base-scope check; Cingulate reports unreachable, with no partial grants. |
+| `federated-revoke` | Revoke routes an opaque federated row id to its owning provider. |
 | `list-all-unreachable` | `plexus` could not be read: named by status, no `grants`. |
 | `list-all-unsupported` | `aft` declares the capability but does not serve `permissions.list`. |
 | `list-all-unchanged` | `since_version` equal to `list-all-ok`'s version: `unchanged`, no `modules`. |

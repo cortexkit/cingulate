@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0 (ck-cingulate)
+
+- Adopt exact subc-client-rs and subc-protocol 0.36.0 pins and declare
+  `scope-federated/v1`. Consent subjects and operator device classes come from
+  federated daemon stamps, never local agent resolution or harness text.
+- Keep carried federated cards collectable after route loss and scope recreation
+  by the same admitted provider and canonical paired subject. Local requester
+  ownership remains scoped by owner, reference and epoch. Run cards retain one
+  immutable, recoverable answer per elicitation and offer only single-use consent.
+- Add computer-first remote card wording, federated permissions holder selectors,
+  provider liveness rules and handler-generated reader vectors. Cingulate still
+  holds no standing grants and relays only rows supplied by providers.
+
 ## 0.15.3 (ck-cingulate)
 
 - Fill absent module-holder labels in `permissions.list_all` from every registered

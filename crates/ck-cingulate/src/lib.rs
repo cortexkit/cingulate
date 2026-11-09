@@ -39,6 +39,7 @@ mod access;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
 pub mod engram;
 mod execution;
+pub mod federated;
 mod identity;
 pub use identity::EntorhinalResolver;
 mod permissions;
@@ -175,6 +176,7 @@ pub fn manifest() -> ModuleManifest {
                 "secret-use-approval/v1".into(),
                 "flow-install-secrets/v1".into(),
                 "scope-workdir/v1".into(),
+                "scope-federated/v1".into(),
             ],
             requires: vec![],
             must_never_reach: vec![],
@@ -265,6 +267,26 @@ impl Stamp {
         // or answer cards. Keep this separate from consent's phone authority.
         stamp.sim_surface =
             stamp.label() == "reserved:callosum" && req.identity.harness.starts_with("fed-sim:");
+        if req
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == subc_protocol::scope::ScopeKind::Federated)
+        {
+            // A federated route never inherits local operator or harness authority.
+            stamp.carried_agent_id.clear();
+            stamp.operator_app = None;
+            stamp.local_operator = false;
+            stamp.operator_surface = false;
+            stamp.sim_surface = false;
+            if let Ok(Some(facts)) = federated::facts(&stamp) {
+                let class = facts.peer_class;
+                if stamp.label() == "reserved:callosum" {
+                    stamp.operator_surface =
+                        class == subc_protocol::scope::FederatedPeerClass::Phone;
+                    stamp.sim_surface = class == subc_protocol::scope::FederatedPeerClass::Sim;
+                }
+            }
+        }
         stamp
     }
 
@@ -287,6 +309,9 @@ impl Stamp {
         if self.label() != "reserved:callosum" {
             return None;
         }
+        if let Ok(Some(facts)) = federated::facts(self) {
+            return Some(&facts.peer_fingerprint);
+        }
         let (class, fingerprint) = self.harness.strip_prefix("fed-")?.split_once(':')?;
         // Callosum names the computer class `computer`; builds before that rename
         // stamp `mac`, so both are read until no computer runs one.
@@ -296,6 +321,11 @@ impl Stamp {
     }
 
     fn secret_use_phone(&self) -> Option<&str> {
+        if let Ok(Some(facts)) = federated::facts(self) {
+            return (self.label() == "reserved:callosum"
+                && facts.peer_class == subc_protocol::scope::FederatedPeerClass::Phone)
+                .then_some(facts.peer_fingerprint.as_str());
+        }
         let fingerprint = self.harness.strip_prefix("fed-phone:")?;
         (self.label() == "reserved:callosum" && cingulate_decode::lowercase_hex(fingerprint, 32))
             .then_some(fingerprint)
@@ -306,6 +336,11 @@ impl Stamp {
                 && feature_declared(params, "secret-use-approval"))
     }
     fn owner(&self) -> String {
+        if let Ok(Some(facts)) = federated::facts(self) {
+            if let Ok(session) = federated::session(facts) {
+                return json!([self.label(), session]).to_string();
+            }
+        }
         json!([self.label(), self.bind_session]).to_string()
     }
     fn allowed_kind(&self) -> Option<&'static [&'static str]> {
@@ -530,6 +565,7 @@ fn integer(params: &Value, key: &str) -> Result<i64, Refusal> {
         .ok_or_else(|| invalid(format!("{key} must be a nonnegative integer")))
 }
 fn operator(stamp: &Stamp) -> Result<(), Refusal> {
+    federated::facts(stamp)?;
     if stamp.operator_surface {
         Ok(())
     } else {
@@ -802,6 +838,37 @@ impl Handler {
         {
             return Err(stamp.refuse());
         }
+        if let Some(facts) = federated::facts(stamp)? {
+            if request.kind != "consent"
+                || requester_admission(stamp.label())
+                    .is_none_or(|admission| admission.agent != SubjectAgent::Carried)
+            {
+                return Err(stamp.refuse());
+            }
+            let selector = if facts.remote_claim.is_none() {
+                "claimless"
+            } else {
+                "exact_claim"
+            };
+            return Ok(RequestIdentity {
+                owner: stamp.owner(),
+                requester: stamp.label().into(),
+                subject: Subject {
+                    agent_id: None,
+                    head_agent_id: String::new(),
+                    via_worker: false,
+                    label: federated::holder_label(facts, selector)
+                        .unwrap_or_else(|| facts.peer_name.clone()),
+                    federated: Some(
+                        serde_json::to_value(facts).expect("federated facts serialization"),
+                    ),
+                },
+                resolved_name: None,
+                // Remote scopes must never drive local-agent notices or session checks.
+                asker: None,
+                head: None,
+            });
+        }
         if let Some(body) = &request.secret_use {
             let scope = stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
             if body
@@ -909,6 +976,7 @@ impl Handler {
                 resolved_name = agent.name;
             }
             Subject {
+                federated: None,
                 agent_id: Some(agent_id.to_owned()),
                 head_agent_id: agent_id.to_owned(),
                 label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
@@ -916,6 +984,7 @@ impl Handler {
             }
         } else {
             Subject {
+                federated: None,
                 agent_id: None,
                 head_agent_id: String::new(),
                 via_worker: false,
@@ -988,6 +1057,7 @@ impl Handler {
     }
 
     async fn dispatch(&self, stamp: &Stamp, method: &str, params: Value) -> Reply {
+        federated::facts(stamp)?;
         if method == "health.check" {
             return Ok(serde_json::to_value(self.health_report()).expect("health serialization"));
         }
@@ -1012,7 +1082,8 @@ impl Handler {
             "consent.answer" | "consent.list_pending" | "consent.watch_pending" => operator(stamp)?,
             "consent.get" if operator_surface => {}
             "consent.outcomes" => {
-                if stamp.label() != "reserved:prefrontal-core" {
+                if stamp.label() != "reserved:prefrontal-core" || federated::facts(stamp)?.is_some()
+                {
                     return Err(stamp.refuse());
                 }
             }
@@ -1039,7 +1110,10 @@ impl Handler {
             {
                 return Err(stamp.refuse());
             }
-            let request = ConsentRequest::decode(params)?;
+            let mut request = ConsentRequest::decode(params)?;
+            if let Some(facts) = federated::facts(stamp)? {
+                federated::prepare(facts, &mut request)?;
+            }
             let identity = self.identity(stamp, &request).await?;
             let result = self
                 .with_store(|store| {

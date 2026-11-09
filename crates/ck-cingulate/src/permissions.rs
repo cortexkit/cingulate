@@ -188,7 +188,7 @@ impl Handler {
     }
 
     async fn permissions(&self, stamp: &Stamp, method: &str, params: &Value) -> Reply {
-        let admitted = stamp.label() == "direct"
+        let admitted = (stamp.label() == "direct" && crate::federated::facts(stamp)?.is_none())
             || (stamp.label() == "reserved:callosum"
                 && (stamp.operator_surface
                     || (method == "permissions.list_all" && stamp.sim_surface)));

@@ -22,6 +22,9 @@ use subc_protocol::{
 use tempfile::TempDir;
 use tokio::sync::{mpsc, watch, Semaphore};
 
+#[path = "module/federated.rs"]
+mod federated;
+
 struct TestClock {
     time: watch::Sender<i64>,
     sleeps: watch::Sender<Vec<i64>>,
@@ -520,7 +523,8 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
             "flow-install-secrets/v1",
-            "scope-workdir/v1"
+            "scope-workdir/v1",
+            "scope-federated/v1"
         ]
     );
     assert!(capabilities.requires.is_empty() && capabilities.must_never_reach.is_empty());
@@ -694,7 +698,8 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
             "flow-install-secrets/v1",
-            "scope-workdir/v1"
+            "scope-workdir/v1",
+            "scope-federated/v1"
         ]
     );
 }

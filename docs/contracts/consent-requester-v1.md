@@ -20,6 +20,9 @@ is the pair of requester principal and attested bind session. An attested scoped
 session includes its owner, reference and epoch; a reused reference with a new
 epoch cannot read the previous session's cards. Unscoped binds have an empty bind
 session. Body session references are card content, not ownership credentials.
+Federated-stamped consent carriers use the paired-subject ownership exception
+in [consent-requester-v2](consent-requester-v2.md#federated-consent-carriers),
+not the scope reference and epoch. Local ownership is unchanged.
 
 | Requester principal | Allowed request kinds |
 |---|---|

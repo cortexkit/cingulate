@@ -52,10 +52,20 @@ fn list(
 
 impl Stamp {
     fn presence_local(&self) -> bool {
-        self.label() != "reserved:callosum" && (self.operator_app.is_some() || self.local_operator)
+        self.scope
+            .as_ref()
+            .is_none_or(|scope| scope.kind != subc_protocol::scope::ScopeKind::Federated)
+            && self.label() != "reserved:callosum"
+            && (self.operator_app.is_some() || self.local_operator)
     }
 
     fn presence_reader(&self) -> Result<(), Refusal> {
+        if crate::federated::facts(self)?.is_some() {
+            return Err(Refusal::new(
+                "presence_read_not_allowed",
+                "federated routes are not local presence readers",
+            ));
+        }
         if self.label() == "reserved:prefrontal-core" || self.presence_local() {
             Ok(())
         } else {
@@ -67,6 +77,21 @@ impl Stamp {
     }
 
     fn presence_device(&self, params: &Value) -> Result<(String, DeviceKind), Refusal> {
+        if let Some(facts) = crate::federated::facts(self)? {
+            return if self.label() == "reserved:callosum"
+                && facts.peer_class == subc_protocol::scope::FederatedPeerClass::Phone
+            {
+                Ok((
+                    format!("phone:{}", facts.peer_fingerprint),
+                    DeviceKind::Phone,
+                ))
+            } else {
+                Err(Refusal::new(
+                    "presence_device_not_allowed",
+                    "only a stamped phone may report federated presence",
+                ))
+            };
+        }
         if self.label() == "reserved:callosum" {
             if let Some(fingerprint) = self.harness.strip_prefix("fed-phone:") {
                 if cingulate_decode::lowercase_hex(fingerprint, 32) {

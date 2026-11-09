@@ -117,6 +117,7 @@ fn cerebellum() -> RequestIdentity {
             head_agent_id: "agent-alf".into(),
             label: "ALF".into(),
             via_worker: false,
+            federated: None,
         },
         resolved_name: Some("ALF".into()),
         asker: Some(asker()),

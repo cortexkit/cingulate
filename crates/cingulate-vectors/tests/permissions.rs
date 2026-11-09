@@ -26,6 +26,39 @@ async fn holder_snapshot(grants: Value, catalog: Vec<Provider>, params: Value) -
     .unwrap()
 }
 
+#[tokio::test(start_paused = true)]
+async fn federated_rows_relay_labels_filtering_and_liveness_failure() {
+    let cases: std::collections::BTreeMap<_, _> =
+        permissions::served_cases().await.into_iter().collect();
+    let rows = cases["federated-holders"]["reply"]["modules"][0]["grants"]
+        .as_array()
+        .unwrap();
+    let expected = [
+        "Juniper · Sage",
+        "Juniper · worker for Sage",
+        "Juniper · worker",
+        "Juniper · flow Morning-digest v3",
+        "Juniper · any program",
+        "Juniper · everything on it",
+    ];
+    assert_eq!(rows.len(), expected.len());
+    for (row, label) in rows.iter().zip(expected) {
+        assert_eq!(row["holder"]["kind"], "federated");
+        assert_eq!(row["holder"]["label"], label);
+        assert!(row.get("agent_id").is_none());
+        assert!(row["holder"].get("agent_id").is_none());
+        assert_ne!(row["holder"]["claim"]["kind"], "run");
+    }
+    assert_eq!(
+        cases["federated-holders-agent-filtered"]["reply"]["modules"][0]["grants"],
+        json!([])
+    );
+    let unavailable = &cases["federated-provider-liveness-unavailable"]["reply"]["modules"][0];
+    assert_eq!(unavailable["status"], "unreachable");
+    assert!(unavailable.get("grants").is_none());
+    assert_eq!(cases["federated-revoke"]["reply"]["outcome"], "revoked");
+}
+
 #[tokio::test]
 async fn permissions_module_holder_gets_catalog_display_name() {
     let grant = holder_row(
@@ -553,6 +586,7 @@ async fn permissions_original_aggregator_vectors_match_real_handler_replies() {
         let name = path.file_stem().unwrap().to_str().unwrap();
         if path.extension().and_then(|ext| ext.to_str()) != Some("json")
             || name.starts_with("served-")
+            || name.starts_with("federated-")
             || name == "list-all-holder-labels"
         {
             continue;
@@ -606,7 +640,7 @@ async fn permissions_original_aggregator_vectors_match_real_handler_replies() {
 #[tokio::test(start_paused = true)]
 async fn permissions_served_vectors_regenerate_byte_for_byte() {
     let generated = permissions::served_files().await;
-    assert_eq!(generated.len(), 33);
+    assert_eq!(generated.len(), 45);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(permissions::root().join(&name)).unwrap(),

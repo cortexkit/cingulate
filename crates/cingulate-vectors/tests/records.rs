@@ -39,6 +39,7 @@ async fn stored_phone_projections_match_all_record_vectors() {
             head_agent_id: "agent-alf".into(),
             label: "ALF".into(),
             via_worker: false,
+            federated: None,
         },
         resolved_name: Some("ALF".into()),
         asker: None,
@@ -63,6 +64,7 @@ async fn stored_phone_projections_match_all_record_vectors() {
             head_agent_id: "agent-alf".into(),
             label: "a worker of ALF".into(),
             via_worker: false,
+            federated: None,
         },
         resolved_name: None,
         ..identity.clone()

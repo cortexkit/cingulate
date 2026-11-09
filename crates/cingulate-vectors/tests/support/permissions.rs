@@ -230,6 +230,44 @@ pub async fn served_cases() -> Vec<(&'static str, Value)> {
         ]
     };
     let mut cases = Vec::new();
+    let federated = federated_rows();
+    for (name, params) in [
+        ("federated-holders", json!({})),
+        (
+            "federated-holders-agent-filtered",
+            json!({"agent_id":"Sage"}),
+        ),
+    ] {
+        capture(
+            &mut cases,
+            name,
+            Runtime::new(vec![Provider::new("plexus", federated.clone())]),
+            phone(),
+            "permissions.list_all",
+            params,
+        )
+        .await;
+    }
+    let mut unavailable = Provider::new("plexus", federated.clone());
+    unavailable.list = Answer::Refused("federated_liveness_unavailable");
+    capture(
+        &mut cases,
+        "federated-provider-liveness-unavailable",
+        Runtime::new(vec![unavailable]),
+        phone(),
+        "permissions.list_all",
+        json!({}),
+    )
+    .await;
+    capture(
+        &mut cases,
+        "federated-revoke",
+        Runtime::new(vec![Provider::new("plexus", federated)]),
+        phone(),
+        "permissions.revoke",
+        json!({"module":"plexus","id":"invented-federated-exact-agent"}),
+    )
+    .await;
     capture(
         &mut cases,
         "list-all-holder-labels",
@@ -356,6 +394,65 @@ pub async fn served_cases() -> Vec<(&'static str, Value)> {
     )
     .await;
     cases
+}
+
+fn federated_rows() -> Value {
+    use ck_cingulate::federated::holder_label;
+    use subc_protocol::scope::{FederatedAttributes, FederatedPeerClass, RemoteClaim};
+    let cases = [
+        (
+            "exact-agent",
+            "exact_claim",
+            Some(RemoteClaim::agent("Sage")),
+        ),
+        (
+            "exact-worker",
+            "exact_claim",
+            Some(RemoteClaim::worker(
+                "invented-owner",
+                "b".repeat(64),
+                Some("Sage".into()),
+            )),
+        ),
+        (
+            "exact-worker-unattributed",
+            "exact_claim",
+            Some(RemoteClaim::worker("invented-owner", "d".repeat(64), None)),
+        ),
+        (
+            "exact-flow",
+            "exact_claim",
+            Some(RemoteClaim::flow(
+                "Morning-digest",
+                3,
+                "install-invented",
+                "c".repeat(64),
+            )),
+        ),
+        ("claimless", "claimless", None),
+        ("all", "all_claims", None),
+    ];
+    json!(cases
+        .into_iter()
+        .map(|(id, selector, claim)| {
+            let facts = FederatedAttributes::new(
+                FederatedPeerClass::Computer,
+                "a".repeat(32),
+                "pairing-invented-1".into(),
+                "Juniper".into(),
+            )
+            .with_remote_claim(claim.clone());
+            let mut holder = json!({"kind":"federated","peer_fingerprint":facts.peer_fingerprint,
+            "pairing_id":facts.pairing_id,"peer_class":"computer","selector":selector,
+            "label":holder_label(&facts, selector).unwrap()});
+            if let Some(claim) = claim {
+                holder["claim"] = json!(claim);
+            }
+            json!({"id":format!("invented-federated-{id}"),"holder":holder,"module":"plexus",
+            "subject_label":"Mail","scope":"mail_read","scope_label":"read your mail",
+            "granted_at_ms":1000000,"card_ref":"el_1"})
+        })
+        .collect::<Vec<_>>())
 }
 
 pub async fn served_files() -> BTreeMap<String, Vec<u8>> {

@@ -44,7 +44,7 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 /// RFC 8785 for this corpus's value domain. serde_json's default map is a
-/// BTreeMap, so keys serialize sorted; with ASCII strings and integers only,
+/// BTreeMap, so ASCII keys serialize sorted; with UTF-8 strings and integers only,
 /// compact serde_json output is the canonical form. `assert_domain` refuses
 /// anything outside that domain instead of emitting non-canonical bytes.
 fn jcs(value: &Value) -> String {
@@ -54,7 +54,6 @@ fn jcs(value: &Value) -> String {
 
 fn assert_domain(value: &Value) {
     match value {
-        Value::String(text) => assert!(text.is_ascii(), "non-ASCII string {text:?}"),
         Value::Number(number) => assert!(
             number.is_i64() || number.is_u64(),
             "non-integer number {number}"
@@ -64,7 +63,7 @@ fn assert_domain(value: &Value) {
             assert!(key.is_ascii(), "non-ASCII key {key:?}");
             assert_domain(value);
         }),
-        Value::Null | Value::Bool(_) => {}
+        Value::Null | Value::Bool(_) | Value::String(_) => {}
     }
 }
 
