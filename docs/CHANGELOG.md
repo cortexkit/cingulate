@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3 (cingulate-vectors)
+
+- Added `permissions/v1` provider grant/denial listing and federated precedence
+  vectors for standing denials, with the decision-table schema and refreshed
+  checksum pins. Other generated corpora remain byte-identical.
+- Added a test-only four-step precedence evaluator and aggregator coverage for
+  unchanged `effect` relay and effect-sensitive listing versions. No
+  `ck-cingulate` production code changed.
+
 ## 0.16.1 (ck-cingulate), 0.8.2 (cingulate-vectors)
 
 - Display daemon-stamped remote agent and flow names beside their ids on

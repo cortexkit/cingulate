@@ -418,6 +418,252 @@ fn provider_rows() -> Value {
     ])
 }
 
+fn federated_denial() -> Value {
+    json!({
+        "id": "grt_09", "effect": "deny",
+        "holder": {"kind": "federated", "peer_fingerprint": "a".repeat(32),
+            "pairing_id": "pairing-invented-1", "peer_class": "computer",
+            "selector": "exact_claim", "claim": {"kind": "agent", "agent_id": "Sage"},
+            "label": "Juniper · Sage"},
+        "module": "plexus", "subject_label": "Mail", "scope": "mail_read",
+        "scope_label": "never read your mail", "granted_at_ms": NOW_MS, "card_ref": "el_9"
+    })
+}
+
+fn federated_precedence() -> Value {
+    let agent = json!({"kind": "agent", "agent_id": "Sage"});
+    let call = |claim: Option<Value>| {
+        let mut call = json!({"pairing_id": "pairing-invented-1", "peer_class": "computer",
+            "now_ms": NOW_MS + 60_000});
+        if let Some(claim) = claim {
+            call["claim"] = claim;
+        }
+        call
+    };
+    let row = |selector: &str, deny: bool| {
+        let mut row = json!({"pairing_id": "pairing-invented-1", "peer_class": "computer",
+            "selector": selector});
+        if selector == "exact_claim" {
+            row["claim"] = agent.clone();
+        }
+        if deny {
+            row["effect"] = json!("deny");
+        }
+        row
+    };
+    let exact_grant = row("exact_claim", false);
+    let exact_deny = row("exact_claim", true);
+    let broad_grant = row("all_claims", false);
+    let broad_deny = row("all_claims", true);
+    let claimed = call(Some(agent.clone()));
+    let claimless = call(None);
+    let mut cases = Vec::new();
+    let mut add = |name: &str, rows: Value, call: Value, expected: &str| {
+        cases.push(json!({"name": name, "rows": rows, "call": call, "expected": expected}));
+    };
+    add(
+        "exact-denial-alone",
+        json!([exact_deny]),
+        claimed.clone(),
+        "refuse",
+    );
+    add(
+        "exact-grant-over-broad-denial",
+        json!([exact_grant, broad_deny]),
+        claimed.clone(),
+        "admit",
+    );
+    add(
+        "exact-denial-over-broad-grant",
+        json!([exact_deny, broad_grant]),
+        claimed.clone(),
+        "refuse",
+    );
+    add(
+        "broad-denial-alone",
+        json!([broad_deny]),
+        claimed.clone(),
+        "refuse",
+    );
+    add(
+        "claimless-grant-over-broad-denial",
+        json!([row("claimless", false), broad_deny]),
+        claimless.clone(),
+        "admit",
+    );
+    add(
+        "claimless-denial-over-broad-grant",
+        json!([row("claimless", true), broad_grant]),
+        claimless.clone(),
+        "refuse",
+    );
+    add(
+        "broad-grant-alone",
+        json!([broad_grant]),
+        claimed.clone(),
+        "admit",
+    );
+    add(
+        "other-agent-falls-back-to-broad-denial",
+        json!([exact_grant, broad_deny]),
+        call(Some(json!({"kind": "agent", "agent_id": "Fern"}))),
+        "refuse",
+    );
+    let run = call(Some(json!({"kind": "run", "agent_id": "Sage"})));
+    add(
+        "run-not-covered-by-broad-grant",
+        json!([broad_grant]),
+        run.clone(),
+        "none",
+    );
+    add(
+        "run-not-covered-by-broad-denial",
+        json!([broad_deny]),
+        run,
+        "none",
+    );
+    let mut named_row = exact_grant.clone();
+    named_row["claim"]["agent_name"] = json!("Old name");
+    add(
+        "agent-without-name",
+        json!([named_row]),
+        claimed.clone(),
+        "admit",
+    );
+    let mut renamed_call = claimed.clone();
+    renamed_call["claim"]["agent_name"] = json!("New name");
+    add(
+        "agent-with-different-name",
+        json!([named_row]),
+        renamed_call,
+        "admit",
+    );
+    let mut other_pairing = broad_deny.clone();
+    other_pairing["pairing_id"] = json!("pairing-invented-old");
+    add(
+        "different-pairing",
+        json!([other_pairing]),
+        claimed.clone(),
+        "none",
+    );
+    let mut expired = exact_deny.clone();
+    expired["expires_at_ms"] = claimed["now_ms"].clone();
+    add(
+        "denial-expired-at-deadline",
+        json!([expired]),
+        claimed.clone(),
+        "none",
+    );
+    add(
+        "expired-denial-falls-back-to-grant",
+        json!([expired, broad_grant]),
+        claimed.clone(),
+        "admit",
+    );
+    let mut live = exact_deny.clone();
+    live["expires_at_ms"] = json!(NOW_MS + 60_001);
+    add(
+        "denial-live-before-deadline",
+        json!([live]),
+        claimed.clone(),
+        "refuse",
+    );
+    add("no-rows", json!([]), claimed.clone(), "none");
+    add(
+        "specific-tie-denial-wins",
+        json!([exact_grant, exact_deny]),
+        claimed.clone(),
+        "refuse",
+    );
+    add(
+        "specific-tie-denial-first",
+        json!([exact_deny, exact_grant]),
+        claimed.clone(),
+        "refuse",
+    );
+    add(
+        "broad-tie-denial-wins",
+        json!([broad_grant, broad_deny]),
+        claimed.clone(),
+        "refuse",
+    );
+    add(
+        "claimless-tie-denial-wins",
+        json!([row("claimless", false), row("claimless", true)]),
+        claimless.clone(),
+        "refuse",
+    );
+    add(
+        "claimless-broad-grant",
+        json!([broad_grant]),
+        claimless.clone(),
+        "admit",
+    );
+    add(
+        "claimless-broad-denial",
+        json!([broad_deny]),
+        claimless.clone(),
+        "refuse",
+    );
+    add(
+        "claimless-not-covered-by-exact",
+        json!([exact_grant]),
+        claimless,
+        "none",
+    );
+    add(
+        "claimed-not-covered-by-claimless",
+        json!([row("claimless", true)]),
+        claimed.clone(),
+        "none",
+    );
+    let mut other_class = broad_grant.clone();
+    other_class["peer_class"] = json!("phone");
+    add(
+        "different-peer-class",
+        json!([other_class]),
+        claimed.clone(),
+        "none",
+    );
+    add(
+        "unknown-selector",
+        json!([row("future", true)]),
+        claimed.clone(),
+        "none",
+    );
+    let worker = json!({"kind": "worker", "owner_module_id": "invented-owner", "worker_ref": "b".repeat(64), "on_behalf_of": "Sage", "agent_name": "Sage name"});
+    let mut worker_row = exact_grant.clone();
+    worker_row["claim"] = worker.clone();
+    let mut worker_call = worker;
+    worker_call["on_behalf_of"] = json!("Fern");
+    worker_call["agent_name"] = json!("Fern name");
+    add(
+        "worker-attribution-is-display-only",
+        json!([worker_row]),
+        call(Some(worker_call)),
+        "admit",
+    );
+    let flow = json!({"kind": "flow", "flow_id": "Morning-digest", "flow_version": 3, "flow_install_id": "install-invented", "flow_code_hash": "c".repeat(64), "flow_name": "Old name"});
+    let mut flow_row = exact_deny;
+    flow_row["claim"] = flow.clone();
+    let mut flow_call = flow;
+    flow_call["flow_name"] = json!("New name");
+    add(
+        "flow-name-is-display-only",
+        json!([flow_row]),
+        call(Some(flow_call.clone())),
+        "refuse",
+    );
+    flow_call["flow_version"] = json!(4);
+    add(
+        "flow-version-is-identity",
+        json!([flow_row]),
+        call(Some(flow_call)),
+        "none",
+    );
+    json!({"tag": PERMISSIONS, "cases": cases})
+}
+
 fn cingulate_route() -> Value {
     json!({"principal": "reserved:cingulate"})
 }
@@ -477,6 +723,23 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
                 listed_at,
             ),
         ),
+        (
+            "provider-list-federated-deny",
+            with_now(
+                case(
+                    PERMISSIONS,
+                    "permissions.list",
+                    cingulate_route(),
+                    json!({}),
+                    reply(json!({"grants": [
+                        served_permissions::federated_rows(false)[5].clone(),
+                        federated_denial()
+                    ]})),
+                ),
+                listed_at,
+            ),
+        ),
+        ("federated-precedence", federated_precedence()),
         (
             "provider-list-after-upgrade",
             with_now(

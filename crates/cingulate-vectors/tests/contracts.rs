@@ -121,10 +121,14 @@ fn cases(name: &str) -> BTreeMap<String, Value> {
         let digest = fs::read_to_string(dir.join(format!("{stem}.sha256"))).unwrap();
         assert_eq!(digest, sha256(&jcs_bytes), "{name}/{stem}.sha256");
         assert_eq!(value["tag"], name, "{name}/{stem}");
-        assert!(
-            value.get("reply").is_some() != value.get("error").is_some(),
-            "{name}/{stem} has exactly one of reply and error"
-        );
+        if name == PERMISSIONS && stem == "federated-precedence" {
+            assert!(value["cases"].is_array(), "decision table cases");
+        } else {
+            assert!(
+                value.get("reply").is_some() != value.get("error").is_some(),
+                "{name}/{stem} has exactly one of reply and error"
+            );
+        }
         cases.insert(stem, value);
     }
     cases
@@ -151,7 +155,7 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 38);
+    assert_eq!(cases(PERMISSIONS).len(), 40);
 }
 
 #[test]
@@ -660,6 +664,9 @@ fn check_flow_holder(name: &str, grant: &Value, holder: &Value) {
 fn grant_rows(cases: &BTreeMap<String, Value>) -> Vec<(String, i64, Vec<Value>)> {
     let mut rows = Vec::new();
     for (name, case) in cases {
+        if case.get("reply").is_none() {
+            continue;
+        }
         let now = case["now_ms"].as_i64().unwrap();
         if let Some(grants) = case.pointer("/reply/grants") {
             rows.push((name.clone(), now, grants.as_array().unwrap().clone()));

@@ -3,8 +3,10 @@
 Wire vectors for the `permissions/v1` provider capability and cingulate's
 aggregator operations behind the apps' permissions page. The normative contract
 is `docs/contracts/permissions-v1.md`. Contract-authored cases pin provider and
-aggregator replies. The `served-*`, `federated-*` cases and `list-all-holder-labels` are captured
-from Cingulate's real handler with fake daemon catalogs and provider replies.
+aggregator replies. The `served-*`, federated holder/list/revoke cases and
+`list-all-holder-labels` are captured from Cingulate's real handler with fake
+daemon catalogs and provider replies. `federated-precedence` is instead a
+contract-authored provider decision table, not an aggregator RPC.
 
 ## Encoding
 
@@ -34,6 +36,124 @@ contract's row invariants.
 as in the danger corpus (`route` is test notation for the daemon's stamp, never a
 request field). `now_ms` is the provider's or cingulate's clock when the
 operation runs; it is not a wire field.
+
+### Federated precedence table schema
+
+`federated-precedence` has `tag` and `cases`, not RPC fields. Each case supplies
+candidate rows for the same subject and a call whose pairing, peer class and
+claim are authenticated daemon-stamped facts, never request-body identity.
+The provider has already verified each row's base scope is live and its peer
+fingerprint equals the call's stamped fingerprint; the table tests row expiry
+and selector precedence, not base-scope verification.
+Rows flatten holder fields and omit display labels and row ids. As on the wire,
+absent `effect` means grant, absent `expires_at_ms` means no expiry, and absent
+`claim` means no claim (not a JSON null). A row expires at `now_ms >= expires_at_ms`.
+Unknown selectors match nothing. Only `exact_claim` rows carry a claim.
+Names and worker attribution are display only; canonical identity uses the
+fields named by the contract. All identifiers in the cases are invented.
+
+The following JSON Schema (2020-12) describes the table's test notation. Claim
+identifiers are assumed valid under the contract's token/module-id rules; this
+is not an input-validation corpus.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["tag", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "tag": {"const": "permissions-v1"},
+    "cases": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "rows", "call", "expected"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}},
+          "call": {"$ref": "#/$defs/call"},
+          "expected": {"enum": ["admit", "refuse", "none"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "peerClass": {"enum": ["computer", "phone", "sim", "unknown"]},
+    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+    "id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "grantableClaim": {
+      "oneOf": [
+        {
+          "type": "object", "required": ["kind", "agent_id"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "agent"}, "agent_id": {"$ref": "#/$defs/id"},
+            "agent_name": {"$ref": "#/$defs/name"}
+          }
+        },
+        {
+          "type": "object", "required": ["kind", "owner_module_id", "worker_ref"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "worker"}, "owner_module_id": {"type": "string"},
+            "worker_ref": {"$ref": "#/$defs/hash"},
+            "on_behalf_of": {"$ref": "#/$defs/id"}, "agent_name": {"$ref": "#/$defs/name"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "flow_id", "flow_version", "flow_install_id", "flow_code_hash"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "flow"}, "flow_id": {"$ref": "#/$defs/id"},
+            "flow_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "flow_install_id": {"$ref": "#/$defs/id"}, "flow_code_hash": {"$ref": "#/$defs/hash"},
+            "flow_name": {"$ref": "#/$defs/name"}
+          }
+        }
+      ]
+    },
+    "row": {
+      "type": "object", "required": ["pairing_id", "peer_class", "selector"],
+      "additionalProperties": false,
+      "properties": {
+        "pairing_id": {"type": "string", "minLength": 1}, "peer_class": {"$ref": "#/$defs/peerClass"},
+        "selector": {"type": "string"}, "claim": {"$ref": "#/$defs/grantableClaim"},
+        "effect": {"const": "deny"}, "expires_at_ms": {"type": "integer"}
+      },
+      "if": {"properties": {"selector": {"const": "exact_claim"}}},
+      "then": {"required": ["claim"]},
+      "else": {"not": {"required": ["claim"]}}
+    },
+    "call": {
+      "type": "object", "required": ["pairing_id", "peer_class", "now_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "pairing_id": {"type": "string", "minLength": 1}, "peer_class": {"$ref": "#/$defs/peerClass"},
+        "now_ms": {"type": "integer"},
+        "claim": {
+          "oneOf": [
+            {"$ref": "#/$defs/grantableClaim"},
+            {
+              "type": "object", "required": ["kind", "agent_id"], "additionalProperties": false,
+              "properties": {"kind": {"const": "run"}, "agent_id": {"$ref": "#/$defs/id"}}
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+`crates/cingulate-vectors/tests/federated_precedence.rs` evaluates every case
+with a test-only reference implementation of the contract's four steps. The
+table includes specific-over-broad precedence, denial ties, claimed and
+claimless calls, run exclusion, display-only names, pairing/class isolation,
+expiry at the deadline and no standing answer.
 
 ## Scenario
 
@@ -67,6 +187,7 @@ cingulate):
 | Case | What it pins |
 |---|---|
 | `provider-list` | `permissions.list` at 1060000: all eight rows, including both flow holders and the unknown holder kind. |
+| `provider-list-federated-deny` | One all-claims federated grant and the contract's exact-agent denial `grt_09` for the same pairing and Mail subject. |
 | `provider-list-after-upgrade` | At 1120000 the TextEdit grant was upgraded to always by card `el_6`: same id `grt_01`, no `expires_at_ms`, new `granted_at_ms` and `card_ref`. |
 | `provider-list-after-expiry` | At exactly 2800000 (the 30-minute expiry) the three expiring rows are gone. The flow and unknown-kind rows stay: neither carries an expiry. |
 | `provider-revoke-revoked` | `permissions.revoke` of the site grant. |
@@ -74,6 +195,12 @@ cingulate):
 | `provider-revoke-not-found` | An id the provider never issued. |
 | `provider-revoke-expired` | `grt_01` after its expiry: `not_found`, the same as unknown. |
 | `provider-revoke-refused-agent` | A route that is neither `reserved:cingulate` nor `direct`: refused. |
+
+Provider decision table:
+
+| Case | What it pins |
+|---|---|
+| `federated-precedence` | Thirty independent row/call/expected-answer cases for standing grants and denials, using the schema above. |
 
 Aggregator cases (cingulate, called by the phone through Callosum unless noted):
 

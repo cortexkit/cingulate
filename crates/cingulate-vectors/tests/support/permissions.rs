@@ -405,7 +405,7 @@ pub async fn served_cases() -> Vec<(&'static str, Value)> {
     cases
 }
 
-fn federated_rows(named: bool) -> Value {
+pub fn federated_rows(named: bool) -> Value {
     use ck_cingulate::federated::holder_label;
     use subc_protocol::scope::{FederatedAttributes, FederatedPeerClass, RemoteClaim};
     let cases = [
