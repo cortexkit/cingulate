@@ -418,6 +418,40 @@ fn provider_rows() -> Value {
     ])
 }
 
+fn worker_grant_sources() -> Value {
+    json!([
+        {
+            "id": "grt_src_01", "agent_id": "agent-cedar",
+            "holder": {"kind": "worker", "agent_id": "agent-cedar", "scope_ref": "scope:wkr-cedar"},
+            "module": "cerebellum", "subject_label": "Preview",
+            "scope": "app", "scope_label": "the app Preview",
+            "granted_at_ms": NOW_MS, "source": "person", "card_ref": "el_src_1"
+        },
+        {
+            "id": "grt_src_02", "agent_id": "agent-cedar",
+            "holder": {"kind": "worker", "agent_id": "agent-cedar", "scope_ref": "scope:wkr-cedar"},
+            "module": "cerebellum", "subject_label": "TextEdit",
+            "scope": "app", "scope_label": "the app TextEdit",
+            "granted_at_ms": NOW_MS + 20_000, "source": "head_grant"
+        },
+        {
+            "id": "grt_src_03", "agent_id": "agent-cedar",
+            "holder": {"kind": "worker", "agent_id": "agent-cedar", "scope_ref": "scope:wkr-cedar"},
+            "module": "cerebellum", "subject_label": "Notes",
+            "scope": "app", "scope_label": "the app Notes",
+            "granted_at_ms": NOW_MS + 40_000, "source": "head_policy"
+        },
+        {
+            "id": "grt_src_04", "agent_id": "agent-cedar",
+            "holder": {"kind": "worker", "agent_id": "agent-cedar", "scope_ref": "scope:wkr-cedar"},
+            "module": "cerebellum", "subject_label": "Mail",
+            "scope": "app", "scope_label": "the app Mail",
+            "granted_at_ms": NOW_MS - 60_000, "source": "unknown",
+            "granted_at_bound": "at_or_before"
+        }
+    ])
+}
+
 fn federated_denial() -> Value {
     json!({
         "id": "grt_09", "effect": "deny",
@@ -719,6 +753,19 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
                     cingulate_route(),
                     json!({}),
                     reply(json!({"grants": provider_rows()})),
+                ),
+                listed_at,
+            ),
+        ),
+        (
+            "provider-list-grant-sources",
+            with_now(
+                case(
+                    PERMISSIONS,
+                    "permissions.list",
+                    cingulate_route(),
+                    json!({}),
+                    reply(json!({"grants": worker_grant_sources()})),
                 ),
                 listed_at,
             ),

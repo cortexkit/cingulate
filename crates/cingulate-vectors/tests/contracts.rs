@@ -155,7 +155,34 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 40);
+    assert_eq!(cases(PERMISSIONS).len(), 41);
+}
+
+#[test]
+fn worker_grant_sources_pin_exact_and_migration_bounded_times() {
+    let cases = cases(PERMISSIONS);
+    let grants = cases["provider-list-grant-sources"]["reply"]["grants"]
+        .as_array()
+        .unwrap();
+    assert_eq!(grants.len(), 4);
+    for (grant, (source, granted_at_ms)) in grants.iter().zip([
+        ("person", 1_000_000),
+        ("head_grant", 1_020_000),
+        ("head_policy", 1_040_000),
+        ("unknown", 940_000),
+    ]) {
+        assert_eq!(grant["holder"]["kind"], "worker");
+        assert_eq!(grant["source"], source);
+        assert_eq!(grant["granted_at_ms"], granted_at_ms);
+        if source == "unknown" {
+            assert_eq!(grant["granted_at_bound"], "at_or_before");
+        } else {
+            assert!(
+                grant.get("granted_at_bound").is_none(),
+                "exact {source} time"
+            );
+        }
+    }
 }
 
 #[test]

@@ -187,6 +187,7 @@ cingulate):
 | Case | What it pins |
 |---|---|
 | `provider-list` | `permissions.list` at 1060000: all eight rows, including both flow holders and the unknown holder kind. |
+| `provider-list-grant-sources` | Four worker grants with `person`, `head_grant`, `head_policy` and `unknown` sources. The first three have exact grant times (1000000, 1020000, 1040000); the unknown-source grant has `granted_at_bound: "at_or_before"` and `granted_at_ms: 940000`, the earlier store-migration time, not its actual mint time. All ids are invented. |
 | `provider-list-federated-deny` | One all-claims federated grant and the contract's exact-agent denial `grt_09` for the same pairing and Mail subject. |
 | `provider-list-after-upgrade` | At 1120000 the TextEdit grant was upgraded to always by card `el_6`: same id `grt_01`, no `expires_at_ms`, new `granted_at_ms` and `card_ref`. |
 | `provider-list-after-expiry` | At exactly 2800000 (the 30-minute expiry) the three expiring rows are gone. The flow and unknown-kind rows stay: neither carries an expiry. |

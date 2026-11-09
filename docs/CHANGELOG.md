@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.4 (cingulate-vectors)
+
+- Added the `permissions/v1` provider `provider-list-grant-sources` vector:
+  four worker grants with `person`, `head_grant`, `head_policy` and `unknown`
+  sources. The unknown-source grant's time is bounded by an earlier store
+  migration; the other grant times are exact.
+- Linked the optional `source` and `granted_at_bound` fields to the vector and
+  refreshed the corpus checksums and pins. Other generated corpora remain
+  byte-identical.
+
 ## 0.8.3 (cingulate-vectors)
 
 - Added `permissions/v1` provider grant/denial listing and federated precedence
