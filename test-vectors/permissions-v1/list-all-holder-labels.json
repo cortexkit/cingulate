@@ -1,0 +1,60 @@
+{
+  "method": "permissions.list_all",
+  "now_ms": 1060000,
+  "reply": {
+    "modules": [
+      {
+        "grants": [
+          {
+            "granted_at_ms": 1000000,
+            "holder": {
+              "kind": "module",
+              "label": "Web Indexer",
+              "module_id": "indexer"
+            },
+            "id": "module-named",
+            "module": "claustrum",
+            "scope": "api_key",
+            "scope_label": "the search API key",
+            "subject_label": "Search API"
+          },
+          {
+            "granted_at_ms": 1000000,
+            "holder": {
+              "kind": "enrolled",
+              "label": "Kitchen tablet",
+              "name": "kitchen-tablet"
+            },
+            "id": "enrolled",
+            "module": "claustrum",
+            "scope": "api_key",
+            "scope_label": "the search API key",
+            "subject_label": "Search API"
+          },
+          {
+            "granted_at_ms": 1000000,
+            "holder": {
+              "kind": "module",
+              "module_id": "unnamed"
+            },
+            "id": "module-unnamed",
+            "module": "claustrum",
+            "scope": "api_key",
+            "scope_label": "the search API key",
+            "subject_label": "Search API"
+          }
+        ],
+        "module": "claustrum",
+        "status": "ok"
+      }
+    ],
+    "version": "312ae8dd91ad1dc664e57030bb5d303a15fba455f49369edf2aa5c4fa226db9a"
+  },
+  "request": {},
+  "route": {
+    "operator_surface": true,
+    "principal": "reserved:callosum",
+    "sim_surface": false
+  },
+  "tag": "permissions-v1"
+}

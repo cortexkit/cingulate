@@ -3,13 +3,149 @@ mod permissions;
 mod support;
 
 use ck_cingulate::{manifest, Stamp};
-use permissions::{bound, call, handler, phone, row, Answer, Provider, Runtime};
+use permissions::{
+    bound, call, catalog_module, handler, holder_row, phone, row, Answer, Provider, Runtime,
+};
 use serde_json::{json, Value};
 use std::{fs, sync::Arc};
 use subc_protocol::{
     manifest::{ManagementOperationKind, ProviderRole},
     Principal,
 };
+
+async fn holder_snapshot(grants: Value, catalog: Vec<Provider>, params: Value) -> Value {
+    let mut providers = vec![Provider::new("claustrum", grants)];
+    providers.extend(catalog);
+    call(
+        &handler(Arc::new(Runtime::new(providers))),
+        &phone(),
+        "permissions.list_all",
+        params,
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn permissions_module_holder_gets_catalog_display_name() {
+    let grant = holder_row(
+        "named",
+        json!({"kind":"module","module_id":"indexer","extra":7}),
+    );
+    let mut expected = grant.clone();
+    expected["holder"]["label"] = json!("Web Indexer");
+    let reply = holder_snapshot(
+        json!([grant]),
+        vec![catalog_module("indexer", Some("Web Indexer"))],
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        reply["modules"],
+        json!([{"module":"claustrum","status":"ok","grants":[expected]}])
+    );
+}
+
+#[tokio::test]
+async fn permissions_module_holder_provider_label_wins() {
+    let grants = json!([
+        holder_row(
+            "label",
+            json!({"kind":"module","module_id":"indexer","label":"Provider name"})
+        ),
+        holder_row(
+            "empty-label",
+            json!({"kind":"module","module_id":"indexer","label":""})
+        ),
+        holder_row(
+            "null-label",
+            json!({"kind":"module","module_id":"indexer","label":null})
+        ),
+        holder_row(
+            "future-label",
+            json!({"kind":"module","module_id":"indexer","label":{"future":true}})
+        ),
+    ]);
+    let reply = holder_snapshot(
+        grants.clone(),
+        vec![catalog_module("indexer", Some("Web Indexer"))],
+        json!({}),
+    )
+    .await;
+    assert_eq!(reply["modules"][0]["grants"], grants);
+}
+
+#[tokio::test]
+async fn permissions_module_holder_without_catalog_name_stays_unlabeled() {
+    let grants = json!([
+        holder_row("unknown", json!({"kind":"module","module_id":"unknown"})),
+        holder_row("unnamed", json!({"kind":"module","module_id":"unnamed"})),
+        holder_row("missing-id", json!({"kind":"module"})),
+    ]);
+    let reply = holder_snapshot(
+        grants.clone(),
+        vec![catalog_module("unnamed", None)],
+        json!({}),
+    )
+    .await;
+    assert_eq!(reply["modules"][0]["grants"], grants);
+}
+
+#[tokio::test]
+async fn permissions_non_module_holders_stay_untouched() {
+    let grants = json!([
+        holder_row("enrolled", json!({"kind":"enrolled","name":"kitchen-tablet","module_id":"indexer"})),
+        holder_row("enrolled-label", json!({"kind":"enrolled","name":"desk-tablet","label":"Kitchen tablet","module_id":"indexer"})),
+        holder_row("agent", json!({"kind":"agent","agent_id":"agent-alf","module_id":"indexer"})),
+        holder_row("future", json!({"kind":"future","module_id":"indexer"})),
+        {"id":"missing-holder","extra":true},
+        {"id":"null-holder","holder":null},
+        {"id":"scalar-holder","holder":"indexer"},
+        "future-row",
+    ]);
+    let reply = holder_snapshot(
+        grants.clone(),
+        vec![catalog_module("indexer", Some("Web Indexer"))],
+        json!({}),
+    )
+    .await;
+    assert_eq!(reply["modules"][0]["grants"], grants);
+}
+
+#[tokio::test]
+async fn permissions_module_display_name_changes_version() {
+    let grants = json!([holder_row(
+        "named",
+        json!({"kind":"module","module_id":"indexer"})
+    )]);
+    let before = holder_snapshot(
+        grants.clone(),
+        vec![catalog_module("indexer", Some("Web Indexer"))],
+        json!({}),
+    )
+    .await;
+    let unchanged = holder_snapshot(
+        grants.clone(),
+        vec![catalog_module("indexer", Some("Web Indexer"))],
+        json!({"since_version":before["version"]}),
+    )
+    .await;
+    assert_eq!(
+        unchanged,
+        json!({"version":before["version"],"unchanged":true})
+    );
+    let after = holder_snapshot(
+        grants,
+        vec![catalog_module("indexer", Some("Renamed Indexer"))],
+        json!({"since_version":before["version"]}),
+    )
+    .await;
+    assert_ne!(before["version"], after["version"]);
+    assert_eq!(
+        after["modules"][0]["grants"][0]["holder"]["label"],
+        "Renamed Indexer"
+    );
+}
 
 #[tokio::test]
 async fn permissions_guard_discovery_uses_capability_not_module_name() {
@@ -417,6 +553,7 @@ async fn permissions_original_aggregator_vectors_match_real_handler_replies() {
         let name = path.file_stem().unwrap().to_str().unwrap();
         if path.extension().and_then(|ext| ext.to_str()) != Some("json")
             || name.starts_with("served-")
+            || name == "list-all-holder-labels"
         {
             continue;
         }
@@ -469,7 +606,7 @@ async fn permissions_original_aggregator_vectors_match_real_handler_replies() {
 #[tokio::test(start_paused = true)]
 async fn permissions_served_vectors_regenerate_byte_for_byte() {
     let generated = permissions::served_files().await;
-    assert_eq!(generated.len(), 30);
+    assert_eq!(generated.len(), 33);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(permissions::root().join(&name)).unwrap(),

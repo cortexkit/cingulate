@@ -2,10 +2,9 @@
 
 Wire vectors for the `permissions/v1` provider capability and cingulate's
 aggregator operations behind the apps' permissions page. The normative contract
-is `docs/contracts/permissions-v1.md`. These vectors are written from that
-contract, not captured from an implementation: no provider or cingulate release
-serves these operations yet, and implementations must match these bytes, not
-regenerate them.
+is `docs/contracts/permissions-v1.md`. Contract-authored cases pin provider and
+aggregator replies. The `served-*` cases and `list-all-holder-labels` are captured
+from Cingulate's real handler with fake daemon catalogs and provider replies.
 
 ## Encoding
 
@@ -80,6 +79,7 @@ Aggregator cases (cingulate, called by the phone through Callosum unless noted):
 | Case | What it pins |
 |---|---|
 | `list-all-ok` | `permissions.list_all`: one module, `ok`, five rows. |
+| `list-all-holder-labels` | Real-handler reply with exactly three rows: a module holder named from the catalog, an enrolled holder with a provider label, and a module holder whose catalog entry declares no name. |
 | `list-all-unreachable` | `plexus` could not be read: named by status, no `grants`. |
 | `list-all-unsupported` | `aft` declares the capability but does not serve `permissions.list`. |
 | `list-all-unchanged` | `since_version` equal to `list-all-ok`'s version: `unchanged`, no `modules`. |

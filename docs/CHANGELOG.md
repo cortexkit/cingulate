@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.3 (ck-cingulate)
+
+- Fill absent module-holder labels in `permissions.list_all` from every registered
+  module's catalog `display_name`, preserving provider labels and other holder
+  kinds. Names enter the snapshot before hashing, so renaming a holder changes
+  the conditional-read version. Add a handler-generated three-row app vector.
+- Upgrade subc-client-rs to 0.34.3 and subc-protocol to 0.34.5 (with transitive
+  subc-control 0.35.1). Keep handle requests for revoke: only trusted, opted-in
+  `route_busy` refusals may retry, never stale channels or uncertain outcomes.
+  Lost replies, including the SDK's new completion-failed `OutcomeUnknown`,
+  still report `module_unreachable`.
+
 ## 0.15.2 (ck-cingulate)
 
 - Pending permission asks now settle as `access_asker_gone` when the daemon

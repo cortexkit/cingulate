@@ -24,6 +24,7 @@ pub enum Answer {
 #[derive(Clone)]
 pub struct Provider {
     pub module: String,
+    pub display_name: Option<String>,
     pub capabilities: Vec<String>,
     pub ready: bool,
     pub supports_list: bool,
@@ -34,6 +35,7 @@ impl Provider {
     pub fn new(module: &str, grants: Value) -> Self {
         Self {
             module: module.into(),
+            display_name: None,
             capabilities: vec!["permissions/v1".into()],
             ready: true,
             supports_list: true,
@@ -61,9 +63,26 @@ impl Provider {
             identity_scope: vec![],
             concurrency: Concurrency::ModuleManaged,
         };
-        json!({"module_id":self.module,"ready":self.ready,"roles":[role],"control_ops":[],
-            "capabilities":{"provides":self.capabilities,"requires":[],"must_never_reach":[]}})
+        let mut entry = json!({"module_id":self.module,"ready":self.ready,"roles":[role],"control_ops":[],
+            "capabilities":{"provides":self.capabilities,"requires":[],"must_never_reach":[]}});
+        if let Some(name) = &self.display_name {
+            entry["display_name"] = json!(name);
+        }
+        entry
     }
+}
+
+pub fn catalog_module(module: &str, display_name: Option<&str>) -> Provider {
+    let mut entry = Provider::new(module, json!([]));
+    entry.capabilities.clear();
+    entry.display_name = display_name.map(str::to_owned);
+    entry
+}
+
+pub fn holder_row(id: &str, holder: Value) -> Value {
+    json!({"id":id,"holder":holder,"module":"claustrum",
+        "subject_label":"Search API","scope":"api_key",
+        "scope_label":"the search API key","granted_at_ms":1000000})
 }
 
 pub struct Runtime {
@@ -211,6 +230,35 @@ pub async fn served_cases() -> Vec<(&'static str, Value)> {
         ]
     };
     let mut cases = Vec::new();
+    capture(
+        &mut cases,
+        "list-all-holder-labels",
+        Runtime::new(vec![
+            Provider::new(
+                "claustrum",
+                json!([
+                    holder_row(
+                        "module-named",
+                        json!({"kind":"module","module_id":"indexer"})
+                    ),
+                    holder_row(
+                        "enrolled",
+                        json!({"kind":"enrolled","name":"kitchen-tablet","label":"Kitchen tablet"})
+                    ),
+                    holder_row(
+                        "module-unnamed",
+                        json!({"kind":"module","module_id":"unnamed"})
+                    ),
+                ]),
+            ),
+            catalog_module("indexer", Some("Web Indexer")),
+            catalog_module("unnamed", None),
+        ]),
+        phone(),
+        "permissions.list_all",
+        json!({}),
+    )
+    .await;
     capture(
         &mut cases,
         "served-list-two-providers",

@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.15.2"
+version = "0.15.3"
 dependencies = [
  "async-trait",
  "cingulate-decode",
@@ -811,15 +811,15 @@ dependencies = [
 
 [[package]]
 name = "subc-client-rs"
-version = "0.33.1"
+version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "082e0ca74885e6441f607db5c445d44136fae0b61b9d785da47ac0341bc53b44"
+checksum = "dec6f915738fea5b10bdd534a86ea2b4fb0184726aeced06b57094716735cc4f"
 dependencies = [
  "async-trait",
  "serde",
  "serde_json",
  "sha2",
- "subc-control",
+ "subc-control 0.35.1",
  "subc-os",
  "subc-protocol",
  "subc-transport",
@@ -833,6 +833,17 @@ name = "subc-control"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d339866d62da0f376dec7f13c897cd764ead24fc93ca6d764cb3e6ab81844d64"
+dependencies = [
+ "serde",
+ "serde_json",
+ "subc-protocol",
+]
+
+[[package]]
+name = "subc-control"
+version = "0.35.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37badc4c1a837e40cd93b14cf76fc5c1e72a1a47b18f71227af744acc8ea3b23"
 dependencies = [
  "serde",
  "serde_json",
@@ -858,7 +869,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "subc-cgroup",
- "subc-control",
+ "subc-control 0.34.0",
  "subc-jobobject",
  "subc-jsonc",
  "subc-os",
@@ -892,9 +903,9 @@ dependencies = [
 
 [[package]]
 name = "subc-os"
-version = "0.1.26"
+version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54ec6e1e76111fd7ecdeae8701a8cb5cae83b704b0c92e6e8f44164cb50fd07c"
+checksum = "ed0290e3b7b5bfe744144edd727d80e5647156e41539e621287f283d808f4e64"
 dependencies = [
  "libc",
  "rustix",
@@ -919,9 +930,9 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.34.0"
+version = "0.34.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3583246114ab2ab1000d9297bd990ac42a35a1f47121353e7ff9df713cfc3631"
+checksum = "cd0af7074ac8e70aee159aae8d2c26662cc98f0ad5450541e8083ec9c715f202"
 dependencies = [
  "serde",
  "serde_json",

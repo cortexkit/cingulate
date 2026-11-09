@@ -151,7 +151,7 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 32);
+    assert_eq!(cases(PERMISSIONS).len(), 33);
 }
 
 #[test]
@@ -878,6 +878,7 @@ fn upgrade_keeps_the_id_and_expiry_drops_rows_at_the_deadline() {
 fn list_all_versions_hash_the_modules_and_unread_modules_carry_no_rows() {
     let cases = cases(PERMISSIONS);
     for name in [
+        "list-all-holder-labels",
         "list-all-ok",
         "list-all-unreachable",
         "list-all-unsupported",

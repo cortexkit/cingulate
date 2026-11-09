@@ -129,8 +129,10 @@ impl PermissionsRuntime for DaemonAccessRuntime {
                 )
                 .await
                 .map_err(|_| PermissionsCallError::Unreachable)?;
-            // A handle request sends once. The managed `call` API may reopen and
-            // resend on stale-channel errors, which a revoke must never do.
+            // A handle request never reopens and resends on stale-channel errors,
+            // unlike managed `call`: a revoke may already have reached the module.
+            // The SDK retries only daemon-origin route_busy refusals on opted-in
+            // routes, which prove the request was never forwarded to the module.
             let bytes = consumer
                 .request(
                     &handle,
@@ -225,7 +227,11 @@ impl Handler {
             .map_err(|_| unavailable())?
             .map_err(|_| unavailable())?;
         let mut providers = BTreeMap::new();
+        let mut display_names = BTreeMap::new();
         for entry in catalog.modules {
+            if let Some(display_name) = entry.display_name {
+                display_names.insert(entry.module_id.clone(), display_name);
+            }
             if entry.capabilities.as_ref().is_some_and(|capabilities| {
                 capabilities
                     .provides
@@ -307,6 +313,31 @@ impl Handler {
                 call.await
                     .unwrap_or_else(|_| json!({"module":module,"status":"unreachable"})),
             );
+        }
+        for module in &mut modules {
+            if module["status"] != "ok" {
+                continue;
+            }
+            let Some(grants) = module["grants"].as_array_mut() else {
+                continue;
+            };
+            for grant in grants {
+                let Some(holder) = grant.get_mut("holder").and_then(Value::as_object_mut) else {
+                    continue;
+                };
+                if holder.get("kind").and_then(Value::as_str) != Some("module")
+                    || holder.contains_key("label")
+                {
+                    continue;
+                }
+                if let Some(display_name) = holder
+                    .get("module_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| display_names.get(id))
+                {
+                    holder.insert("label".into(), json!(display_name));
+                }
+            }
         }
         let canonical = serde_jcs::to_vec(&modules).map_err(|_| unavailable())?;
         let version = format!("{:x}", Sha256::digest(canonical));
