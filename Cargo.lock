@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "cingulate-vectors"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "async-trait",
  "base64",
@@ -140,14 +140,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "subc-client-rs",
- "subc-protocol 0.36.0",
+ "subc-protocol 0.36.2",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "ck-cingulate"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "async-trait",
  "cingulate-decode",
@@ -164,7 +164,7 @@ dependencies = [
  "sha2",
  "subc-client-rs",
  "subc-daemon",
- "subc-protocol 0.36.0",
+ "subc-protocol 0.36.2",
  "subc-transport 0.17.0",
  "tempfile",
  "tokio",
@@ -811,17 +811,17 @@ dependencies = [
 
 [[package]]
 name = "subc-client-rs"
-version = "0.36.0"
+version = "0.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65a41aaba5b6bad110375cc4d640b005ee5e331060cc6afb88f92f749adfd077"
+checksum = "e03fd2860189a6a9b98b517b97e21317f449836208da81636074a710a7cfb96a"
 dependencies = [
  "async-trait",
  "serde",
  "serde_json",
  "sha2",
- "subc-control 0.37.0",
+ "subc-control 0.38.2",
  "subc-os",
- "subc-protocol 0.36.0",
+ "subc-protocol 0.36.2",
  "subc-transport 0.17.0",
  "tokio",
  "tokio-util",
@@ -841,13 +841,13 @@ dependencies = [
 
 [[package]]
 name = "subc-control"
-version = "0.37.0"
+version = "0.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fb7a697c95ab59be38f720da06a5f03f431986f03906eb405fdb80f05d8e86a"
+checksum = "17686253de3d49b9a7283131f483dd468b347d9514de9ffd00b3187a8c1a1627"
 dependencies = [
  "serde",
  "serde_json",
- "subc-protocol 0.36.0",
+ "subc-protocol 0.36.2",
 ]
 
 [[package]]
@@ -940,9 +940,9 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.36.0"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d3a637e5216963e31c58a51a26c3412412781b10f0b7df851135406949bf2e"
+checksum = "28cc916c8a00269cfc6f13a1ac4d8333132de805b10c3eb8dbc23ea868f3d9bb"
 dependencies = [
  "serde",
  "serde_json",
@@ -979,7 +979,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "subc-os",
- "subc-protocol 0.36.0",
+ "subc-protocol 0.36.2",
  "subtle",
  "tokio",
 ]

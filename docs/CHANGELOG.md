@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.1 (ck-cingulate), 0.8.2 (cingulate-vectors)
+
+- Display daemon-stamped remote agent and flow names beside their ids on
+  federated consent cards and permissions labels. Persist valid names in card
+  subjects, including phone and watch projections; drop invalid display text
+  without refusing the caller. No name enters card ownership or grant matching.
+- Pin subc-client-rs 0.38.2 and subc-protocol 0.36.2 (and the required transitive
+  subc-control 0.38.2). Preserve existing unnamed wording byte for byte.
+- Add the handler-generated named federated permissions sample, refresh corpus
+  checksums, and cover renames, omitted names, distinct ids and unsafe names.
+
 ## 0.16.0 (ck-cingulate)
 
 - Adopt exact subc-client-rs and subc-protocol 0.36.0 pins and declare

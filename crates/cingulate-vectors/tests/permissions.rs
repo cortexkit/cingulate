@@ -57,6 +57,27 @@ async fn federated_rows_relay_labels_filtering_and_liveness_failure() {
     assert_eq!(unavailable["status"], "unreachable");
     assert!(unavailable.get("grants").is_none());
     assert_eq!(cases["federated-revoke"]["reply"]["outcome"], "revoked");
+    let named = cases["federated-holders-named"]["reply"]["modules"][0]["grants"]
+        .as_array()
+        .unwrap();
+    let expected_named = [
+        "Juniper · “Remote Sage” (Sage)",
+        "Juniper · worker for “Remote Sage” (Sage)",
+        "Juniper · worker",
+        "Juniper · flow “Daily digest” (Morning-digest) v3",
+        "Juniper · any program",
+        "Juniper · everything on it",
+    ];
+    for (row, label) in named.iter().zip(expected_named) {
+        assert_eq!(row["holder"]["label"], label);
+    }
+    assert_eq!(named[0]["holder"]["claim"]["agent_name"], "Remote Sage");
+    assert_eq!(named[1]["holder"]["claim"]["agent_name"], "Remote Sage");
+    assert_eq!(named[3]["holder"]["claim"]["flow_name"], "Daily digest");
+    assert_ne!(
+        cases["federated-holders"]["reply"]["version"],
+        cases["federated-holders-named"]["reply"]["version"]
+    );
 }
 
 #[tokio::test]
@@ -640,7 +661,7 @@ async fn permissions_original_aggregator_vectors_match_real_handler_replies() {
 #[tokio::test(start_paused = true)]
 async fn permissions_served_vectors_regenerate_byte_for_byte() {
     let generated = permissions::served_files().await;
-    assert_eq!(generated.len(), 45);
+    assert_eq!(generated.len(), 48);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(permissions::root().join(&name)).unwrap(),

@@ -1,6 +1,6 @@
 [package]
 name = "ck-cingulate"
-version = "0.16.0"
+version = "0.16.1"
 edition = "2021"
 
 [dependencies]
@@ -15,8 +15,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
-subc-client-rs = "=0.36.0"
-subc-protocol = "=0.36.0"
+subc-client-rs = "=0.38.2"
+subc-protocol = "=0.36.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 

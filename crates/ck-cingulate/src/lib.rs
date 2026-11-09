@@ -860,7 +860,8 @@ impl Handler {
                     label: federated::holder_label(facts, selector)
                         .unwrap_or_else(|| facts.peer_name.clone()),
                     federated: Some(
-                        serde_json::to_value(facts).expect("federated facts serialization"),
+                        serde_json::to_value(federated::display_facts(facts))
+                            .expect("federated facts serialization"),
                     ),
                 },
                 resolved_name: None,

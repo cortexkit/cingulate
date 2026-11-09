@@ -30,8 +30,9 @@ canonical claim identity). Claim identity includes its kind and is:
 - worker: `owner_module_id` and `worker_ref`;
 - flow: all four of `flow_id`, `flow_version`, `flow_install_id`, `flow_code_hash`.
 
-The scope ref/epoch, `peer_name`, and worker `on_behalf_of` do not enter that
-identity. A different provider, pairing, class or claim cannot collect the card.
+The scope ref/epoch, `peer_name`, worker `on_behalf_of`, `agent_name` and
+`flow_name` do not enter that identity. A different provider, pairing, class or
+claim cannot collect the card.
 Pending `el_` records already persist independently of a route; route closure
 cancels its wait, not its card. On a new route with the same paired subject the
 provider can get, await, collect answers and acknowledge them through the normal
@@ -61,6 +62,12 @@ peer name for a run; no local `subject.agent_id` or `head_agent_id` is emitted.
 
 Every card adds the fact `“Juniper” is paired with this computer.`. “Cloud” and
 “hosted” are never added unless present in the person's roster name.
+
+Since 0.16.1, validated optional names from the stamped claim are shown in quotes
+with the id beside them in parentheses. Without a name the sentences above are
+unchanged. Names are stored as display data in `subject.federated.remote_claim`,
+never used as identity. See the exact named sentences and validation rule in
+[consent-card-text-v1](consent-card-text-v1.md#federated-caller-names).
 
 A run card is **one immutable answer per elicitation, for the call that raised
 it**, not a standing grant. The provider binds the elicitation id (and its

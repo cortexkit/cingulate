@@ -25,8 +25,8 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
         include_str!("../../cingulate-vectors/Cargo.toml"),
     ] {
         for pin in [
-            "subc-client-rs = \"=0.36.0\"",
-            "subc-protocol = \"=0.36.0\"",
+            "subc-client-rs = \"=0.38.2\"",
+            "subc-protocol = \"=0.36.2\"",
         ] {
             assert!(
                 manifest.lines().any(|line| line == pin),
@@ -45,11 +45,11 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
             "missing exact pin {pin}"
         );
     }
-    assert_eq!(locked_versions("subc-client-rs"), ["0.36.0"]);
+    assert_eq!(locked_versions("subc-client-rs"), ["0.38.2"]);
     // The older daemon fixture verifies wire compatibility with the current SDK;
     // only dev dependencies retain the older protocol, control and transport.
-    assert_eq!(locked_versions("subc-protocol"), ["0.34.5", "0.36.0"]);
-    assert_eq!(locked_versions("subc-control"), ["0.34.0", "0.37.0"]);
+    assert_eq!(locked_versions("subc-protocol"), ["0.34.5", "0.36.2"]);
+    assert_eq!(locked_versions("subc-control"), ["0.34.0", "0.38.2"]);
     assert_eq!(locked_versions("subc-daemon"), ["0.39.0"]);
     assert_eq!(locked_versions("subc-transport"), ["0.15.0", "0.17.0"]);
     assert_eq!(locked_versions("cortexkit-test-support"), ["0.1.3"]);

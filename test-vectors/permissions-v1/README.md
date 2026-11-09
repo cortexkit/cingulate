@@ -83,6 +83,7 @@ Aggregator cases (cingulate, called by the phone through Callosum unless noted):
 | `list-all-holder-labels` | Real-handler reply with exactly three rows: a module holder named from the catalog, an enrolled holder with a provider label, and a module holder whose catalog entry declares no name. |
 | `federated-holders` | Real-handler relay of six invented provider rows: exact agent, both worker label forms, flow, claimless and explicitly chosen all-claims. No local agent ids. |
 | `federated-holders-agent-filtered` | Filtering for `Sage` includes none of the remote holders, even when their remote claim names `Sage`. |
+| `federated-holders-named` | Remote agent, attributed-worker and flow names appear beside their ids in `holder.label`; names remain optional display-only fields in `holder.claim`. |
 | `federated-provider-liveness-unavailable` | Provider refuses its whole list after an indeterminate base-scope check; Cingulate reports unreachable, with no partial grants. |
 | `federated-revoke` | Revoke routes an opaque federated row id to its owning provider. |
 | `list-all-unreachable` | `plexus` could not be read: named by status, no `grants`. |

@@ -1,6 +1,6 @@
 [package]
 name = "cingulate-vectors"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 publish = false
 
@@ -15,7 +15,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
-subc-client-rs = "=0.36.0"
-subc-protocol = "=0.36.0"
+subc-client-rs = "=0.38.2"
+subc-protocol = "=0.36.2"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

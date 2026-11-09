@@ -230,7 +230,16 @@ pub async fn served_cases() -> Vec<(&'static str, Value)> {
         ]
     };
     let mut cases = Vec::new();
-    let federated = federated_rows();
+    let federated = federated_rows(false);
+    capture(
+        &mut cases,
+        "federated-holders-named",
+        Runtime::new(vec![Provider::new("plexus", federated_rows(true))]),
+        phone(),
+        "permissions.list_all",
+        json!({}),
+    )
+    .await;
     for (name, params) in [
         ("federated-holders", json!({})),
         (
@@ -396,7 +405,7 @@ pub async fn served_cases() -> Vec<(&'static str, Value)> {
     cases
 }
 
-fn federated_rows() -> Value {
+fn federated_rows(named: bool) -> Value {
     use ck_cingulate::federated::holder_label;
     use subc_protocol::scope::{FederatedAttributes, FederatedPeerClass, RemoteClaim};
     let cases = [
@@ -435,6 +444,15 @@ fn federated_rows() -> Value {
     json!(cases
         .into_iter()
         .map(|(id, selector, claim)| {
+            let claim = claim.map(|claim| match claim {
+                RemoteClaim::Agent { .. }
+                | RemoteClaim::Worker {
+                    on_behalf_of: Some(_),
+                    ..
+                } if named => claim.with_agent_name("Remote Sage"),
+                RemoteClaim::Flow { .. } if named => claim.with_flow_name("Daily digest"),
+                _ => claim,
+            });
             let facts = FederatedAttributes::new(
                 FederatedPeerClass::Computer,
                 "a".repeat(32),

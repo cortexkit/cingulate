@@ -194,9 +194,10 @@ these canonical identities (all fields are compared, including the kind):
 
 The remote ids are opaque printable non-space ASCII tokens, 1–256 bytes; worker
 owners use the daemon's module-id grammar: 1–255 UTF-8 bytes, not `.` or `..`,
-with no control characters, `/` or `\\`. The peer name and worker attribution
-are display only. A federated row MUST omit both the top-level `agent_id` and
-`holder.agent_id`; remote ids remain only inside `claim`. These rows appear only
+with no control characters, `/` or `\\`. The peer name, worker attribution,
+`agent_name` and `flow_name` are display only. A federated row MUST omit both the
+top-level `agent_id` and `holder.agent_id`; remote ids remain only inside
+`claim`. These rows appear only
 in an **unfiltered** `permissions.list`, never an agent-filtered list. Selector
 and canonical claim identity are part of row identity and revoke: two different
 selectors are distinct holders and a revoke targets only the opaque row id.
@@ -214,6 +215,35 @@ selectors are distinct holders and a revoke targets only the opaque row id.
 | claimless | `Juniper · any program` |
 | explicitly chosen `all_claims` | `Juniper · everything on it` |
 | run | No row, no standing-grant label. |
+
+Since ck-cingulate 0.16.1, `claim` may also carry optional `agent_name` (agent or
+worker) or `flow_name` (flow). A worker's name refers to `on_behalf_of`, not its
+worker identity, and is rendered only when that id is present. Providers carry
+names only from the daemon-stamped claim. Like module holders, federated holders
+use the existing optional `holder.label` for display, not a second label field
+or an app-maintained lookup table. The id remains beside the quoted name:
+
+| Named claim | Label |
+|---|---|
+| agent `Sage`, name `Remote Sage` | `Juniper · “Remote Sage” (Sage)` |
+| worker for `Sage`, agent name `Remote Sage` | `Juniper · worker for “Remote Sage” (Sage)` |
+| flow `Morning-digest`, version 3, name `Daily digest` | `Juniper · flow “Daily digest” (Morning-digest) v3` |
+
+Absent or invalid names preserve the unnamed labels above byte for byte. Names
+follow the [card plain-text rule](consent-card-text-v1.md#federated-caller-names):
+1–80 Unicode scalars, no control or bidi formatting characters. Invalid names
+are omitted, never grounds for granting or refusing authority. The whole label
+still has the existing 80-scalar truncation limit. `holder_label` rechecks names
+before rendering. Cingulate relays provider labels unchanged, as it does a
+provider-written module label; it does not resolve remote names from a local
+roster. Missing labels fall back to the peer and canonical claim ids, not names
+supplied separately by a requester.
+
+Names never participate in selectors, canonical row identity, revocation keys
+or grant matching. A different name or no name keeps the same grant; the same
+name on a different id cannot match it. Display changes may change the listing
+snapshot `version` but never its authority. The named reader sample is
+[`federated-holders-named`](../../test-vectors/permissions-v1/federated-holders-named.json).
 
 #### Liveness belongs to the grant-holding provider
 

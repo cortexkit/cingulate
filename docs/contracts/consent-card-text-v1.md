@@ -43,3 +43,38 @@ are omitted. Package list records continue to omit only the large `script` and
 The served-record examples are in
 [`test-vectors/consent-card-text-v1/`](../../test-vectors/consent-card-text-v1/README.md).
 Their generator captures actual Cingulate handler replies.
+
+## Federated caller names
+
+For federated `consent` cards, the provider sends an action phrase such as
+`read your mail.`. Cingulate supplies the computer-first sentence from the
+[daemon-stamped subject](consent-requester-v2.md#federated-consent-carriers),
+never from a requester's body or a local agent resolver. Since ck-cingulate
+0.16.1, optional `remote_claim.agent_name` (agent, run or worker) and
+`remote_claim.flow_name` (flow) are display text. A worker's `agent_name` names
+only its `on_behalf_of` agent; without that id it is not rendered.
+
+For paired computer `Juniper`, name `Remote Sage` or `Daily digest`, and action
+`read your mail.`, the exact sentences are:
+
+| Claim | With a name | Without a name (unchanged) |
+|---|---|---|
+| agent `Sage` | `“Juniper” says agent “Remote Sage” (Sage) wants to read your mail.` | `“Juniper” says agent Sage wants to read your mail.` |
+| worker for `Sage` | `“Juniper” says a worker for agent “Remote Sage” (Sage) wants to read your mail.` | `“Juniper” says a worker for agent Sage wants to read your mail.` |
+| flow `Morning-digest`, version 3 | `“Juniper” says flow “Daily digest” (Morning-digest) (version 3) wants to read your mail.` | `“Juniper” says flow “Morning-digest” (version 3) wants to read your mail.` |
+| run for `Sage` | `“Juniper” says a run for agent “Remote Sage” (Sage) wants to read your mail. (this time only)` | `“Juniper” says a run for agent Sage wants to read your mail. (this time only)` |
+
+Names contain 1–80 Unicode scalar values of plain text, with no Unicode control
+characters or bidi formatting characters (U+061C, U+200E–U+200F, U+202A–U+202E,
+U+2066–U+2069). Cingulate rechecks these bounds even on typed daemon stamps.
+An invalid name is dropped, not truncated and not a refusal; the unnamed
+sentence is used. Worker-without-attribution and claimless sentences are
+unchanged. No name is resolved from the id.
+
+Validated names are stored in `subject.federated.remote_claim` with their
+protocol snake_case spelling, unchanged on both phone and requester readbacks.
+The same optional fields appear in `consent.watch_pending` changed items under
+`card.subject.federated.remote_claim`; no watch envelope fields are added.
+`subject.label` uses the [permissions label](permissions-v1.md#federated-grants).
+Names never enter ownership or standing-grant keys: renaming or removing a name
+does not affect collection of an existing card, including its one-time answer.

@@ -60,6 +60,260 @@ fn request() -> Value {
     value
 }
 
+fn named_claims(name: Option<&str>) -> Vec<RemoteClaim> {
+    let claims = vec![
+        RemoteClaim::agent("agent-invented"),
+        RemoteClaim::worker(
+            "invented-owner",
+            "b".repeat(64),
+            Some("agent-invented".into()),
+        ),
+        RemoteClaim::flow("flow-invented", 3, "install-invented", "c".repeat(64)),
+        RemoteClaim::run("agent-invented"),
+    ];
+    claims
+        .into_iter()
+        .map(|claim| match name {
+            Some(name) if matches!(claim, RemoteClaim::Flow { .. }) => claim.with_flow_name(name),
+            Some(name) => claim.with_agent_name(name),
+            None => claim,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn stamped_names_are_stored_and_rendered_beside_ids() {
+    let fixture = Fixture::open(None).await;
+    let (send, mut items) = mpsc::unbounded_channel();
+    let handler = fixture.handler.clone();
+    let watch = tokio::spawn(async move {
+        handler
+            .handle_watch_stamped(
+                &operator(),
+                &serde_json::to_vec(&json!({"method":"consent.watch_pending","params":{}}))
+                    .unwrap(),
+                &OperatorWatch(send),
+            )
+            .await
+    });
+    assert_eq!(
+        next_operator_item(&mut items).await,
+        json!({"type":"reread"})
+    );
+    let expected = [
+        ("“Juniper” says agent “Remote Sage” (agent-invented) wants to read your mail.", Some("Juniper · “Remote Sage” (agent-invented)")),
+        ("“Juniper” says a worker for agent “Remote Sage” (agent-invented) wants to read your mail.", Some("Juniper · worker for “Remote Sage” (agent-invented)")),
+        ("“Juniper” says flow “Remote Sage” (flow-invented) (version 3) wants to read your mail.", Some("Juniper · flow “Remote Sage” (flow-invented) v3")),
+        ("“Juniper” says a run for agent “Remote Sage” (agent-invented) wants to read your mail. (this time only)", None),
+    ];
+    for (claim, (prompt, label)) in named_claims(Some("Remote Sage")).into_iter().zip(expected) {
+        let facts = facts(Some(claim));
+        let stamp = subject(facts.clone());
+        let mut body = request();
+        if matches!(facts.remote_claim, Some(RemoteClaim::Run { .. })) {
+            body["options"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|option| option["effect"] == "decline" || option["id"] == "allow_once");
+        }
+        let id = fixture.request(&stamp, body).await;
+        let card = ok(
+            &fixture.handler,
+            &stamp,
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+        assert_eq!(card["prompt"], prompt);
+        assert_eq!(card["subject"]["federated"], json!(facts));
+        assert_eq!(card["subject"]["label"], label.unwrap_or("Juniper"));
+        assert_eq!(holder_label(&facts, "exact_claim").as_deref(), label);
+        let phone = ok(
+            &fixture.handler,
+            &operator(),
+            "consent.get",
+            json!({"elicitationId":id}),
+        )
+        .await;
+        assert_eq!(phone["subject"]["federated"], json!(facts));
+        assert_eq!(phone["prompt"], prompt);
+        let changed = next_operator_item(&mut items).await;
+        assert_eq!(changed["type"], "changed");
+        assert_eq!(changed["card"]["subject"], phone["subject"]);
+        assert_eq!(changed["card"]["prompt"], prompt);
+    }
+    fixture.handler.stop_watches();
+    assert_eq!(watch.await.unwrap(), HandlerOutcome::Streamed);
+    let unattributed = facts(Some(
+        RemoteClaim::worker("invented-owner", "b".repeat(64), None)
+            .with_agent_name("Not an identity"),
+    ));
+    assert_eq!(
+        holder_label(&unattributed, "exact_claim").as_deref(),
+        Some("Juniper · worker")
+    );
+}
+
+#[tokio::test]
+async fn remote_name_changes_preserve_card_ownership_and_grant_keys() {
+    let fixture = Fixture::open(None).await;
+    for original in named_claims(Some("Original name")) {
+        let stamp = subject(facts(Some(original.clone())));
+        let mut body = request();
+        if matches!(original, RemoteClaim::Run { .. }) {
+            body["options"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|option| option["effect"] == "decline" || option["id"] == "allow_once");
+        }
+        let id = fixture.request(&stamp, body).await;
+        fixture.answer(&id, "allow_once").await;
+        let holder = json!({"kind":"federated","peer_fingerprint":"a".repeat(32),
+            "pairing_id":"pairing-invented-1","peer_class":"computer",
+            "selector":"exact_claim","claim":original});
+        let grantable = !matches!(original, RemoteClaim::Run { .. });
+        for name in [Some("Renamed agent or flow"), None] {
+            let changed = named_claims(name)
+                .into_iter()
+                .find(|claim| std::mem::discriminant(claim) == std::mem::discriminant(&original))
+                .unwrap();
+            let renamed = subject(facts(Some(changed.clone())));
+            assert_eq!(
+                ok(
+                    &fixture.handler,
+                    &renamed,
+                    "consent.get",
+                    json!({"elicitation_id":id})
+                )
+                .await["answered_choice_id"],
+                "allow_once"
+            );
+            assert_eq!(
+                ok(
+                    &fixture.handler,
+                    &renamed,
+                    "consent.await",
+                    json!({"elicitation_id":id,"timeout_ms":1})
+                )
+                .await["answered_choice_id"],
+                "allow_once"
+            );
+            assert_eq!(
+                ok(
+                    &fixture.handler,
+                    &renamed,
+                    "consent.answers",
+                    json!({"since":0})
+                )
+                .await["records"][0]["elicitation_id"],
+                id
+            );
+            assert_eq!(holder_selects(&holder, renamed.scope.as_ref()), grantable);
+            let mut changed_holder = holder.clone();
+            changed_holder["claim"] = json!(changed);
+            assert_eq!(
+                holder_selects(&changed_holder, stamp.scope.as_ref()),
+                grantable
+            );
+        }
+        let mut different_id = original.clone();
+        match &mut different_id {
+            RemoteClaim::Agent { agent_id, .. } | RemoteClaim::Run { agent_id, .. } => {
+                *agent_id = "different-agent".into()
+            }
+            RemoteClaim::Worker { worker_ref, .. } => *worker_ref = "d".repeat(64),
+            RemoteClaim::Flow { flow_id, .. } => *flow_id = "different-flow".into(),
+            _ => unreachable!(),
+        }
+        let other = subject(facts(Some(different_id)));
+        error(
+            &fixture.handler,
+            &other,
+            "consent.get",
+            json!({"elicitation_id":id}),
+            "elicitation_not_owner",
+        )
+        .await;
+        assert!(
+            !holder_selects(&holder, other.scope.as_ref()),
+            "the same name cannot match a different id"
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_remote_names_are_dropped_even_on_typed_stamps() {
+    let fixture = Fixture::open(None).await;
+    let mut invalid = vec![
+        String::new(),
+        "界".repeat(81),
+        "bad\nname".into(),
+        "bad\u{7f}name".into(),
+        "bad\u{85}name".into(),
+    ];
+    invalid.extend(
+        [
+            '\u{061c}', '\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}',
+            '\u{202e}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ]
+        .map(|ch| format!("bad{ch}name")),
+    );
+    for invalid in invalid {
+        for mut claim in named_claims(None) {
+            let mut body = request();
+            if matches!(claim, RemoteClaim::Run { .. }) {
+                body["options"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|option| option["effect"] == "decline" || option["id"] == "allow_once");
+            }
+            let clean = facts(Some(claim.clone()));
+            // Mutate after construction so the protocol's lossy decoder and
+            // validating builders cannot hide a missing Cingulate check.
+            match &mut claim {
+                RemoteClaim::Agent { agent_name, .. }
+                | RemoteClaim::Run { agent_name, .. }
+                | RemoteClaim::Worker { agent_name, .. } => *agent_name = Some(invalid.clone()),
+                RemoteClaim::Flow { flow_name, .. } => *flow_name = Some(invalid.clone()),
+                _ => unreachable!(),
+            }
+            let dirty = facts(Some(claim));
+            assert_eq!(
+                holder_label(&dirty, "exact_claim"),
+                holder_label(&clean, "exact_claim")
+            );
+            let id = fixture.request(&subject(dirty), body).await;
+            let card = ok(
+                &fixture.handler,
+                &subject(clean.clone()),
+                "consent.get",
+                json!({"elicitation_id":id}),
+            )
+            .await;
+            assert_eq!(card["subject"]["federated"], json!(clean));
+            assert!(!card["prompt"].as_str().unwrap().contains("bad"));
+        }
+    }
+    for name in ["界".repeat(80), "🛰".repeat(80)] {
+        let stamp = subject(facts(Some(
+            RemoteClaim::agent("agent-invented").with_agent_name(&name),
+        )));
+        let id = fixture.request(&stamp, request()).await;
+        let card = ok(
+            &fixture.handler,
+            &stamp,
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+        assert_eq!(
+            card["subject"]["federated"]["remote_claim"]["agent_name"],
+            name
+        );
+        assert!(card["prompt"].as_str().unwrap().contains(&name));
+    }
+}
+
 #[tokio::test]
 async fn stamped_subject_and_exact_text_for_every_claim() {
     let fixture = Fixture::open(None).await;
