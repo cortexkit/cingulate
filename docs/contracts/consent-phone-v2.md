@@ -330,3 +330,29 @@ Cingulate accepts a card only when all its statements share one asking computer
 (or none has one) that differs from `member_id`. [secret_use](../../test-vectors/secret-use-approval-v2/README.md)
 and [flow install](../../test-vectors/flow-install-secrets-v2/README.md) cards
 are generated from the vault's own v2 vectors and pinned byte for byte.
+
+## Extended secret statements v3 (ck-cingulate 0.16.2)
+
+The statement domains `ck-secret-use-statement/v3` and
+`ck-secret-flow-statement/v3` carry extended scopes for local and forwarded
+requests. `asking_member_id` is absent locally and present for forwarded requests,
+with the same grammar and serving-vault exclusion as v2. Legacy scopes still use
+v1 locally and v2 when forwarded.
+
+For v3, `agent_api_key` carries `use: {rules: [{host, path_prefix}, ...], location}`;
+flow API keys also carry sorted `methods` beside `rules`. Each rule has both
+string keys, with `""` for no prefix. `site_login` carries `use: {origins: [...]}`.
+Cingulate refuses kind/shape or version/shape mismatches and unknown or mixed
+fields, but the vault owns host grammar, public-suffix policy and scope matching.
+
+Render rules and origins in their canonical signed order. Show all hosts and
+prefixes, or the first few plus "and N more"; preserve wildcard spelling such as
+`*.x.test`. Never display the first entry as though it were the entire scope.
+Cingulate supplies no scope-derived text or labels: it relays the statement bytes
+unchanged, so scope rendering remains the phone's responsibility.
+
+Approval envelopes, statement digests, signatures and the recorded
+`envelope_sha256` are unchanged. See the
+[pinned v3 samples](../../test-vectors/secret-statements-v3/README.md) and the
+[requester contract](consent-requester-v2.md#extended-secret-statements-v3-ck-cingulate-0162)
+for closed shapes and reserved flow-id tags.

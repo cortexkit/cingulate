@@ -7,9 +7,14 @@ use serde_json::{Map, Value};
 
 use crate::{
     lowercase_hex,
-    secret_use::{canonical, present_string, statement_version_ok},
+    secret_use::{canonical, present_string, statement_version_ok, StatementRule},
     Refusal, SecretUse, SecretUseAnswer,
 };
+
+const USE_V2: &str = "ck-secret-use-statement/v2";
+const FLOW_V2: &str = "ck-secret-flow-statement/v2";
+const USE_V3: &str = "ck-secret-use-statement/v3";
+const FLOW_V3: &str = "ck-secret-flow-statement/v3";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -52,8 +57,8 @@ struct FlowStatement {
     v: String,
     request_id: String,
     member_id: String,
-    /// The paired computer the flow runs on; present only in v2 statements,
-    /// which the home vault writes for requests forwarded from that computer.
+    /// The paired computer the flow runs on; present exactly for forwarded
+    /// requests (v2, or forwarded v3).
     #[serde(default, deserialize_with = "present_string")]
     asking_member_id: Option<String>,
     flow: FlowIdentity,
@@ -68,6 +73,7 @@ struct FlowStatement {
 enum FlowUse {
     ApiKey {
         host: String,
+        // Signed legacy statements always emit this key, using "" for no prefix.
         path_prefix: String,
         location: String,
         methods: Vec<String>,
@@ -75,6 +81,24 @@ enum FlowUse {
     Login {
         origin: String,
     },
+    ExtendedApiKey {
+        rules: Vec<StatementRule>,
+        location: String,
+        methods: Vec<String>,
+    },
+    ExtendedLogin {
+        origins: Vec<String>,
+    },
+}
+
+impl FlowUse {
+    fn shape_ok(&self, v3: bool, kind: &str) -> bool {
+        match self {
+            Self::ApiKey { .. } | Self::Login { .. } => !v3,
+            Self::ExtendedApiKey { .. } => v3 && kind == "agent_api_key",
+            Self::ExtendedLogin { .. } => v3 && kind == "site_login",
+        }
+    }
 }
 
 pub struct FlowInstallSecrets {
@@ -116,6 +140,8 @@ impl FlowInstallSecrets {
         // The asking computer of the first statement; every later statement
         // must name the same one, or all must omit it.
         let mut asking: Option<Option<String>> = None;
+        // One home vault holds the account's flow grants and agent secrets.
+        let mut member: Option<String> = None;
         self.approvals
             .items
             .iter()
@@ -127,8 +153,19 @@ impl FlowInstallSecrets {
                     "ck-secret-flow-statement",
                     statement.asking_member_id.as_deref(),
                     &statement.member_id,
-                ) || *asking.get_or_insert_with(|| statement.asking_member_id.clone())
-                    != statement.asking_member_id
+                ) || !statement
+                    .r#use
+                    .shape_ok(statement.v == FLOW_V3, &statement.secret.kind)
+                    // Extended scopes reserve the v3 tags even locally; every
+                    // forwarded request also reserves the legacy v2 tags.
+                    || (statement.v == FLOW_V3
+                        && matches!(statement.flow.flow_id.as_str(), USE_V3 | FLOW_V3))
+                    || (statement.asking_member_id.is_some()
+                        && matches!(statement.flow.flow_id.as_str(), USE_V2 | FLOW_V2))
+                    || *asking.get_or_insert_with(|| statement.asking_member_id.clone())
+                        != statement.asking_member_id
+                    || *member.get_or_insert_with(|| statement.member_id.clone())
+                        != statement.member_id
                     || !super::secret_use::ulid(&item.request_id)
                     || statement.request_id != item.request_id
                 {
@@ -155,7 +192,7 @@ impl FlowInstallSecrets {
                 // The vault owns secret scope semantics. Decode the closed shape here
                 // without rewriting any of the bytes the phone will display and sign.
                 let _ = (&statement.member_id, &statement.secret);
-                match &statement.r#use {
+                let methods = match &statement.r#use {
                     FlowUse::ApiKey {
                         host,
                         path_prefix,
@@ -163,19 +200,34 @@ impl FlowInstallSecrets {
                         methods,
                     } => {
                         let _ = (host, path_prefix, location);
-                        if methods.is_empty()
-                            || methods.windows(2).any(|pair| pair[0] >= pair[1])
-                            || methods.iter().any(|m| {
-                                !(1..=16).contains(&m.len())
-                                    || !m.bytes().all(|b| b.is_ascii_uppercase())
-                            })
-                        {
-                            return Err(invalid());
-                        }
+                        Some(methods)
+                    }
+                    FlowUse::ExtendedApiKey {
+                        rules,
+                        location,
+                        methods,
+                    } => {
+                        let _ = (rules, location);
+                        Some(methods)
                     }
                     FlowUse::Login { origin } => {
                         let _ = origin;
+                        None
                     }
+                    FlowUse::ExtendedLogin { origins } => {
+                        let _ = origins;
+                        None
+                    }
+                };
+                if methods.is_some_and(|methods| {
+                    methods.is_empty()
+                        || methods.windows(2).any(|pair| pair[0] >= pair[1])
+                        || methods.iter().any(|m| {
+                            !(1..=16).contains(&m.len())
+                                || !m.bytes().all(|b| b.is_ascii_uppercase())
+                        })
+                }) {
+                    return Err(invalid());
                 }
                 i64::try_from(statement.request_expires_at_ms).map_err(|_| invalid())
             })

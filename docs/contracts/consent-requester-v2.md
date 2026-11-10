@@ -596,7 +596,7 @@ Cingulate, exactly as for v1. A v2 statement is the v1 statement plus one key,
 `secret_use` card, `ck-secret-flow-statement/v2` in `flow_install.secrets`.
 `member_id` still names the home vault serving the grant. Canonical bytes,
 envelope digests, expiry, idempotency and every other rule above are unchanged.
-Requests made on the home computer stay v1, byte for byte.
+Legacy requests made on the home computer stay v1, byte for byte.
 
 - A v1 statement must not carry `asking_member_id`, not even as `null`.
 - A v2 statement must carry it as `fed-computer:` plus exactly 32 lowercase hex
@@ -613,3 +613,41 @@ vault sets it from the attested forwarding route and grants only a statement
 whose digest matches its stored request. Vault vectors and generated cards:
 [secret_use](../../test-vectors/secret-use-approval-v2/README.md) and
 [flow install](../../test-vectors/flow-install-secrets-v2/README.md).
+
+## Extended secret statements v3 (ck-cingulate 0.16.2)
+
+Extended scopes use `ck-secret-use-statement/v3` for `secret_use` and
+`ck-secret-flow-statement/v3` in `flow_install.secrets`, for both local and
+forwarded requests. All other fields retain their v1 meanings, except that
+`asking_member_id` is present exactly for forwarded requests, with the same
+grammar and serving-vault exclusion as v2. Per-card asker consistency is
+unchanged; a `secret_use` card also retains its one-agent check. Every statement
+on a secret-use or flow-install card must name the same serving vault, because
+one home vault holds all agent secrets and flow grants for the account.
+
+The closed `use` shapes are version-specific:
+
+| Version | API key | Login |
+| --- | --- | --- |
+| v1/v2 | `{host, path_prefix, location}` | `{origin}` |
+| v3 | `{rules: [{host, path_prefix}, ...], location}` | `{origins: [...]}` |
+
+Flow API keys additionally require the existing sorted, nonempty `methods` list
+beside the legacy fields or `rules`. Every v3 rule must contain both string keys;
+`path_prefix: ""` means no prefix. For v3, `secret.kind: "agent_api_key"` requires
+the API-key shape and `"site_login"` the login shape; any other kind refuses.
+Unknown keys, mixed shapes and shapes under the wrong version refuse with the
+existing invalid-statement codes. Cingulate checks shape/version agreement and
+card binding, not host grammar, scope counts, public suffixes or scope matching:
+the vault remains the authority on the signed scope.
+
+For flow statements, an extended v3 request cannot use either v3 statement tag as
+`flow_id`, local or forwarded. A forwarded request (v2 or v3) also cannot use
+either v2 statement tag as `flow_id`. A local v3 request may use a v2 tag; local
+legacy v1 flow ids remain unchanged.
+
+Envelope bytes, signatures, approvals and the recorded `envelope_sha256` are
+unchanged. Cingulate does not render statement `use` content into card text or
+labels; it relays all statement bytes unchanged to the phone, which renders the
+complete scope. The [pinned vault samples](../../test-vectors/secret-statements-v3/README.md)
+cover canonical multi-rule and wildcard scopes and multiple origins.

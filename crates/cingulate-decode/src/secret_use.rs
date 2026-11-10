@@ -38,13 +38,11 @@ pub(super) fn present_string<'de, D: Deserializer<'de>>(
 /// `asking_member_id`.
 ///
 /// The vault writes v1 for a request made on the home computer that holds the
-/// vault. When an agent on another paired computer asks, the home vault
-/// forwards the request and writes v2: the v1 object with `v` ending in `/v2`
-/// and one added key, `asking_member_id`, naming the computer that asked as
-/// `fed-computer:` and 32 lowercase hex characters. `member_id` still names the home vault serving the
-/// grant. So v1 never carries the key and v2 always does. `family` keeps
-/// secret_use and flow statements apart: a version string from the other
-/// family never matches.
+/// vault with a legacy scope, and v2 for a forwarded legacy request. Extended
+/// scopes use v3 for both local and forwarded requests. Only forwarded requests
+/// carry `asking_member_id`, naming the computer that asked as `fed-computer:`
+/// and 32 lowercase hex characters. `member_id` still names the serving vault.
+/// `family` keeps secret_use and flow statements apart.
 ///
 /// Cingulate deliberately does not compare `asking_member_id` with this
 /// computer's own identity. The home vault sets the field from the paired
@@ -63,14 +61,12 @@ pub(super) fn statement_version_ok(
         return false;
     };
     match (version, asking_member_id) {
-        ("v1", None) => true,
-        ("v2", Some(asking)) => {
+        ("v1" | "v3", None) => true,
+        ("v2" | "v3", Some(asking)) => {
             asking
                 .strip_prefix("fed-computer:")
                 .is_some_and(|hex| lowercase_hex(hex, 32))
-                // v2 exists only for a request forwarded from another computer.
-                // The home vault never forwards to itself, so a v2 statement
-                // naming the serving vault as the asker cannot be genuine.
+                // The home vault never forwards to itself.
                 && asking != member_id
         }
         _ => false,
@@ -115,8 +111,8 @@ pub struct UseStatement {
     pub v: String,
     pub request_id: String,
     pub member_id: String,
-    /// The paired computer the agent asked from; present only in v2
-    /// statements, which the home vault writes for forwarded requests.
+    /// The paired computer the agent asked from; present exactly for forwarded
+    /// requests (v2, or forwarded v3).
     #[serde(default, deserialize_with = "present_string")]
     pub asking_member_id: Option<String>,
     pub agent_id: Option<String>,
@@ -150,12 +146,37 @@ pub struct StatementSecret {
 pub enum StatementUse {
     ApiKey {
         host: String,
+        // Signed legacy statements always emit this key, using "" for no prefix.
         path_prefix: String,
         location: String,
     },
     Login {
         origin: String,
     },
+    ExtendedApiKey {
+        rules: Vec<StatementRule>,
+        location: String,
+    },
+    ExtendedLogin {
+        origins: Vec<String>,
+    },
+}
+
+impl StatementUse {
+    fn shape_ok(&self, v3: bool, kind: &str) -> bool {
+        match self {
+            Self::ApiKey { .. } | Self::Login { .. } => !v3,
+            Self::ExtendedApiKey { .. } => v3 && kind == "agent_api_key",
+            Self::ExtendedLogin { .. } => v3 && kind == "site_login",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatementRule {
+    pub host: String,
+    pub path_prefix: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,6 +232,10 @@ impl SecretUse {
                     "ck-secret-use-statement",
                     statement.asking_member_id.as_deref(),
                     &statement.member_id,
+                )
+                || !statement.r#use.shape_ok(
+                    statement.v == "ck-secret-use-statement/v3",
+                    &statement.secret.kind,
                 )
                 || !ulid(&item.request_id)
                 || statement.request_id != item.request_id

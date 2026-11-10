@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.16.2 (ck-cingulate), 0.7.1 (cingulate-decode)
+
+- Accept local and forwarded `ck-secret-use-statement/v3` and
+  `ck-secret-flow-statement/v3` statements for extended API-key rules and login
+  origins. Keep closed shapes, enforce v3 kind/shape agreement, and retain the
+  existing forwarded-asker grammar and serving-vault exclusion.
+- Refuse legacy/extended shape and version mismatches. Flow statements reserve
+  the v3 statement tags for extended scopes and the v2 tags for forwarded
+  requests, matching the vault contract. Local legacy flow ids remain unchanged.
+- Fix flow cards accepting statements from different serving vaults: every
+  statement must name the same secret home, for v1, v2 and v3 alike.
+- Pin both claustrum `secret-multi-host-vectors-v1` statement samples byte for
+  byte and cover all sixteen approval-required cases through filing, phone
+  projection and answer binding. Envelope handling, v1/v2 vectors and existing
+  card wording are unchanged; Cingulate relays scopes rather than rendering them.
+
 ## 0.8.4 (cingulate-vectors)
 
 - Added the `permissions/v1` provider `provider-list-grant-sources` vector:
