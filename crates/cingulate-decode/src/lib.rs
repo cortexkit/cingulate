@@ -103,6 +103,13 @@ pub struct DryRunText {
     pub problems: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorText {
+    pub label: String,
+    pub text: String,
+}
+
 /// The request form stored after successful decoding.
 ///
 /// Flow bodies stay opaque except for the vault identity and secret approvals;
@@ -130,6 +137,18 @@ pub struct ConsentRequest {
         deserialize_with = "deserialize_dry_run_text"
     )]
     pub dry_run_text: Option<DryRunText>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_explanation"
+    )]
+    pub explanation: Option<AuthorText>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_changes"
+    )]
+    pub changes: Option<AuthorText>,
     pub kind: String,
     pub title: String,
     pub prompt: String,
@@ -254,6 +273,49 @@ where
         })
 }
 
+fn deserialize_author_text<'de, D>(
+    deserializer: D,
+    field: &str,
+) -> Result<Option<AuthorText>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| de::Error::custom(format!("{field} must be an object")))?;
+    for key in object.keys() {
+        if !matches!(key.as_str(), "label" | "text") {
+            return Err(de::Error::custom(format!("unknown field {field}.{key}")));
+        }
+    }
+    let string = |member: &str| {
+        object
+            .get(member)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| de::Error::custom(format!("{field}.{member} must be a string")))
+    };
+    Ok(Some(AuthorText {
+        label: string("label")?,
+        text: string("text")?,
+    }))
+}
+
+fn deserialize_explanation<'de, D>(deserializer: D) -> Result<Option<AuthorText>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_author_text(deserializer, "explanation")
+}
+
+fn deserialize_changes<'de, D>(deserializer: D) -> Result<Option<AuthorText>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_author_text(deserializer, "changes")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     pub code: &'static str,
@@ -286,6 +348,13 @@ impl ConsentRequest {
     /// The returned form has no answer schema, including for equality/dedup.
     pub fn decode(body: Value) -> Result<Self, Refusal> {
         let body = if body.get("kind").and_then(Value::as_str) == Some("secret_use") {
+            for field in ["explanation", "changes"] {
+                if body.get(field).is_some() {
+                    return Err(Refusal::invalid(format!(
+                        "{field} is only valid for flow_install or package cards"
+                    )));
+                }
+            }
             secret_use::normalize(body)?
         } else {
             body
@@ -303,6 +372,19 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        for (field, value) in [
+            ("explanation", &self.explanation),
+            ("changes", &self.changes),
+        ] {
+            if let Some(value) = value {
+                if !matches!(self.kind.as_str(), "flow_install" | "package") {
+                    return Err(Refusal::invalid(format!(
+                        "{field} is only valid for flow_install or package cards"
+                    )));
+                }
+                validate_author_text(field, value)?;
+            }
+        }
         self.flow_install_secrets()?;
         if self.kind == "secret_use" {
             self.secret_use
@@ -561,6 +643,27 @@ impl ConsentRequest {
                     .as_ref()
                     .is_some_and(|body| body.contains_key("secrets")))
     }
+}
+
+fn validate_author_text(field: &str, value: &AuthorText) -> Result<(), Refusal> {
+    if value.label.is_empty() || value.label.chars().count() > 64 {
+        return Err(Refusal::invalid(format!(
+            "{field}.label must be nonempty and at most 64 Unicode scalar values"
+        )));
+    }
+    if value.text.is_empty() || value.text.len() > 8192 {
+        return Err(Refusal::invalid(format!(
+            "{field}.text must be nonempty and at most 8192 UTF-8 bytes"
+        )));
+    }
+    for (member, text) in [("label", &value.label), ("text", &value.text)] {
+        if text.chars().any(|c| c.is_control() && c != '\n') {
+            return Err(Refusal::invalid(format!(
+                "{field}.{member} must not contain control characters except newline"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_dry_run_text(dry_run_text: &DryRunText) -> Result<(), Refusal> {

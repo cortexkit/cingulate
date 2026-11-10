@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.0 (ck-cingulate), 0.8.0 (cingulate-decode), 0.9.0 (cingulate-vectors)
+
+- Advertise `consent-card-explanations/v1`. Accept optional `explanation` and
+  `changes` author text on package and flow-install approval cards, with
+  core-supplied labels of up to 64 Unicode scalar values and text of up to
+  8,192 UTF-8 bytes. Refuse empty values and control characters U+0000–U+001F
+  and U+007F–U+009F other than newline, naming the affected field.
+- Persist both objects verbatim in existing card JSON and return them on get
+  and pending-list readbacks; omit absent objects and keep author text out of
+  push pointers and the durable notice outbox. No schema migration is needed.
+- Add checksum-pinned, handler-generated phone and desktop samples, decoder
+  boundary tests, restart/old-record compatibility and notice privacy coverage.
+
 ## 0.16.2 (ck-cingulate), 0.7.1 (cingulate-decode)
 
 - Accept local and forwarded `ck-secret-use-statement/v3` and

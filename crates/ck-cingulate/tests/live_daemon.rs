@@ -615,6 +615,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent/v1",
             "agent-run-scopes/v1",
             "consent-card-text/v1",
+            "consent-card-explanations/v1",
             "consent-option-group/v1",
             "consent-single-use/v1",
             "consent-outcomes-late/v1",

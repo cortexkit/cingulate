@@ -7,6 +7,11 @@ and its `SHA256SUMS`; the phone projection is specified in
 retention tombstone, execution report, acknowledgment or settlement-feed entry:
 AFT uses durable request/get/await/withdraw and core receives notices.
 
+Package and flow-install `consent.request`/`consent.get` also support the optional
+[`explanation` and `changes` author texts](consent-card-explanations-v1.md) when
+`consent-card-explanations/v1` is declared. The same objects appear unchanged in
+app pending lists; they never appear in notices.
+
 ## Federated consent carriers
 
 Since ck-cingulate 0.16.0, Cingulate declares `scope-federated/v1`. An admitted

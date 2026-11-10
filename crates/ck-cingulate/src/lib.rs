@@ -169,6 +169,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent/v1".into(),
                 "agent-run-scopes/v1".into(),
                 "consent-card-text/v1".into(),
+                "consent-card-explanations/v1".into(),
                 "consent-option-group/v1".into(),
                 "consent-single-use/v1".into(),
                 "consent-outcomes-late/v1".into(),

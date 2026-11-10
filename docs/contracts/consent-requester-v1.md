@@ -13,6 +13,22 @@ fresh temporary stores. The [phone contract](consent-phone-v1.md) describes the
 other side of these cards. The optional `source` and `dry_run_text` fields and
 their requester readbacks are specified in [consent-card-text-v1](consent-card-text-v1.md).
 
+## Optional author explanations
+
+With `consent-card-explanations/v1`, `consent.request` also accepts optional
+`explanation: {label, text}` and `changes: {label, text}`, only on `package` and
+`flow_install`. Both are plain author text shown with the labels core supplies.
+Each string is nonempty; labels are at most 64 Unicode scalar values and text
+at most 8,192 UTF-8 bytes. C0/C1 controls (U+0000–U+001F, U+007F–U+009F) are
+refused except newline U+000A, including in labels. Invalid members or members
+on other kinds return `elicitation_invalid_request` naming the field. Objects
+are closed and null is not absence.
+
+`consent.get` returns both objects unchanged. App `consent.list_pending` records
+also include them; absent members are omitted and notifications never carry
+them. The [explanations contract](consent-card-explanations-v1.md) defines storage,
+display semantics and checksum-pinned phone/desktop samples.
+
 ## Identity and admission
 
 Only the daemon's route bind supplies requester and subject identity. Ownership

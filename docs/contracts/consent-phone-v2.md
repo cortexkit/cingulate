@@ -9,6 +9,11 @@ render unknown kinds as ordinary expiring approvals. The shared
 and requester bytes. The [requester v2 contract](consent-requester-v2.md) specifies
 admission, identity, state machine and core notices.
 
+Package and flow-install get/list cards also support the optional plain-text
+[`explanation` and `changes` objects](consent-card-explanations-v1.md), including
+core-supplied labels. Omitted members stay omitted; push notices carry neither.
+The linked contract includes caps, character rules and shared desktop samples.
+
 `secret_use` has a hard deadline: both allow and decline are refused at or after
 the earliest statement expiry, even if the same choice was already recorded.
 Late-answer rules never extend a vault request's lifetime.

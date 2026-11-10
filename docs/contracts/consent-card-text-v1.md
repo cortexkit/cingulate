@@ -5,6 +5,10 @@ Cingulate can carry two optional, human-readable fields on `flow_install` and
 producer owns it. Producers send these fields only when Cingulate advertises the
 `consent-card-text/v1` capability in its manifest `provides` list.
 
+The separate [author explanations extension](consent-card-explanations-v1.md)
+adds `explanation` and `changes` under `consent-card-explanations/v1`; support for
+`consent-card-text/v1` alone does not imply support for those members.
+
 ## Request fields
 
 Both fields use snake_case in `consent.request` params. They are accepted only

@@ -10,6 +10,14 @@ Callosum. Requests are JSON envelopes:
 The additive `source` and `dryRunText` card fields are specified in
 [consent-card-text-v1](consent-card-text-v1.md).
 
+Package and flow-install cards may also carry `explanation: {label, text}` and
+`changes: {label, text}` on `consent.get` and every `consent.list_pending` entry.
+These plain author texts and core-supplied labels are returned unchanged;
+absent members are omitted. Labels are 1–64 Unicode scalar values and text is
+1–8,192 UTF-8 bytes; C0/C1 controls are refused except newline. Notifications
+omit both objects. See [consent-card-explanations-v1](consent-card-explanations-v1.md)
+for the capability, precise validation and shared phone/desktop samples.
+
 ```json
 {"method":"consent.get","params":{"elicitationId":"el_1"}}
 ```
