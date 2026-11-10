@@ -49,6 +49,7 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | `group?` | `"danger"` for grants as broad as the danger option that minted them. Cerebellum sets it on `whole_computer` and `all_sites`, and only there. |
 | `methods?` | A non-empty list of uppercase HTTP method names, such as `["GET"]`. A provider sends it only for grants it limits by method. Surfaces show it as given. |
 | `expires_at_ms?` | Absent for a grant without expiry ("always"). |
+| `ends_with_holder?` | `true` when the grant also ends as soon as its holder ends, for example a worker's grant that ends with that worker, whether or not it has `expires_at_ms`. Surfaces then show the lifetime from the holder, such as "Until this worker ends", instead of "Until revoked". Absent means the grant lasts until revoked or until `expires_at_ms`. A reader that doesn't know the member shows the row as before and keeps it. |
 | `granted_at_ms` | When the current form of the grant was minted. Always present: a reader drops a row without it, which would hide a grant the person can't then revoke. |
 | `granted_at_bound?` | `"at_or_before"` when the provider doesn't know the real mint time, only that it is no later than `granted_at_ms` (for example, rows a store migration rewrote). Surfaces then show the time as an upper bound, such as "granted before 3 Nov". Absent means `granted_at_ms` is exact. A reader that doesn't know a value shows `granted_at_ms` as given and keeps the row ([`provider-list-grant-sources`](../../test-vectors/permissions-v1/provider-list-grant-sources.json)). |
 | `source?` | Who decided the grant: `person` (a person answered a card or ask), `head_grant` (a head passed on, to its worker, a grant a person gave the head), `head_policy` (a head gave its worker access from its own default policy, with no person deciding), or `unknown` (the provider didn't record it, for example rows saved before it did). Absent means the provider doesn't report sources. The vocabulary is open: a reader treats a value it doesn't know as `unknown`. Surfaces may group or label rows by source, but MUST still list and offer revoke for every row, whatever its source ([`provider-list-grant-sources`](../../test-vectors/permissions-v1/provider-list-grant-sources.json)). |
@@ -64,6 +65,10 @@ Row rules:
   upgraded grant, the narrower outcome.
 - **Expiry.** A grant drops out at `expires_at_ms`: a row is listed only while
   `now < expires_at_ms` ([`provider-list-after-expiry`](../../test-vectors/permissions-v1/provider-list-after-expiry.json)).
+- **Holder lifetime.** A provider that sets `ends_with_holder` drops the row once
+  the holder has ended (it is not listed after that), and a revoke of such a row
+  before then works as for any row
+  ([`provider-list-ends-with-holder`](../../test-vectors/permissions-v1/provider-list-ends-with-holder.json)).
 
 ### `permissions.revoke {id}`
 

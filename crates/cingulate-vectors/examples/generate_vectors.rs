@@ -418,6 +418,34 @@ fn provider_rows() -> Value {
     ])
 }
 
+fn holder_lifetime_grants() -> Value {
+    json!([
+        {
+            "id": "grt_lifetime_01", "agent_id": "agent-maple",
+            "holder": {"kind": "worker", "agent_id": "agent-maple", "scope_ref": "scope:wkr-maple"},
+            "module": "cerebellum", "subject_label": "Sample Canvas",
+            "scope": "app", "scope_label": "the app Sample Canvas",
+            "granted_at_ms": NOW_MS, "source": "head_grant",
+            "ends_with_holder": true, "expires_at_ms": NOW_MS + HALF_HOUR_MS
+        },
+        {
+            "id": "grt_lifetime_02", "agent_id": "agent-maple",
+            "holder": {"kind": "worker", "agent_id": "agent-maple", "scope_ref": "scope:wkr-maple"},
+            "module": "cerebellum", "subject_label": "Sample Notebook",
+            "scope": "app", "scope_label": "the app Sample Notebook",
+            "granted_at_ms": NOW_MS + 20_000, "source": "head_policy",
+            "ends_with_holder": true
+        },
+        {
+            "id": "grt_lifetime_03", "agent_id": "agent-maple",
+            "holder": {"kind": "agent", "agent_id": "agent-maple"},
+            "module": "cerebellum", "subject_label": "Sample Ledger",
+            "scope": "app", "scope_label": "the app Sample Ledger",
+            "granted_at_ms": NOW_MS + 40_000, "source": "person", "card_ref": "el_lifetime_1"
+        }
+    ])
+}
+
 fn worker_grant_sources() -> Value {
     json!([
         {
@@ -766,6 +794,19 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
                     cingulate_route(),
                     json!({}),
                     reply(json!({"grants": worker_grant_sources()})),
+                ),
+                listed_at,
+            ),
+        ),
+        (
+            "provider-list-ends-with-holder",
+            with_now(
+                case(
+                    PERMISSIONS,
+                    "permissions.list",
+                    cingulate_route(),
+                    json!({}),
+                    reply(json!({"grants": holder_lifetime_grants()})),
                 ),
                 listed_at,
             ),

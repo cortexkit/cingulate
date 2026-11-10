@@ -155,7 +155,25 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 41);
+    assert_eq!(cases(PERMISSIONS).len(), 42);
+}
+
+#[test]
+fn holder_lifetime_sample_covers_worker_grants_with_and_without_expiry() {
+    let cases = cases(PERMISSIONS);
+    let grants = cases["provider-list-ends-with-holder"]["reply"]["grants"]
+        .as_array()
+        .unwrap();
+    assert_eq!(grants.len(), 3);
+    for grant in &grants[..2] {
+        assert_eq!(grant["holder"]["kind"], "worker");
+        assert_eq!(grant["ends_with_holder"], true);
+    }
+    assert_eq!(grants[0]["expires_at_ms"], 2_800_000);
+    assert!(grants[1].get("expires_at_ms").is_none());
+    assert_eq!(grants[2]["holder"]["kind"], "agent");
+    assert!(grants[2].get("ends_with_holder").is_none());
+    assert!(grants[2].get("expires_at_ms").is_none());
 }
 
 #[test]

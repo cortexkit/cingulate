@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add the optional `permissions/v1` row member `ends_with_holder` and the
+  checksum-pinned `provider-list-ends-with-holder` sample for holder-bound grants
+  with and without an expiry. Contract and test data only; no runtime behaviour
+  change.
+
 ## 0.17.0 (ck-cingulate), 0.8.0 (cingulate-decode), 0.9.0 (cingulate-vectors)
 
 - Advertise `consent-card-explanations/v1`. Accept optional `explanation` and
