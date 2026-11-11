@@ -97,6 +97,10 @@ nested payload keys are not recursively renamed.
 | `executionReason` | Optional open-set lowercase snake_case code reported with `approved_not_executed`; absent when no reason was supplied. See the requester execution-report contract. |
 | `blockUntilMs` | Optional integer, only on pending cards with an active requester wait. The latest wait deadline, capped at card expiry only if one exists; indicates how long a requester is currently waiting, not an approval, a lease or an extension of expiry. Disappears when the last wait is dropped. Conditional polling accounts for it. |
 
+The feature-gated `secret_use` and `manifest_binding` kinds are specified in
+[phone v2](consent-phone-v2.md); a v1 reader must not render them as ordinary
+consent cards.
+
 Optional requester-provided fields are omitted when absent: `dedupKey` (string),
 `scope` and `duration` (JSON values), `argsDigest` (string), `sessionRef` and
 `parentSessionRef` (strings), `preview` (`{label: string, text: string}`), and

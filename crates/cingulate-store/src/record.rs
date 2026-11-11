@@ -62,6 +62,8 @@ pub struct ElicitationRecord {
     pub answered_device: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_use_answer: Option<cingulate_decode::SecretUseAnswer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_binding_answer: Option<cingulate_decode::ManifestBindingAnswer>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -106,7 +106,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
     RequesterAdmission {
         principal: "reserved:plexus",
         requester_name: Some("Plexus"),
-        kinds: &["consent"],
+        kinds: &["consent", "manifest_binding"],
         agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
@@ -175,6 +175,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-outcomes-late/v1".into(),
                 "consent-no-expiry/v1".into(),
                 "secret-use-approval/v1".into(),
+                "manifest-binding-approval/v1".into(),
                 "flow-install-secrets/v1".into(),
                 "scope-workdir/v1".into(),
                 "scope-federated/v1".into(),
@@ -334,7 +335,14 @@ impl Stamp {
     fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
         !record.request.is_secret_card()
             || (self.secret_use_phone().is_some()
-                && feature_declared(params, "secret-use-approval"))
+                && feature_declared(
+                    params,
+                    if record.request.kind == "manifest_binding" {
+                        "manifest-binding-approval"
+                    } else {
+                        "secret-use-approval"
+                    },
+                ))
     }
     fn owner(&self) -> String {
         if let Ok(Some(facts)) = federated::facts(self) {
@@ -883,7 +891,26 @@ impl Handler {
                 ));
             }
         }
-        let agent_source = if request.kind == "secret_use" {
+        if let Some(body) = &request.manifest_binding {
+            let scope_agent = stamp
+                .scope
+                .as_ref()
+                .and_then(|scope| scope.attributes.agent_id.as_deref());
+            for agent in [
+                scope_agent,
+                (!stamp.carried_agent_id.is_empty()).then_some(stamp.carried_agent_id.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if agent != body.agent_id {
+                    return Err(invalid(
+                        "manifest_binding.agent_id must match the daemon-stamped agent_id",
+                    ));
+                }
+            }
+        }
+        let agent_source = if matches!(request.kind.as_str(), "manifest_binding" | "secret_use") {
             SubjectAgent::FromScope
         } else {
             requester_admission(stamp.label())
@@ -891,7 +918,7 @@ impl Handler {
         };
         let carrier = agent_source == SubjectAgent::Carried;
         let from_scope = agent_source == SubjectAgent::FromScope;
-        let worker_head = if request.kind != "secret_use"
+        let worker_head = if !matches!(request.kind.as_str(), "secret_use" | "manifest_binding")
             && (request.kind == "consent" || from_scope)
             && stamp.carried_agent_id.trim().is_empty()
         {
@@ -924,6 +951,9 @@ impl Handler {
                     Refusal::new("access_no_head", "stamped parent head has no agent_id")
                 })?,
             None if request.kind == "secret_use" => stamped_secret_agent,
+            None if request.kind == "manifest_binding" && stamp.carried_agent_id.is_empty() => {
+                stamped_secret_agent
+            }
             None => &stamp.carried_agent_id,
         };
         if carrier && agent_id.trim().is_empty() {
@@ -998,6 +1028,12 @@ impl Handler {
                 .into(),
             }
         };
+        if request.kind == "manifest_binding" {
+            // The binding's target is shown from its statement. Subject identity
+            // and any attribution still come only from the daemon's route stamp.
+            subject.label = "Plexus".into();
+            resolved_name = None;
+        }
         if let Some(project) = project {
             subject.label = format!("{} in project {project}", subject.label);
             // The store uses this display value for both new cards and dedup refreshes.
@@ -1107,6 +1143,11 @@ impl Handler {
             false
         };
         if method == "consent.request" {
+            if params.get("kind").and_then(Value::as_str) == Some("manifest_binding")
+                && !stamp.admits_kind("manifest_binding")
+            {
+                return Err(stamp.refuse());
+            }
             if params.get("kind").and_then(Value::as_str) == Some("secret_use")
                 && (!stamp.admits_kind("secret_use") || stamp.scope.is_none())
             {
@@ -1230,17 +1271,23 @@ impl Handler {
                 .get_phone(id.expect("phone id"), now)
                 .map_err(store_error)?
             {
-                if record.request.is_secret_card()
-                    && (!secret_use || stamp.secret_use_phone().is_none())
-                {
+                if !stamp.card_visible(&record, &params) {
                     return Err(Refusal::new(
                         if method == "consent.answer" {
-                            "elicitation_secret_use_approval_required"
+                            if record.request.kind == "manifest_binding" {
+                                "elicitation_manifest_binding_approval_required"
+                            } else {
+                                "elicitation_secret_use_approval_required"
+                            }
                         } else {
                             "elicitation_not_found"
                         },
                         if method == "consent.answer" {
-                            "secret use requires a phone with clientFeatures secret-use-approval"
+                            if record.request.kind == "manifest_binding" {
+                                "manifest binding requires a phone with clientFeatures manifest-binding-approval"
+                            } else {
+                                "secret use requires a phone with clientFeatures secret-use-approval"
+                            }
                         } else {
                             "elicitation not found"
                         },
@@ -1403,6 +1450,11 @@ impl Handler {
                     }
                     if secret_use && stamp.secret_use_phone().is_some() {
                         revision.push_str(":secret-use");
+                    }
+                    if feature_declared(&params, "manifest-binding-approval")
+                        && stamp.secret_use_phone().is_some()
+                    {
+                        revision.push_str(":manifest-binding");
                     }
                     if after.is_none()
                         && params.get("if_revision").and_then(Value::as_str) == Some(&revision)
@@ -1651,7 +1703,11 @@ mod tests {
                     Some("Cerebellum"),
                     vec!["consent", "secret_use"]
                 ),
-                ("reserved:plexus", Some("Plexus"), vec!["consent"]),
+                (
+                    "reserved:plexus",
+                    Some("Plexus"),
+                    vec!["consent", "manifest_binding"]
+                ),
                 ("reserved:broca", Some("Broca"), vec!["consent"]),
                 ("reserved:entorhinal", Some("Entorhinal"), vec!["consent"]),
                 ("direct", None, vec!["consent"]),
@@ -1714,10 +1770,11 @@ mod tests {
         );
         assert_eq!(implemented, documented);
         for name in implemented {
-            // Cerebellum also files secret_use cards for the vault's site
-            // logins; every other generic requester files consent cards only.
+            // Generic requesters can also have a dedicated vault-card kind.
             let expected: &[&str] = if name == "reserved:cerebellum" {
                 &["consent", "secret_use"]
+            } else if name == "reserved:plexus" {
+                &["consent", "manifest_binding"]
             } else {
                 &["consent"]
             };

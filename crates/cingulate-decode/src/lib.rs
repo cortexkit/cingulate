@@ -10,9 +10,11 @@ use serde_json::{Map, Value};
 
 mod access;
 mod flow_secrets;
+mod manifest_binding;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
+pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};
 pub use secret_use::{SecretUse, SecretUseAnswer, SecretUseItem, UseStatement};
 
 pub const MAX_EXPIRES_IN_MS: i64 = 86_400_000;
@@ -113,10 +115,13 @@ pub struct AuthorText {
 /// The request form stored after successful decoding.
 ///
 /// Flow bodies stay opaque except for the vault identity and secret approvals;
-/// the consent module neither interprets manifests nor synthesizes card facts.
+/// the consent module never interprets executable manifests. Manifest-binding
+/// facts are a read-only projection of the vault's statement, not filer text.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_binding: Option<ManifestBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_use: Option<SecretUse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -356,6 +361,8 @@ impl ConsentRequest {
                 }
             }
             secret_use::normalize(body)?
+        } else if body.get("kind").and_then(Value::as_str) == Some("manifest_binding") {
+            manifest_binding::normalize(body)?
         } else {
             body
         };
@@ -386,6 +393,16 @@ impl ConsentRequest {
             }
         }
         self.flow_install_secrets()?;
+        if self.kind == "manifest_binding" {
+            self.manifest_binding
+                .as_ref()
+                .ok_or_else(|| Refusal::invalid("missing manifest_binding"))?
+                .statement()?;
+        } else if self.manifest_binding.is_some() {
+            return Err(Refusal::invalid(
+                "manifest_binding body requires manifest_binding kind",
+            ));
+        }
         if self.kind == "secret_use" {
             self.secret_use
                 .as_ref()
@@ -497,7 +514,7 @@ impl ConsentRequest {
         }
         if matches!(
             self.kind.as_str(),
-            "flow_install" | "package" | "secret_use"
+            "flow_install" | "package" | "secret_use" | "manifest_binding"
         ) {
             if self.kind == "flow_install" && self.flow_install.is_none() {
                 return Err(Refusal::invalid("missing flow_install"));
@@ -524,7 +541,12 @@ impl ConsentRequest {
         }
         if !matches!(
             self.kind.as_str(),
-            "consent" | "flow_install" | "flow_decision" | "package" | "secret_use"
+            "consent"
+                | "flow_install"
+                | "flow_decision"
+                | "package"
+                | "secret_use"
+                | "manifest_binding"
         ) {
             return Err(Refusal::new(
                 "elicitation_unknown_kind",
@@ -636,7 +658,8 @@ impl ConsentRequest {
     }
 
     pub fn is_secret_card(&self) -> bool {
-        self.secret_use.is_some()
+        self.manifest_binding.is_some()
+            || self.secret_use.is_some()
             || (self.kind == "flow_install"
                 && self
                     .flow_install

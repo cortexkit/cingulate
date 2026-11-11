@@ -289,7 +289,14 @@ impl Handler {
                 position = change.version;
                 if change.secret_use
                     && (stamp.secret_use_phone().is_none()
-                        || !feature_declared(params, "secret-use-approval"))
+                        || !feature_declared(
+                            params,
+                            if change.manifest_binding {
+                                "manifest-binding-approval"
+                            } else {
+                                "secret-use-approval"
+                            },
+                        ))
                 {
                     continue;
                 }

@@ -46,6 +46,7 @@ impl ElicitationRecord {
         let card_kind = match self.request.kind.as_str() {
             "consent" | "package" | "flow_decision" => "consent",
             "secret_use" => "secret_use",
+            "manifest_binding" => "manifest_binding",
             "flow_install" => "flow_install",
             _ => return None,
         };

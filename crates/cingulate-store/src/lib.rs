@@ -28,7 +28,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 10] = [
+pub const MIGRATIONS: [Migration; 11] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -68,6 +68,10 @@ pub const MIGRATIONS: [Migration; 10] = [
     Migration {
         version: 10,
         statements: include_str!("../migrations/010_retire_rich_ui_approval.sql"),
+    },
+    Migration {
+        version: 11,
+        statements: include_str!("../migrations/011_manifest_binding.sql"),
     },
 ];
 
@@ -215,6 +219,8 @@ pub struct Change {
     /// after payload pruning, because a watch that may not see secret cards must
     /// not see their ids either, not even as a removal.
     pub secret_use: bool,
+    /// Distinguishes the new reader feature from secret-use approval support.
+    pub manifest_binding: bool,
     pub version: i64,
     pub elicitation_id: String,
 }
@@ -326,13 +332,14 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id,MAX(secret_use) FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
                 .query_map(params![version, limit as i64], |row| {
                     Ok(Change {
                         secret_use: row.get(2)?,
+                        manifest_binding: row.get(3)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
                     })
@@ -377,7 +384,9 @@ impl ConsentStore {
         request.requested_schema = None;
         self.transaction(|tx| {
             let flow_secrets = request.flow_install_secrets().map_err(Error::Refused)?;
-            let secret_expiry = if let Some(body) = &flow_secrets {
+            let secret_expiry = if let Some(body) = &request.manifest_binding {
+                Some(body.expires_at_ms().map_err(Error::Refused)?)
+            } else if let Some(body) = &flow_secrets {
                 Some(body.expires_at_ms().map_err(Error::Refused)?)
             } else {
                 request
@@ -396,7 +405,7 @@ impl ConsentStore {
             if secret_expiry.is_some_and(|expiry| expiry <= now_ms) {
                 return Err(refuse(
                     "elicitation_expired",
-                    "secret use request has expired",
+                    if request.manifest_binding.is_some() { "manifest_binding.expires_at_ms has passed" } else { "secret use request has expired" },
                 ));
             }
             if let Some(body) = &request.secret_use {
@@ -425,6 +434,21 @@ impl ConsentStore {
                             "secret request id is already used",
                         ));
                     }
+                }
+            }
+            if let Some(body) = &request.manifest_binding {
+                let existing: Option<String> = tx.query_row(
+                    "SELECT elicitation_id FROM manifest_binding_requests WHERE statement_sha256=?1",
+                    [&body.statement_sha256], |row| row.get(0),
+                ).optional()?;
+                if let Some(id) = existing {
+                    if let Some(old) = load(tx, &id)? {
+                        if check_owner(tx, &identity.owner, &id).is_ok()
+                            && old.request.manifest_binding.as_ref() == Some(body) {
+                            return Ok(CreateResult { record: old, created: false, settlements: vec![] });
+                        }
+                    }
+                    return Err(refuse("elicitation_request_conflict", "manifest binding statement is already filed under another session"));
                 }
             }
             let matched: Option<String> = match &request.dedup_key {
@@ -487,6 +511,7 @@ impl ConsentStore {
                 answered_at_ms: None,
                 answered_device: None,
                 secret_use_answer: None,
+                manifest_binding_answer: None,
                 answered_choice_id: None,
                 execution: None,
                 execution_reason: None,
@@ -497,15 +522,16 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use) \
-                  VALUES (?1,?2,?3,?4,'pending',?5,?6)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding) \
+                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7)",
                 params![
                     record.elicitation_id,
                     identity.owner,
                     record.request.dedup_key,
                     serde_json::to_string(&record)?,
                     record.expires_at_ms,
-                    record.request.is_secret_card()
+                    record.request.is_secret_card(),
+                    record.request.manifest_binding.is_some()
                 ],
             )?;
             if let Some(body) = &record.request.secret_use {
@@ -515,6 +541,9 @@ impl ConsentStore {
                         params![item.request_id, record.elicitation_id],
                     )?;
                 }
+            }
+            if let Some(body) = &record.request.manifest_binding {
+                tx.execute("INSERT INTO manifest_binding_requests(statement_sha256,elicitation_id) VALUES (?1,?2)",params![body.statement_sha256,record.elicitation_id])?;
             }
             enqueue_person_notice(tx, &record, "escalated")?;
             Ok(CreateResult {
@@ -635,7 +664,11 @@ impl ConsentStore {
             {
                 return Err(refuse(
                     "elicitation_expired",
-                    "secret use request has expired",
+                    if record.request.manifest_binding.is_some() {
+                        "manifest_binding.expires_at_ms has passed"
+                    } else {
+                        "secret use request has expired"
+                    },
                 ));
             }
             let flow_secrets = record
@@ -671,10 +704,17 @@ impl ConsentStore {
                     .transpose()
                     .map_err(Error::Refused)?
             };
+            let manifest_answer = record
+                .request
+                .manifest_binding
+                .as_ref()
+                .map(|body| body.answer(choice, device, envelope))
+                .transpose()
+                .map_err(Error::Refused)?;
             if !record.request.is_secret_card() && envelope.is_some() {
                 return Err(refuse(
                     "invalid_params",
-                    "envelope_b64url requires secret_use",
+                    "envelope_b64url requires a vault approval card",
                 ));
             }
             let mut settlements = Vec::new();
@@ -688,6 +728,7 @@ impl ConsentStore {
                 if record.state == State::Answered
                     && record.answered_choice_id.as_deref() == Some(choice)
                     && record.secret_use_answer == secret_answer
+                    && record.manifest_binding_answer == manifest_answer
                 {
                     AnswerOutcome::AlreadyAnswered(record)
                 } else {
@@ -715,6 +756,7 @@ impl ConsentStore {
                 }
                 record.answered_device = device.map(str::to_owned);
                 record.secret_use_answer = secret_answer;
+                record.manifest_binding_answer = manifest_answer;
                 terminal(
                     tx,
                     &mut record,

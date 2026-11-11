@@ -96,10 +96,13 @@ To preserve v1 behavior, the generic-consent rule admits `direct` and
 `reserved:entorhinal` for
 `kind: "consent"` only. These requesters use the generic consent body; none can
 request `flow_install`, `flow_decision`, `package`, `tool_permission` or
-`macos_permission`. A disallowed kind refuses `elicitation_requester_refused`.
+`macos_permission`. Separately, Cerebellum may file `secret_use` and Plexus may
+file `manifest_binding` under the dedicated vault-card rules below. A disallowed
+kind refuses `elicitation_requester_refused`.
 Requester and subject identity come only from the daemon's route stamp, never
 from body fields. A nonblank carried agent id is required for reserved requesters
-except for the worker admission rule below.
+except for the worker admission rule below and `manifest_binding` as described
+in its dedicated section.
 
 For `kind: "consent"` from any requester already admitted for that kind, a stamp
 without an agent id may be a `worker` owned by `reserved:prefrontal-core`.
@@ -354,7 +357,8 @@ that sends them is deployed.
   parent omit `head`; no body-supplied session is used.
 - `escalated.fields` contains only `card_kind`, `subject`, and optional
   `expires_at_ms`, in that order. `card_kind` is `consent` for consent, package
-  and flow-decision cards, `secret_use` for secret use, and `flow_install` for
+  and flow-decision cards, `secret_use` for secret use, `manifest_binding` for
+  repository bindings, and `flow_install` for
   installs (including those carrying secrets). Cards with no expiry omit
   `expires_at_ms`.
 - `settled.fields` contains only `outcome`: `answered` or `expired`. Withdrawal
@@ -478,6 +482,87 @@ The target bytes are pinned in
 [`test-vectors/consent-late-answer-v1/`](../../test-vectors/consent-late-answer-v1/README.md).
 Cingulate's implementation must produce them byte for byte, and core decodes
 them.
+
+## Manifest-binding requester (0.18.0)
+
+**Readers first.** The phone and desktop must render `manifest_binding` before
+Plexus files one. Phones advertise the separate `manifest-binding-approval`
+feature; `secret-use-approval` alone does not opt into this kind.
+
+Only the full daemon-attested principal `reserved:plexus` may file this kind.
+Other principals (including bare `plexus`, enrolled identities and Direct) get
+the ordinary `elicitation_requester_refused`, before statement decoding.
+The filing is a closed object, with exactly one statement:
+
+```json
+{"kind":"manifest_binding","manifest_binding":{"statement_b64url":"<vault propose reply, unchanged>"}}
+```
+
+No authored title, prompt, facts, display name, requested expiry, or other member
+is accepted. In particular, both `expires_at_ms` and `expires_in_ms` are refused
+as unknown filing fields. Cingulate derives the card expiry from the statement's
+`expires_at_ms`; a filing at or after that time refuses `elicitation_expired`.
+There is no expiry override or refresh.
+
+The unpadded base64url statement must decode to RFC 8785 JCS canonical UTF-8 bytes
+with exactly `{v, proposal_id, agent_id, app_slug, repo, installation_permissions,
+manifest_version, manifest_sha256, prior_version, prior_sha256, expires_at_ms}`.
+`v` is `ck-manifest-binding-statement/v1`, `proposal_id` is a ULID, permissions
+are a map with values only `read`, `write` or `admin`, the new version is exactly
+`prior_version + 1`, and both SHA-256 fields are 64 lowercase hex digits. Integers
+are nonnegative and at most 2^53 − 1. Defects refuse
+`elicitation_invalid_request` with a reason naming `manifest_binding.<field>`;
+invalid encoding or noncanonical bytes name `manifest_binding.statement_b64url`.
+Cingulate stores those exact statement bytes (as unchanged base64url) and their
+lowercase-hex SHA-256, plus read-only `agent_id`, `app_slug`, `repo` and the full
+`installation_permissions` map. It stores no target-agent display name; apps
+resolve that name from core's agent record. Generic card text is fixed locally.
+The vault's proposal grammar also applies: `agent_id` is 1–128 ASCII letters,
+digits, `_` or `-`; `app_slug` is 1–100 lowercase ASCII letters, digits or `-`;
+`repo` has exactly two slash-separated parts of 1–100 ASCII letters, digits,
+`.`, `_` or `-`, with neither part `.` or `..`.
+
+Plexus may file without a carried agent: the subject is Plexus. When either the
+carried agent or scope agent is daemon-stamped, every such agent must equal the
+statement's `agent_id`, or the filing refuses `elicitation_invalid_request` with
+an `agent_id` reason. Subject identity is never taken from the statement.
+
+Identical statement bytes dedup by `statement_sha256`, for the same full owner
+(principal plus session), just as `secret_use` re-requests do. While unexpired,
+a repeat returns the existing card id without refreshing it, including after
+an answer. A new statement is a new card. A repeat from another session gets
+`elicitation_request_conflict`: a card for this statement is already filed under
+another session. Do not refile it. Learn an approval from the vault's
+`manifest.watch`; otherwise the pending card lapses at the statement's expiry.
+Outcome reads do not acquire cross-session authority.
+
+Plexus reads its card through the usual requester `consent.get` with
+`{elicitation_id}` or `consent.await` with `{elicitation_id, timeout_ms}`. The
+snake_case record has `manifest_binding` facts and, after an accepted answer,
+`manifest_binding_answer`:
+
+- allow: `{decision:"allow", statement_sha256, envelope_sha256}`, with the
+  route-derived `answered_device` alongside it;
+- decline: `{decision:"decline", statement_sha256}`, with `answered_device`
+  and no envelope hash;
+- expired: `state:"expired"`, no selected choice and no
+  `manifest_binding_answer` because no phone answered. Expiry is a denial, never
+  an allow.
+
+Only the attested Callosum phone route may answer; the development desktop
+operator switch is not authority for this kind. See the
+[phone binding contract](consent-phone-v2.md#manifest-binding-approvals-0180).
+Cingulate never calls the vault: the phone signs and submits an allow envelope
+directly to `manifest.approve`; a decline is recorded only in Cingulate.
+Escalate, settle and withdraw push notices contain only Cingulate-vouched
+metadata, never the statement, repository or permissions. Their field shapes
+are the same as secret-use notices.
+
+[Handler-generated samples](../../test-vectors/manifest-binding-v1/README.md)
+include first and repeated filing, phone get and answers, and both requester
+get and await records for allow, decline and expired outcomes. The copied vault
+statement and envelope are pinned to claustrum tag `manifest-binding-vectors-v1`
+at `c2a9ce2eaf99da646160eeb0c73d6b11d9341cbf`.
 
 ## Vault secret-use requester (0.12.0)
 

@@ -523,6 +523,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
+            "manifest-binding-approval/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1",
             "scope-federated/v1"
@@ -699,6 +700,7 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-outcomes-late/v1",
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
+            "manifest-binding-approval/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1",
             "scope-federated/v1"

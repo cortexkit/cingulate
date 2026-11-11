@@ -199,7 +199,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7,8,9,10"
+        "1,2,3,4,5,6,7,8,9,10,11"
     );
     let answer_schema: String = conn
         .query_row(
@@ -287,14 +287,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,11,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,12,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 11"));
-    assert!(error.to_string().contains("migration 10"));
+    assert!(error.to_string().contains("version 12"));
+    assert!(error.to_string().contains("migration 11"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1264,6 +1264,8 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
             "DROP TRIGGER cingulate_change_card_insert;
         DROP TRIGGER cingulate_change_card_update;
         DROP TRIGGER cingulate_change_card_delete;
+        DROP TABLE manifest_binding_requests;
+        ALTER TABLE elicitation_records DROP COLUMN manifest_binding;
         DROP TABLE secret_use_requests;
         ALTER TABLE elicitation_records DROP COLUMN secret_use;
         DROP TABLE cingulate_changes;
@@ -1327,6 +1329,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         answered_at_ms: None,
         answered_device: None,
         secret_use_answer: None,
+        manifest_binding_answer: None,
         answered_choice_id: None,
         execution: None,
         execution_reason: None,
@@ -1343,6 +1346,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
     drop(old);
     let mut before = rows(&scratch.sql(), "elicitation_records");
     for row in &mut before {
+        row.push(json!(0));
         row.push(json!(0));
     }
     let (store, settlements) = scratch.open(100);
@@ -1554,6 +1558,7 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
     drop(old);
     let mut before = snapshot(&scratch);
     for row in &mut before.records {
+        row.push(json!(0));
         row.push(json!(0));
     }
     let notices = rows(&scratch.sql(), "access_notices");
@@ -2096,10 +2101,10 @@ fn retirement_migrates_v9_without_device_columns_or_revoked_state() {
             .unwrap()
         };
         assert_eq!(schema_version(), 9);
-        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS)
+        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..10])
             .unwrap();
         assert_eq!(schema_version(), 10);
-        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS)
+        old.migrate(MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..10])
             .unwrap();
         assert_eq!(schema_version(), 10);
         for table in ["elicitation_records", "cingulate_changes"] {

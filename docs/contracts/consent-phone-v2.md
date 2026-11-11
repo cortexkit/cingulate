@@ -1,7 +1,8 @@
 # Phone consent contract, v2
 
 Version 2 includes the [v1 interface](consent-phone-v1.md) unchanged for existing
-kinds, plus `tool_permission` and `macos_permission`. It is a new version rather
+kinds, plus `tool_permission`, `macos_permission` and the feature-gated vault
+kinds `secret_use` and `manifest_binding` described below. It is a new version rather
 than claiming additive compatibility: these kinds have no lifetime
 fields, and late same-choice answers conflict. Clients pinned to v1 must not
 render unknown kinds as ordinary expiring approvals. The shared
@@ -231,6 +232,75 @@ older than those gets `reread`.
 Never infer an answer or a grant from a watch item's absence, a `removed` item,
 a `reread`, or the stream ending: those only say what to read again.
 
+## Manifest-binding approvals (0.18.0)
+
+**Readers first.** Phone and desktop renderers must implement this kind before
+Plexus files a card. Cingulate advertises `manifest-binding-approval/v1`.
+A reader advertises `clientFeatures: ["manifest-binding-approval"]` only once it
+can independently decode the statement and render this kind. The older
+`secret-use-approval` feature is not sufficient. Only a daemon-stamped
+`reserved:callosum` phone route (`fed-phone:<32 lowercase hex>`, or the equivalent
+daemon-stamped federated phone identity) with this feature may read or answer.
+List/get/watch hide cards and pruned removal ids from unsupported readers and
+other devices. Unsupported get refuses `elicitation_not_found`; unsupported
+answer refuses `elicitation_manifest_binding_approval_required`. The desktop
+development operator switch never grants answering authority, even for decline.
+
+The flat card has `kind: "manifest_binding"` and the read-only payload:
+
+```text
+manifestBinding: {
+  statement_b64url, statement_sha256, agent_id, app_slug, repo,
+  installation_permissions: {<permission>: "read" | "write" | "admin", ...}
+}
+```
+
+Nested names retain their snake_case spelling. Decode the canonical statement
+yourself, check its SHA-256 against `statement_sha256`, and refuse a card whose
+served facts or `expiresAtMs` disagree with those bytes. Draw and sign only from
+that independent decode. Render the repository exactly (including casing), the
+bot `app_slug`, the full permissions map, and the binding's `agent_id`. Resolve
+the agent's display name from core's agent record, not Cingulate or filer text.
+The statement has exactly the keys and version described in the
+[requester contract](consent-requester-v2.md#manifest-binding-requester-0180).
+The default is decline, `onExpiry` is deny, and expiry is the statement's
+`expires_at_ms` with no extension. All generic labels are fixed by Cingulate.
+
+Decline sends `consent.answer` with `{elicitationId, choiceId:"decline",
+clientFeatures:["manifest-binding-approval"]}` and no envelope. Send nothing to
+the vault. For allow, sign the exact JCS envelope and send `{envelope_b64url,
+signature_b64url}` straight to the vault's `manifest.approve`. After the vault
+accepts, answer Cingulate with `{elicitationId, choiceId:"allow",
+clientFeatures:["manifest-binding-approval"], envelope_b64url}` using those
+same envelope bytes. Cingulate does not call the vault or verify signatures.
+
+The envelope's closed shape is `{v, proposal_id, statement_sha256, decision,
+device_fingerprint, issued_at_ms}`. Cingulate requires unpadded base64url and JCS,
+`v == "ck-manifest-binding-envelope/v1"`, `decision == "allow"`, the stored
+proposal id and exact statement digest, and a lowercase-hex device fingerprint
+equal to the answering phone route's. Integers must be nonnegative and no larger
+than 2^53 − 1. Malformed or mismatched fields refuse
+`elicitation_invalid_request`. As for secret-use approvals, the vault owns the
+signature and issued-at freshness checks. Cingulate refuses all answers at or
+after card expiry with `elicitation_expired`, including declines and retries.
+
+The served `manifestBindingAnswer` contains `decision`, `statement_sha256`, and
+for allow only `envelope_sha256`, hashing the exact decoded envelope. The
+route-derived fingerprint is `answeredDevice` beside the answer. Expired cards
+have no answer object. Same-choice retries require the same decision binding;
+they never replace a recorded decision with another envelope. Requester
+get/await use `manifest_binding_answer` instead, as described in requester v2.
+
+The [samples](../../test-vectors/manifest-binding-v1/README.md) pin allow, decline,
+expired and mismatch-refusal cases. `phone-refuse-mismatch.json` deliberately
+mutates a decoded fact on a real card: it is an input the phone MUST refuse,
+not a card Cingulate serves. The vault samples and contract come from claustrum
+tag `manifest-binding-vectors-v1`, commit
+`c2a9ce2eaf99da646160eeb0c73d6b11d9341cbf`.
+
+Escalate, settle and withdraw pushes carry only Cingulate-vouched metadata,
+never repository, statement or permissions; fetch the card on the admitted route.
+
 ## Vault secret-use approvals (0.12.0)
 
 Cingulate advertises `secret-use-approval/v1`. Only daemon-stamped
@@ -266,7 +336,8 @@ signature:
 - `duration` is offered by every listed statement.
 
 Malformed or mismatched bindings refuse `elicitation_invalid_request` without
-recording an answer. Envelope params on kinds other than `secret_use` or secret-bearing `flow_install` refuse `invalid_params`.
+recording an answer. Envelope params on kinds other than `secret_use`,
+`manifest_binding` or secret-bearing `flow_install` refuse `invalid_params`.
 Answers at or after expiry refuse `elicitation_expired`, including declines and
 same-choice retries. The vault separately checks its signature, live requests,
 grant expiry arithmetic, pairing and current sealed-secret incarnation.

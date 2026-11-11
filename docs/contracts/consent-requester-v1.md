@@ -48,6 +48,9 @@ not the scope reference and epoch. Local ownership is unchanged.
 | `direct` | `consent`; displayed as an unverified local process |
 | Anything else, including absent / unverified / `reserved:callosum` | No requests |
 
+The dedicated `secret_use` and `manifest_binding` filing rules are in
+[requester v2](consent-requester-v2.md), not the generic-consent admission above.
+
 Disallowed principals or principal/kind combinations refuse
 `elicitation_requester_refused`. Requesters need an admitted daemon route but
 **no phone bind or harness prefix**. The `fed-phone:` rule applies only to
