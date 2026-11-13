@@ -42,6 +42,14 @@ pub fn body(case: &str) -> Value {
 }
 
 pub fn filer(module: &str, agent: Option<&str>) -> Stamp {
+    filer_with_scope(
+        module,
+        ScopeKind::Head,
+        ScopeAttributes::new().with_agent_id(agent.map(str::to_owned)),
+    )
+}
+
+pub fn filer_with_scope(module: &str, kind: ScopeKind, attributes: ScopeAttributes) -> Stamp {
     Stamp::from_bind(
         &RouteBindRequest::new(
             RouteHandle::detached(1, 1),
@@ -60,9 +68,9 @@ pub fn filer(module: &str, agent: Option<&str>) -> Stamp {
                 },
                 "H",
                 7,
-                ScopeKind::Head,
+                kind,
             )
-            .with_attributes(ScopeAttributes::new().with_agent_id(agent.map(str::to_owned)))
+            .with_attributes(attributes)
             .with_owner_authorized(true),
         ),
     )

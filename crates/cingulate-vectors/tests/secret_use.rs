@@ -13,6 +13,7 @@ use secret_use::*;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fs};
+use subc_protocol::scope::{ScopeAttributes, ScopeKind};
 
 #[tokio::test]
 async fn secret_use_vault_vectors_file_and_bind_answers() {
@@ -92,6 +93,61 @@ async fn secret_use_null_agent_binding_is_exact() {
             accepted
         );
     }
+}
+
+#[tokio::test]
+async fn secret_use_worker_agent_binding_accepts_on_behalf_or_null() {
+    for (on_behalf, statement_agent, accepted) in [
+        (Some("agent-A"), json!("agent-A"), true),
+        (Some("agent-A"), Value::Null, true),
+        (Some("agent-A"), json!("agent-B"), false),
+        (None, json!("agent-A"), false),
+    ] {
+        let f = fixture().await;
+        let stamp = filer_with_scope(
+            "cerebellum",
+            ScopeKind::Worker,
+            ScopeAttributes::new().with_on_behalf_of_agent(on_behalf.map(str::to_owned)),
+        );
+        let mut request = body("approval");
+        let mut statement = decoded(&request["secret_use"]["items"][0]["statement_b64url"]);
+        statement["agent_id"] = statement_agent;
+        request["secret_use"]["items"][0]["statement_b64url"] = encoded(&statement);
+        let result = f.call(&stamp, "consent.request", request).await;
+        if accepted {
+            assert!(result.is_ok(), "on_behalf={on_behalf:?}: {result:?}");
+        } else {
+            assert_eq!(
+                result.unwrap_err(),
+                json!({
+                    "code": "elicitation_invalid_request",
+                    "message": "secret use agent_id must match the stamped agent_id"
+                })
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn secret_use_head_does_not_accept_on_behalf_agent() {
+    let f = fixture().await;
+    let stamp = filer_with_scope(
+        "cerebellum",
+        ScopeKind::Head,
+        ScopeAttributes::new()
+            .with_agent_id(Some("agent-A".into()))
+            .with_on_behalf_of_agent(Some("agent-B".into())),
+    );
+    let mut request = body("approval");
+    let mut statement = decoded(&request["secret_use"]["items"][0]["statement_b64url"]);
+    statement["agent_id"] = json!("agent-B");
+    request["secret_use"]["items"][0]["statement_b64url"] = encoded(&statement);
+    assert_eq!(
+        f.call(&stamp, "consent.request", request)
+            .await
+            .unwrap_err(),
+        json!({"code":"elicitation_invalid_request", "message":"secret use agent_id must match the stamped agent_id"})
+    );
 }
 
 #[tokio::test]

@@ -7,6 +7,12 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.18.1 (ck-cingulate)
+
+- Accept worker secret-use statements naming the agent in the daemon's
+  `on_behalf_of_agent` route stamp, as well as null. For non-worker scopes,
+  statements must still exactly match the stamp's `agent_id`.
+
 ## 0.17.0 (ck-cingulate), 0.8.0 (cingulate-decode), 0.9.0 (cingulate-vectors)
 
 - Advertise `consent-card-explanations/v1`. Accept optional `explanation` and

@@ -881,11 +881,13 @@ impl Handler {
         }
         if let Some(body) = &request.secret_use {
             let scope = stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
-            if body
-                .statements()?
-                .iter()
-                .any(|s| s.agent_id != scope.attributes.agent_id)
-            {
+            if body.statements()?.iter().any(|s| {
+                if scope.kind == subc_protocol::scope::ScopeKind::Worker {
+                    s.agent_id.is_some() && s.agent_id != scope.attributes.on_behalf_of_agent
+                } else {
+                    s.agent_id != scope.attributes.agent_id
+                }
+            }) {
                 return Err(invalid(
                     "secret use agent_id must match the stamped agent_id",
                 ));
