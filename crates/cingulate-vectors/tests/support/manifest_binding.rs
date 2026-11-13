@@ -132,6 +132,37 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
             capture(&f, &filer(), "consent.get", json!({"elicitation_id":id})).await,
         );
     }
+    let f = fixture().await;
+    let id = f.request(&filer(), body()).await;
+    let withdraw = json!({"elicitation_id":id});
+    cases.insert(
+        "other-withdraw-refused.json",
+        capture(
+            &f,
+            &support::stamp("reserved:cerebellum"),
+            "consent.withdraw",
+            withdraw.clone(),
+        )
+        .await,
+    );
+    cases.insert(
+        "filer-withdraw.json",
+        capture(&f, &filer(), "consent.withdraw", withdraw.clone()).await,
+    );
+    cases.insert(
+        "phone-get-withdrawn.json",
+        capture(
+            &f,
+            &phone(),
+            "consent.get",
+            json!({"elicitationId":id,"clientFeatures":["manifest-binding-approval"]}),
+        )
+        .await,
+    );
+    cases.insert(
+        "filer-withdraw-repeat.json",
+        capture(&f, &filer(), "consent.withdraw", withdraw).await,
+    );
     cases
         .into_iter()
         .map(|(name, value)| {

@@ -287,14 +287,30 @@ async fn manifest_binding_card_projection_decline_and_push_privacy() {
 #[tokio::test]
 async fn manifest_binding_vectors_are_handler_generated_and_hash_pinned() {
     use sha2::{Digest, Sha256};
-    for (name, bytes) in generate().await {
+    let generated = generate().await;
+    let case = |name: &str| -> Value { serde_json::from_slice(&generated[name]).unwrap() };
+    let withdraw = case("filer-withdraw.json");
+    let repeat = case("filer-withdraw-repeat.json");
+    let refused = case("other-withdraw-refused.json");
+    let phone = case("phone-get-withdrawn.json");
+    assert_eq!(refused["reply"]["error"]["code"], "elicitation_not_owner");
+    assert_eq!(withdraw["reply"]["result"]["state"], "withdrawn");
+    assert_eq!(repeat["reply"], withdraw["reply"]);
+    assert_eq!(phone["reply"]["result"]["state"], "withdrawn");
+    assert!(phone["reply"]["result"].get("choices").is_none());
+    let sums = std::fs::read_to_string(support::corpus(CORPUS).join("SHA256SUMS")).unwrap();
+    let pinned: std::collections::BTreeSet<_> = sums
+        .lines()
+        .map(|line| line.split_once("  ").unwrap().1)
+        .collect();
+    for (name, bytes) in generated {
+        assert!(pinned.contains(name.as_str()), "{name} is not hash-pinned");
         assert_eq!(
             std::fs::read(support::corpus(CORPUS).join(&name)).unwrap(),
             bytes,
             "{name}"
         );
     }
-    let sums = std::fs::read_to_string(support::corpus(CORPUS).join("SHA256SUMS")).unwrap();
     for line in sums.lines() {
         let (hash, name) = line.split_once("  ").unwrap();
         assert_eq!(
