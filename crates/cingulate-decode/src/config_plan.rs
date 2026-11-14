@@ -48,7 +48,8 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
         dedup_key: Option<String>,
         config_plan: ConfigPlan,
     }
-    // JSON null is a recorded value, but an omitted old/new value is not.
+    // Optional fields may be omitted, but a present JSON null must not be
+    // silently treated as an omitted object or project id by serde's Option.
     if body["config_plan"]
         .get("other_sections")
         .is_some_and(|v| !v.is_object())
@@ -63,13 +64,6 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
                 return Err(Refusal::invalid(
                     "config_plan.changes.project_id must be a string",
                 ));
-            }
-            for field in ["old", "new"] {
-                if row.get(field).is_none() {
-                    return Err(Refusal::invalid(format!(
-                        "config_plan.changes.{field} is required"
-                    )));
-                }
             }
         }
     }
