@@ -10,7 +10,7 @@ use subc_client_rs::HandlerOutcome;
 use crate::{Handler, Reply, Stamp, WatchSink};
 
 fn invalid(field: &'static str) -> Refusal {
-    Refusal::new("invalid_params", json!({"field": field}).to_string())
+    Refusal::new("invalid_params", json!({"field": field}).to_string()).reason("param_type")
 }
 
 fn code(value: &str, separator: u8) -> bool {
@@ -129,7 +129,7 @@ impl Handler {
             }),
             "presence.watch" => stamp
                 .presence_reader()
-                .and_then(|()| Err(invalid("stream"))),
+                .and_then(|()| Err(invalid("stream").reason("watch_unary"))),
             _ => return None,
         })
     }
@@ -138,7 +138,7 @@ impl Handler {
         let (device_id, device_kind) = stamp.presence_device(params)?;
         let state: State =
             serde_json::from_value(params.get("state").cloned().unwrap_or(Value::Null))
-                .map_err(|_| invalid("state"))?;
+                .map_err(|_| invalid("state").reason("state_invalid"))?;
         let mut focus = list(params, "focus", 1, 16, |id| {
             subc_protocol::scope::validate_on_behalf_of_agent(id).is_ok()
         })?;
@@ -215,11 +215,12 @@ impl Handler {
             method: String,
         }
         if body.len() > 1_310_720 {
-            return Err(invalid("request"));
+            return Err(invalid("request").reason("envelope_invalid"));
         }
-        let request: Request = serde_json::from_slice(body).map_err(|_| invalid("request"))?;
+        let request: Request = serde_json::from_slice(body)
+            .map_err(|_| invalid("request").reason("envelope_invalid"))?;
         if request.method != "presence.watch" {
-            return Err(invalid("method"));
+            return Err(invalid("method").reason("method_invalid"));
         }
         let mut stopping = self.inner.stopping.subscribe();
         if *stopping.borrow() {

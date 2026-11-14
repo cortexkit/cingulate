@@ -325,6 +325,8 @@ where
 pub struct Refusal {
     pub code: &'static str,
     pub message: String,
+    /// Fixed diagnostic label for logs only; never derived from caller data.
+    pub reason: Option<&'static str>,
 }
 
 impl Refusal {
@@ -332,11 +334,17 @@ impl Refusal {
         Self {
             code,
             message: message.into(),
+            reason: None,
         }
     }
 
+    pub fn reason(mut self, reason: &'static str) -> Self {
+        self.reason = Some(reason);
+        self
+    }
+
     fn invalid(message: impl Into<String>) -> Self {
-        Self::new("elicitation_invalid_request", message)
+        Self::new("elicitation_invalid_request", message).reason("envelope_invalid")
     }
 }
 
@@ -600,13 +608,19 @@ impl ConsentRequest {
             return Err(Refusal::new(
                 "elicitation_fail_closed_required",
                 "consent requires a decline default and on_expiry deny",
-            ));
+            )
+            .reason(if default.effect != "decline" {
+                "default_not_decline"
+            } else {
+                "expiry_not_deny"
+            }));
         }
         if default.group == Some(OptionGroup::Danger) {
             return Err(Refusal::new(
                 "elicitation_fail_closed_required",
                 "the default option cannot be in the danger group",
-            ));
+            )
+            .reason("default_danger"));
         }
         if self.options.iter().any(|option| option.effect == "grant")
             && !self

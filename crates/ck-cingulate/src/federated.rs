@@ -69,7 +69,7 @@ pub fn claim_identity(claim: Option<&RemoteClaim>) -> Result<Value, Refusal> {
                 flow_code_hash
             ])
         }
-        Some(_) => return Err(invalid("unsupported remote claim")),
+        Some(_) => return Err(invalid("unsupported remote claim").reason("remote_claim_invalid")),
     })
 }
 
@@ -135,7 +135,7 @@ fn display(claim: Option<&RemoteClaim>) -> Result<(String, Option<String>), Refu
             None,
         ),
         None => (String::new(), Some("any program".into())),
-        Some(_) => return Err(invalid("unsupported remote claim")),
+        Some(_) => return Err(invalid("unsupported remote claim").reason("remote_claim_invalid")),
     })
 }
 
@@ -242,7 +242,8 @@ pub(crate) fn prepare(
     request: &mut ConsentRequest,
 ) -> Result<(), Refusal> {
     if request.kind != "consent" {
-        return Err(invalid("federated requesters may raise only consent cards"));
+        return Err(invalid("federated requesters may raise only consent cards")
+            .reason("federated_kind_invalid"));
     }
     let (subject, _) = display(facts.remote_claim.as_ref())?;
     let name = &facts.peer_name;
@@ -268,7 +269,8 @@ pub(crate) fn prepare(
             .count()
             != 1
         {
-            return Err(invalid("a run card requires exactly one grant choice"));
+            return Err(invalid("a run card requires exactly one grant choice")
+                .reason("grant_choices_invalid"));
         }
         request.single_use = Some(true);
         request.duration = None;

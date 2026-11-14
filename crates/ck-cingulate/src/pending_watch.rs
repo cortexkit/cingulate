@@ -156,8 +156,9 @@ impl Handler {
             #[serde(default)]
             params: Value,
         }
-        let request = serde_json::from_slice::<WireRequest>(body)
-            .map_err(|error| Refusal::new("invalid_request", error.to_string()))?;
+        let request = serde_json::from_slice::<WireRequest>(body).map_err(|error| {
+            Refusal::new("invalid_request", error.to_string()).reason("envelope_invalid")
+        })?;
         if request.method != WATCH_PENDING {
             return Err(Refusal::new(
                 "unknown_method",
@@ -347,7 +348,8 @@ impl Handler {
             }
             Err(error) => return Err(error),
         };
-        let item = serde_json::to_vec(&item).map_err(|error| invalid(error.to_string()))?;
+        let item = serde_json::to_vec(&item)
+            .map_err(|error| invalid(error.to_string()).reason("projection_invalid"))?;
         Ok(if item.len() > ITEM_LIMIT_BYTES {
             reread()
         } else {

@@ -10,7 +10,11 @@ use sha2::{Digest, Sha256};
 use crate::{lowercase_hex, secret_use::canonical, Refusal};
 
 fn invalid(field: &str) -> Refusal {
-    Refusal::invalid(format!("invalid manifest_binding.{field}"))
+    Refusal::invalid(format!("invalid manifest_binding.{field}")).reason("statement_invalid")
+}
+
+fn invalid_envelope(field: &str) -> Refusal {
+    invalid(field).reason("envelope_invalid")
 }
 
 /// Read-only card facts derived from the exact canonical statement bytes.
@@ -183,29 +187,29 @@ impl ManifestBinding {
             ("decline", None) => None,
             ("allow", Some(encoded)) => {
                 let (envelope, bytes): (Envelope, _) =
-                    canonical(encoded).map_err(|_| invalid("envelope_b64url"))?;
+                    canonical(encoded).map_err(|_| invalid_envelope("envelope_b64url"))?;
                 if envelope.v != "ck-manifest-binding-envelope/v1" {
-                    return Err(invalid("v"));
+                    return Err(invalid_envelope("v"));
                 }
                 if envelope.proposal_id != statement.proposal_id {
-                    return Err(invalid("proposal_id"));
+                    return Err(invalid_envelope("proposal_id"));
                 }
                 if envelope.statement_sha256 != self.statement_sha256 {
-                    return Err(invalid("statement_sha256"));
+                    return Err(invalid_envelope("statement_sha256"));
                 }
                 if envelope.decision != choice {
-                    return Err(invalid("decision"));
+                    return Err(invalid_envelope("decision"));
                 }
                 if device != Some(envelope.device_fingerprint.as_str())
                     || !lowercase_hex(&envelope.device_fingerprint, 32)
                 {
-                    return Err(invalid("device_fingerprint"));
+                    return Err(invalid_envelope("device_fingerprint"));
                 }
                 // As for secret_use, the vault owns signature and issued-at checks.
                 let _ = envelope.issued_at_ms;
                 Some(format!("{:x}", Sha256::digest(bytes)))
             }
-            _ => return Err(invalid("decision")),
+            _ => return Err(invalid_envelope("decision")),
         };
         Ok(ManifestBindingAnswer {
             decision: choice.into(),

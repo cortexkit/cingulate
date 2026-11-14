@@ -573,6 +573,7 @@ fn refusal_outcome(stamp: &Stamp, body: &[u8], error: Refusal) -> HandlerOutcome
     tracing::info!(
         method = ?method,
         code = error.code,
+        reason = ?error.reason,
         principal = ?stamp.label(),
         kind = ?kind,
         scope_kind = ?scope_kind.as_ref().and_then(|kind| kind.as_str()),
@@ -589,7 +590,7 @@ fn refusal_outcome(stamp: &Stamp, body: &[u8], error: Refusal) -> HandlerOutcome
 }
 
 fn invalid(message: impl Into<String>) -> Refusal {
-    Refusal::new("elicitation_invalid_request", message)
+    Refusal::new("elicitation_invalid_request", message).reason("request_shape")
 }
 
 fn option_group_declared(params: &Value) -> Result<bool, Refusal> {
@@ -599,7 +600,9 @@ fn option_group_declared(params: &Value) -> Result<bool, Refusal> {
     let features = features
         .as_array()
         .filter(|features| features.iter().all(Value::is_string))
-        .ok_or_else(|| invalid("clientFeatures must be an array of strings"))?;
+        .ok_or_else(|| {
+            invalid("clientFeatures must be an array of strings").reason("client_features_invalid")
+        })?;
     Ok(features.iter().any(|feature| feature == "option-group"))
 }
 
@@ -619,20 +622,24 @@ fn surface_options(mut value: Value, option_group: bool) -> Value {
     value
 }
 fn store_error(error: cingulate_store::Error) -> Refusal {
-    Refusal::new(error.code(), error.to_string())
+    let mut refusal = Refusal::new(error.code(), error.to_string());
+    if let cingulate_store::Error::Refused(error) = error {
+        refusal.reason = error.reason;
+    }
+    refusal
 }
 fn text<'a>(params: &'a Value, key: &str) -> Result<&'a str, Refusal> {
     params
         .get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| invalid(format!("{key} must be a string")))
+        .ok_or_else(|| invalid(format!("{key} must be a string")).reason("param_type"))
 }
 fn integer(params: &Value, key: &str) -> Result<i64, Refusal> {
     params
         .get(key)
         .and_then(Value::as_i64)
         .filter(|v| *v >= 0)
-        .ok_or_else(|| invalid(format!("{key} must be a nonnegative integer")))
+        .ok_or_else(|| invalid(format!("{key} must be a nonnegative integer")).reason("param_type"))
 }
 fn operator(stamp: &Stamp) -> Result<(), Refusal> {
     federated::facts(stamp)?;
@@ -949,9 +956,10 @@ impl Handler {
                     s.agent_id != scope.attributes.agent_id
                 }
             }) {
-                return Err(invalid(
-                    "secret use agent_id must match the stamped agent_id",
-                ));
+                return Err(
+                    invalid("secret use agent_id must match the stamped agent_id")
+                        .reason("agent_id_mismatch"),
+                );
             }
         }
         if let Some(body) = &request.manifest_binding {
@@ -969,7 +977,8 @@ impl Handler {
                 if agent != body.agent_id {
                     return Err(invalid(
                         "manifest_binding.agent_id must match the daemon-stamped agent_id",
-                    ));
+                    )
+                    .reason("agent_id_mismatch"));
                 }
             }
         }
@@ -1024,7 +1033,8 @@ impl Handler {
         }
         if let Some(console) = &request.at_console {
             if self.inner.machine_id.lock().expect("machine lock").as_ref() != Some(console) {
-                return Err(invalid("at_console must match the daemon's machine_id"));
+                return Err(invalid("at_console must match the daemon's machine_id")
+                    .reason("at_console_mismatch"));
             }
         }
         let has_agent = carrier
@@ -1148,7 +1158,9 @@ impl Handler {
         }
         let reply = match serde_json::from_slice::<WireRequest>(body) {
             Ok(request) => self.dispatch(stamp, &request.method, request.params).await,
-            Err(error) => Err(Refusal::new("invalid_request", error.to_string())),
+            Err(error) => {
+                Err(Refusal::new("invalid_request", error.to_string()).reason("envelope_invalid"))
+            }
         };
         match reply {
             Ok(reply) => HandlerOutcome::Response(
@@ -1195,9 +1207,10 @@ impl Handler {
             // The watch streams, so it is served by handle_watch_stamped. A
             // unary call reaching here is refused only after the same
             // admission as consent.list_pending.
-            return Err(invalid(
-                "consent.watch_pending is a watch; subscribe to it as a stream",
-            ));
+            return Err(
+                invalid("consent.watch_pending is a watch; subscribe to it as a stream")
+                    .reason("watch_unary"),
+            );
         }
         let option_group = if matches!(method, "consent.answer" | "consent.list_pending")
             || (method == "consent.get" && operator_surface)
@@ -1476,7 +1489,7 @@ impl Handler {
                                 } else if let Some(record) = store.access_get(&id).map_err(store_error)? {
                                     record.created_at_ms
                                 } else {
-                                    return Err(invalid("legacy continuation card is no longer retained; restart the list"));
+                                    return Err(invalid("legacy continuation card is no longer retained; restart the list").reason("legacy_continuation"));
                                 }
                             };
                             Ok((created, id))
@@ -1574,7 +1587,8 @@ impl Handler {
                             + 1;
                         if bytes + size > cingulate_store::PAGE_RECORD_BYTES {
                             if records.is_empty() {
-                                return Err(invalid("card projection exceeds page budget"));
+                                return Err(invalid("card projection exceeds page budget")
+                                    .reason("page_budget"));
                             }
                             continuation = last;
                             break;
@@ -1599,8 +1613,10 @@ impl Handler {
                             params
                                 .get("envelope_b64url")
                                 .map(|v| {
-                                    v.as_str()
-                                        .ok_or_else(|| invalid("envelope_b64url must be a string"))
+                                    v.as_str().ok_or_else(|| {
+                                        invalid("envelope_b64url must be a string")
+                                            .reason("param_type")
+                                    })
                                 })
                                 .transpose()?,
                             now,
@@ -1771,6 +1787,121 @@ mod tests {
 
         async fn ended(&self) {
             std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn request_refusals_log_fixed_reasons_without_private_data() {
+        let dir = tempfile::tempdir().expect("scratch directory");
+        let descriptor = storage_descriptor(None, dir.path().to_str().unwrap());
+        let handler = Handler::new(Options {
+            sweep_timer: false,
+            ..Options::default()
+        });
+        handler
+            .hello_ack(&ModuleHelloAckBody {
+                negotiated_ver: 1,
+                subc_ops: vec![],
+                subc_capabilities: vec![],
+                storage: Some(serde_json::to_value(&descriptor).unwrap()),
+                machine_id: Some("local-machine".into()),
+            })
+            .await;
+        assert_eq!(handler.health_report().status, HealthStatus::Ok);
+        let stamp = Stamp {
+            principal: Some("reserved:cerebellum".into()),
+            carried_agent_id: "stamped-agent".into(),
+            scope: Some(
+                serde_json::from_value(json!({
+                    "owner":{"kind":"reserved","module_id":"prefrontal-core"},
+                    "ref":"head:alf", "scope_epoch":7, "kind":"head",
+                    "attributes":{"agent_id":"stamped-agent"}, "owner_authorized":true
+                }))
+                .unwrap(),
+            ),
+            ..Stamp::default()
+        };
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../../test-vectors/secret-use-approval-v1/secret-approval-v1.json"
+        ))
+        .unwrap();
+        let statement = &vectors["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|vector| vector["case"] == "approval")
+            .unwrap()["statements"][0];
+        let secret_request = json!({"kind":"secret_use", "secret_use":{"items":[{
+            "request_id":statement["request_id"], "statement_b64url":statement["statement_b64url"]
+        }]}});
+        let mut console_request: Value = serde_json::from_str(include_str!(
+            "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
+        ))
+        .unwrap();
+        console_request["at_console"] = json!("PRIVATE_CONSOLE");
+        console_request["prompt"] = json!("PRIVATE_PROMPT");
+
+        let bytes = Arc::new(StdMutex::new(Vec::new()));
+        let buffer = LogBuffer(bytes.clone());
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || buffer.clone())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        for (params, reason, expected_message) in [
+            (
+                secret_request,
+                "agent_id_mismatch",
+                "secret use agent_id must match the stamped agent_id",
+            ),
+            (
+                console_request,
+                "at_console_mismatch",
+                "at_console must match the daemon's machine_id",
+            ),
+        ] {
+            let result = handler
+                .handle_stamped(
+                    &stamp,
+                    &serde_json::to_vec(&json!({"method":"consent.request", "params":params}))
+                        .unwrap(),
+                )
+                .await;
+            match result {
+                HandlerOutcome::Error { code, message } => {
+                    assert_eq!(code, "elicitation_invalid_request");
+                    assert_eq!(message, expected_message);
+                    // The transport error envelope contains only code and message.
+                    let reply =
+                        serde_json::to_vec(&json!({"error":{"code":code,"message":message}}))
+                            .unwrap();
+                    assert_eq!(
+                        reply,
+                        format!(r#"{{"error":{{"code":"elicitation_invalid_request","message":"{expected_message}"}}}}"#).as_bytes()
+                    );
+                    let reply: Value = serde_json::from_slice(&reply).unwrap();
+                    assert!(reply["error"].get("reason").is_none());
+                }
+                other => panic!("expected refusal, got {other:?}"),
+            }
+            let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+            assert_eq!(log.lines().count(), 1, "{log}");
+            assert!(
+                log.contains("request refused") && log.contains("consent.request"),
+                "{log}"
+            );
+            assert!(log.contains(&format!("reason=Some({reason:?})")), "{log}");
+            for private in [
+                statement["statement_b64url"].as_str().unwrap(),
+                "agent-A",
+                "PRIVATE_CONSOLE",
+                "PRIVATE_PROMPT",
+                expected_message,
+            ] {
+                assert!(!log.contains(private), "private data in log: {log}");
+            }
+            bytes.lock().unwrap().clear();
         }
     }
 

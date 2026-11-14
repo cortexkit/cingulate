@@ -32,14 +32,14 @@ pub enum AccessRequest {
 
 impl AccessRequest {
     pub fn decode(value: Value) -> Result<Self, Refusal> {
-        let request: Self = serde_json::from_value(value)
-            .map_err(|e| Refusal::new("elicitation_invalid_request", e.to_string()))?;
+        let request: Self =
+            serde_json::from_value(value).map_err(|e| Refusal::invalid(e.to_string()))?;
         request.validate()?;
         Ok(request)
     }
 
     pub fn validate(&self) -> Result<(), Refusal> {
-        let invalid = |message| Refusal::new("elicitation_invalid_request", message);
+        let invalid = Refusal::invalid;
         match self {
             Self::ToolPermission {
                 call_key,
@@ -134,7 +134,8 @@ pub fn validate_note(note: &str, optional: bool) -> Result<(), Refusal> {
         Err(Refusal::new(
             "elicitation_invalid_request",
             "reason or note must be one line, at most 160 characters",
-        ))
+        )
+        .reason("note_invalid"))
     } else {
         Ok(())
     }

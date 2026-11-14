@@ -7,6 +7,12 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.18.4 (ck-cingulate)
+
+- Add fixed, log-only refusal reasons to distinguish invalid requests, including
+  agent and console mismatches. Refusal messages and statement bytes remain
+  private, and caller replies are unchanged.
+
 ## 0.18.3 (ck-cingulate)
 
 - Install a log subscriber at start, writing INFO and above to stderr, which the

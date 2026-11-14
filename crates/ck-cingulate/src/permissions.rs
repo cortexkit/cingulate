@@ -199,7 +199,7 @@ impl Handler {
             ));
         }
         if !params.is_object() {
-            return Err(invalid("permissions params must be an object"));
+            return Err(invalid("permissions params must be an object").reason("param_type"));
         }
         let agent_id = if method == "permissions.list_all" {
             optional_text(params, "agent_id")?

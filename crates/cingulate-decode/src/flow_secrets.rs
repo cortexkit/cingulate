@@ -49,6 +49,7 @@ fn invalid() -> Refusal {
         "elicitation_invalid_flow_secrets",
         "invalid flow secret statements",
     )
+    .reason("statement_invalid")
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,7 +123,8 @@ impl FlowInstallSecrets {
             serde_json::from_value(identity.clone()).map_err(|_| invalid_identity())?;
         identity.validate()?;
         let approvals = SecretUse {
-            items: serde_json::from_value(secrets.clone()).map_err(|_| invalid())?,
+            items: serde_json::from_value(secrets.clone())
+                .map_err(|_| invalid().reason("request_shape"))?,
         };
         let result = Self {
             identity,
@@ -134,7 +136,7 @@ impl FlowInstallSecrets {
 
     fn expiries(&self) -> Result<Vec<i64>, Refusal> {
         if !(1..=16).contains(&self.approvals.items.len()) {
-            return Err(invalid());
+            return Err(invalid().reason("request_shape"));
         }
         let mut seen = HashSet::new();
         // The asking computer of the first statement; every later statement
@@ -227,9 +229,10 @@ impl FlowInstallSecrets {
                                 || !m.bytes().all(|b| b.is_ascii_uppercase())
                         })
                 }) {
-                    return Err(invalid());
+                    return Err(invalid().reason("methods_invalid"));
                 }
-                i64::try_from(statement.request_expires_at_ms).map_err(|_| invalid())
+                i64::try_from(statement.request_expires_at_ms)
+                    .map_err(|_| invalid().reason("expiry_invalid"))
             })
             .collect()
     }

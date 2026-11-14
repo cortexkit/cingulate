@@ -14,7 +14,11 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 const DURATIONS: [&str; 4] = ["once", "hour", "session", "permanent"];
 
 fn invalid() -> Refusal {
-    Refusal::invalid("invalid secret approval statement or envelope")
+    Refusal::invalid("invalid secret approval statement or envelope").reason("statement_invalid")
+}
+
+fn invalid_envelope() -> Refusal {
+    invalid().reason("envelope_invalid")
 }
 
 pub(super) fn ulid(value: &str) -> bool {
@@ -300,7 +304,8 @@ impl SecretUse {
         let (duration, allowed, hash) = match (choice, encoded) {
             ("decline", None) => (None, HashSet::new(), None),
             ("allow", Some(encoded)) => {
-                let (envelope, bytes): (Envelope, _) = canonical(encoded)?;
+                let (envelope, bytes): (Envelope, _) =
+                    canonical(encoded).map_err(|error| error.reason("envelope_invalid"))?;
                 if envelope.v != "ck-secret-use-envelope/v1"
                     || envelope.decision != "allow"
                     || device != Some(envelope.device_fingerprint.as_str())
@@ -311,7 +316,7 @@ impl SecretUse {
                             || envelope.duration != "version"
                             || envelope.grant_expires_at_ms != 0))
                 {
-                    return Err(invalid());
+                    return Err(invalid_envelope());
                 }
                 let mut allowed = HashSet::new();
                 for item in &envelope.items {
@@ -319,7 +324,7 @@ impl SecretUse {
                         .items
                         .iter()
                         .position(|s| s.request_id == item.request_id)
-                        .ok_or_else(invalid)?;
+                        .ok_or_else(invalid_envelope)?;
                     let bytes = URL_SAFE_NO_PAD
                         .decode(&self.items[index].statement_b64url)
                         .map_err(|_| invalid())?;
@@ -327,7 +332,7 @@ impl SecretUse {
                         || item.statement_sha256 != format!("{:x}", Sha256::digest(bytes))
                         || !durations[index].contains(&envelope.duration)
                     {
-                        return Err(invalid());
+                        return Err(invalid_envelope());
                     }
                 }
                 let _ = (envelope.grant_expires_at_ms, envelope.issued_at_ms);
@@ -337,7 +342,7 @@ impl SecretUse {
                     Some(format!("{:x}", Sha256::digest(bytes))),
                 )
             }
-            _ => return Err(invalid()),
+            _ => return Err(invalid_envelope()),
         };
         Ok(SecretUseAnswer {
             decision: choice.into(),
@@ -367,7 +372,7 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
         kind: String,
         secret_use: SecretUse,
     }
-    let filing: Filing = serde_json::from_value(body).map_err(|_| invalid())?;
+    let filing: Filing = serde_json::from_value(body).map_err(|_| invalid_envelope())?;
     Ok(json!({
         "kind": filing.kind, "secret_use": filing.secret_use,
         "title": "Secret use approval", "prompt": "Review the vault's requested access.",

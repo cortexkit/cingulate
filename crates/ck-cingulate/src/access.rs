@@ -436,7 +436,11 @@ impl Handler {
                             let note = params
                                 .get("note")
                                 .filter(|v| !v.is_null())
-                                .map(|v| v.as_str().ok_or_else(|| invalid("note must be a string")))
+                                .map(|v| {
+                                    v.as_str().ok_or_else(|| {
+                                        invalid("note must be a string").reason("param_type")
+                                    })
+                                })
                                 .transpose()?
                                 .map(str::to_owned);
                             if let Some(note) = &note {
@@ -444,14 +448,14 @@ impl Handler {
                             }
                             let by = if surface == "head" {
                                 let by: RelayIdentity = serde_json::from_value(
-                                    params
-                                        .get("answered_by")
-                                        .cloned()
-                                        .ok_or_else(|| invalid("answered_by is required"))?,
+                                    params.get("answered_by").cloned().ok_or_else(|| {
+                                        invalid("answered_by is required").reason("param_type")
+                                    })?,
                                 )
-                                .map_err(|e| invalid(e.to_string()))?;
+                                .map_err(|e| invalid(e.to_string()).reason("param_type"))?;
                                 if by.agent_id.trim().is_empty() {
-                                    return Err(invalid("answered_by.agent_id must be nonblank"));
+                                    return Err(invalid("answered_by.agent_id must be nonblank")
+                                        .reason("param_type"));
                                 }
                                 Some(ScopeIdentity {
                                     scope_ref: by.scope_ref,
@@ -588,7 +592,8 @@ impl Handler {
                     _ => Err(Refusal::new(
                         "elicitation_invalid_request",
                         "operation is not supported for permission asks",
-                    )),
+                    )
+                    .reason("operation_unsupported")),
                 }
             }
             .await,
