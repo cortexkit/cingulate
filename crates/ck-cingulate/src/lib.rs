@@ -527,6 +527,67 @@ pub struct Handler {
 }
 type Reply = Result<Value, Refusal>;
 
+fn refusal_outcome(stamp: &Stamp, body: &[u8], error: Refusal) -> HandlerOutcome {
+    let request: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let method = request
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let params = &request["params"];
+    let kind = (method == "consent.request")
+        .then(|| params.get("kind").and_then(Value::as_str))
+        .flatten();
+    let request_ids: Vec<&str> = if kind == Some("secret_use") {
+        params["secret_use"]["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.get("request_id").and_then(Value::as_str))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let elicitation_id = if matches!(
+        method,
+        "consent.get"
+            | "consent.answer"
+            | "consent.await"
+            | "consent.withdraw"
+            | "consent.detach"
+            | "consent.report_execution"
+    ) {
+        params
+            .get("elicitation_id")
+            .or_else(|| params.get("elicitationId"))
+            .and_then(Value::as_str)
+    } else {
+        None
+    };
+    let scope_kind = stamp
+        .scope
+        .as_ref()
+        .map(|scope| serde_json::to_value(scope.kind).expect("scope kind serialization"));
+    // Never log refusal messages, statement bytes or fields other than request_id,
+    // answers, option text, or anything from the stored card's record_json column:
+    // these can contain caller data.
+    tracing::info!(
+        method = ?method,
+        code = error.code,
+        principal = ?stamp.label(),
+        kind = ?kind,
+        scope_kind = ?scope_kind.as_ref().and_then(|kind| kind.as_str()),
+        scope_ref = ?stamp.scope.as_ref().map(|scope| &scope.scope_ref),
+        scope_epoch = ?stamp.scope.as_ref().map(|scope| scope.scope_epoch),
+        request_id = ?request_ids,
+        elicitation_id = ?elicitation_id,
+        "request refused"
+    );
+    HandlerOutcome::Error {
+        code: error.code.into(),
+        message: error.message,
+    }
+}
+
 fn invalid(message: impl Into<String>) -> Refusal {
     Refusal::new("elicitation_invalid_request", message)
 }
@@ -1070,10 +1131,14 @@ impl Handler {
     /// In-process envelope entry point, also used by the production adapter.
     pub async fn handle_stamped(&self, stamp: &Stamp, body: &[u8]) -> HandlerOutcome {
         if body.len() > 1_310_720 {
-            return HandlerOutcome::Error {
-                code: "elicitation_request_too_large".into(),
-                message: "consent envelope exceeds 1310720 bytes".into(),
-            };
+            return refusal_outcome(
+                stamp,
+                body,
+                Refusal::new(
+                    "elicitation_request_too_large",
+                    "consent envelope exceeds 1310720 bytes",
+                ),
+            );
         }
         #[derive(Deserialize)]
         struct WireRequest {
@@ -1089,10 +1154,7 @@ impl Handler {
             Ok(reply) => HandlerOutcome::Response(
                 serde_json::to_vec(&json!({"result":reply})).expect("wire serialization"),
             ),
-            Err(error) => HandlerOutcome::Error {
-                code: error.code.into(),
-                message: error.message,
-            },
+            Err(error) => refusal_outcome(stamp, body, error),
         }
     }
 
@@ -1652,7 +1714,7 @@ impl ModuleHandler for Handler {
         }
         tokio::select! {
             result = self.handle_stamped(&stamp, &body) => result,
-            _ = ctx.cancelled() => HandlerOutcome::Error { code: "cancelled".into(), message: "request cancelled".into() },
+            _ = ctx.cancelled() => refusal_outcome(&stamp, &body, Refusal::new("cancelled", "request cancelled")),
         }
     }
     async fn on_hello_ack(&self, ack: &ModuleHelloAckBody) {
@@ -1684,6 +1746,139 @@ impl ModuleHandler for Handler {
 mod tests {
     use super::*;
     use subc_protocol::{BindIdentity, RouteTarget};
+
+    #[derive(Clone)]
+    struct LogBuffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct UnusedSink;
+
+    #[async_trait]
+    impl pending_watch::WatchSink for UnusedSink {
+        async fn emit(&self, _: Vec<u8>) -> Result<(), String> {
+            panic!("refused watches must not emit")
+        }
+
+        async fn ended(&self) {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn refusals_log_safe_context_once_and_successes_do_not() {
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let buffer = LogBuffer(bytes.clone());
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || buffer.clone())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let handler = Handler::new(Options {
+            sweep_timer: false,
+            ..Options::default()
+        });
+        let stamp = Stamp {
+            principal: Some("reserved:aft".into()),
+            scope: Some(
+                serde_json::from_value(json!({
+                    "owner":{"kind":"reserved","module_id":"prefrontal-core"},
+                    "ref":"head:alf", "scope_epoch":7, "kind":"head",
+                    "attributes":{}, "owner_authorized":true
+                }))
+                .unwrap(),
+            ),
+            ..Stamp::default()
+        };
+        let request = json!({"method":"consent.request", "params":{
+            "kind":"secret_use", "secret_use":{"items":[
+                {"request_id":"vault-123", "statement_b64url":"SENTINEL_PRIVATE"},
+                {"request_id":"vault-456", "statement_b64url":"SENTINEL_PRIVATE"}
+            ]}, "record_json":"SENTINEL_PRIVATE"
+        }});
+        let result = handler
+            .handle_stamped(&stamp, &serde_json::to_vec(&request).unwrap())
+            .await;
+        assert!(
+            matches!(result, HandlerOutcome::Error { ref code, .. } if code == "consent_unavailable")
+        );
+        let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+        assert_eq!(log.lines().count(), 1, "{log}");
+        for field in [
+            "INFO",
+            "consent.request",
+            "consent_unavailable",
+            "reserved:aft",
+            "secret_use",
+            "head",
+            "head:alf",
+            "7",
+            "vault-123",
+            "vault-456",
+        ] {
+            assert!(log.contains(field), "missing {field} in {log}");
+        }
+        assert!(!log.contains("SENTINEL_PRIVATE"));
+
+        bytes.lock().unwrap().clear();
+        let body = br#"{"method":"consent.answer","params":{"elicitationId":"el-123","choiceId":"SENTINEL_PRIVATE"}}"#;
+        let result = handler.handle_stamped(&stamp, body).await;
+        assert!(matches!(result, HandlerOutcome::Error { .. }));
+        let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+        assert_eq!(log.lines().count(), 1, "{log}");
+        assert!(log.contains("el-123"));
+        assert!(!log.contains("SENTINEL_PRIVATE"));
+
+        bytes.lock().unwrap().clear();
+        let _ = refusal_outcome(
+            &stamp,
+            br#"{"method":"consent.get"}"#,
+            Refusal::new("test_code", "SENTINEL_PRIVATE"),
+        );
+        let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+        assert_eq!(log.lines().count(), 1, "{log}");
+        assert!(!log.contains("SENTINEL_PRIVATE"));
+
+        bytes.lock().unwrap().clear();
+        for (method, code) in [
+            ("consent.watch_pending", "consent_unavailable"),
+            ("presence.watch", "presence_read_not_allowed"),
+        ] {
+            let body = serde_json::to_vec(&json!({"method":method})).unwrap();
+            let result = if method == "consent.watch_pending" {
+                handler
+                    .handle_watch_stamped(&stamp, &body, &UnusedSink)
+                    .await
+            } else {
+                handler
+                    .handle_presence_watch_stamped(&stamp, &body, &UnusedSink)
+                    .await
+            };
+            assert!(
+                matches!(result, HandlerOutcome::Error { code: ref actual, .. } if actual == code)
+            );
+            let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+            assert_eq!(log.lines().count(), 1, "{log}");
+            assert!(log.contains(method) && log.contains(code), "{log}");
+            bytes.lock().unwrap().clear();
+        }
+
+        let result = handler
+            .handle_stamped(&stamp, br#"{"method":"health.check"}"#)
+            .await;
+        assert!(matches!(result, HandlerOutcome::Response(_)));
+        assert!(bytes.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn every_admitted_requester_has_its_phone_display_name() {

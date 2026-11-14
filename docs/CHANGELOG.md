@@ -7,6 +7,12 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.18.2 (ck-cingulate)
+
+- Log one line per refusal: method, refusal code, the caller's daemon-stamped
+  principal and scope, the elicitation kind and id, and vault request ids.
+  Request content and refusal messages are never logged.
+
 ## 0.18.1 (ck-cingulate)
 
 - Accept worker secret-use statements naming the agent in the daemon's

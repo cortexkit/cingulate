@@ -139,10 +139,7 @@ impl Handler {
     ) -> HandlerOutcome {
         match self.watch(stamp, body, sink).await {
             Ok(()) => HandlerOutcome::Streamed,
-            Err(error) => HandlerOutcome::Error {
-                code: error.code.into(),
-                message: error.message,
-            },
+            Err(error) => crate::refusal_outcome(stamp, body, error),
         }
     }
 
