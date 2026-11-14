@@ -18,6 +18,8 @@
 - Add sequence-checked `consent.report_unverified` to reopen an unexpired card
   atomically, invalidate its old current answer and push it again. Preserve
   person lifecycle outbox history with round-aware uniqueness and delivery order.
+  Expose the same nonzero `round` in phone and requester records so a reopened
+  card supersedes a final copy of the same id; omit it on the initial round.
   Retain prior
   answer audit metadata; each new answer increments `answer_seq`.
 - Add reader-first phone/requester contracts and checksum-pinned, real-handler

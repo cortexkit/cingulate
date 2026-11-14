@@ -14,6 +14,8 @@ carry both unchanged, not parse or verify them. Callosum is the verifier.
 `person-notices-two-rounds.json` pins the four scope-less person notices for Core:
 escalated/settled with round omitted (zero), then escalated/settled with round 1.
 Core must key intake, push receipts and terminal checks by id, purpose and round.
+Reopened phone/requester records carry that same nonzero integer `round`; a
+higher round supersedes a final copy of the same id. Initial records omit it.
 
 The samples cover filing, pending list/get, an approval and requester get/await,
 unverified reopening, a second answer with sequence 2, decline, withdrawal,

@@ -55,6 +55,7 @@
       "prompt": "Review this computer's settings changes.",
       "requesterLabel": "reserved:callosum",
       "requesterName": "This computer's settings",
+      "round": 1,
       "scope": {},
       "state": "pending",
       "subject": {

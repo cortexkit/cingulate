@@ -822,13 +822,19 @@ in the audit. No old choice or signed bytes remain in the pending projection.
 The response is the current requester record; it and the phone projection add:
 
 ```json
-{"unverified":{"code":"signature","reported_at_ms":10000}}
+{"round":1,"unverified":{"code":"signature","reported_at_ms":10000}}
 ```
 
 The phone shows “The approval couldn't be verified. Nothing was changed.” A new
 answer clears `unverified`, receives `answer_seq: 2`, and is verified again by
 Callosum. A repeated report on an already pending card is refused. Awaiters and
 pending revisions are notified on reopening just as for a new pending card.
+Phone list/watch/get records and requester get/await records carry the same
+`round` as the current round's person notices: a JSON integer reopen count,
+omitted on the initial round and never emitted as 0. The value remains on that
+round's answered or otherwise settled record. A higher round supersedes a final
+copy of the same elicitation id and shows it as pending again; `answer_seq` is
+an answer-attempt counter, not a substitute for this record identity rule.
 Each reopened `config_plan` sends a fresh scope-less `escalated` person notice
 and phone pointer with `eventAtMs` equal to `reported_at_ms`, not the original
 creation time. Person lifecycle notices have an optional nonnegative integer

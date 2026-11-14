@@ -492,7 +492,7 @@ reopens. Its old choice, answer time/device and signed bytes disappear; its
 `answerSeq` remains 1 and its phone projection includes exactly:
 
 ```json
-{"unverified":{"code":"signature","reported_at_ms":10000}}
+{"round":1,"unverified":{"code":"signature","reported_at_ms":10000}}
 ```
 
 Possible codes are `time`, `plan`, `decision`, `signature`, `key`. Show **The
@@ -501,3 +501,11 @@ new signed answer within the remaining original lifetime. The next answer uses
 `answerSeq: 2` and clears `unverified`. Reopening bumps the pending revision and
 pushes the card again. Withdrawal and expiry retract it; no timeout or missing
 signature grants anything. Retained settled cards are readable for 24 hours.
+
+The card record in `consent.list_pending`, `consent.watch_pending` changed items
+and `consent.get` includes `round`, the JSON integer reopen count, with the same
+value as that round's person notices. It is absent on the initial round, never
+emitted as 0, and remains present after that round settles. A higher `round`
+supersedes a final copy of the same elicitation id and shows as pending again.
+Do not treat an id as permanently final across higher rounds. Requester
+get/await records carry the same `round`; it is not renamed to `noticeRound`.

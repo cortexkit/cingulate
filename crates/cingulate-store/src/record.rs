@@ -110,6 +110,9 @@ impl ElicitationRecord {
         object.remove("head");
         object.remove("late");
         object.remove("noticeRound");
+        if self.notice_round > 0 {
+            object.insert("round".into(), json!(self.notice_round));
+        }
         for (key, value) in serde_json::to_value(&self.request)
             .expect("request serialization")
             .as_object()

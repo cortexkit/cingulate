@@ -1,6 +1,12 @@
 #[path = "support/config_plan.rs"]
 mod config_plan;
+#[path = "support/phone.rs"]
+#[allow(dead_code)]
+mod phone;
 mod support;
+#[path = "support/watch_pending.rs"]
+#[allow(dead_code)]
+mod watch_pending;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use cingulate_decode::ConsentRequest;
@@ -583,6 +589,86 @@ async fn config_plan_decline_withdraw_expiry_and_retention() {
             "elicitation_not_found"
         );
     }
+}
+
+#[tokio::test]
+async fn config_plan_reopened_projections_expose_notice_round() {
+    fn assert_round(record: &Value, round: u64) {
+        if round == 0 {
+            assert!(record.get("round").is_none(), "{record}");
+        } else {
+            assert_eq!(record["round"].as_u64(), Some(round), "{record}");
+        }
+        assert!(record.get("noticeRound").is_none());
+        assert!(record.get("notice_round").is_none());
+    }
+
+    let f = support::Fixture::open(None).await;
+    let mut watch = watch_pending::Watch::open(
+        &f.handler,
+        &phone(),
+        json!({"clientFeatures":["config-plan"]}),
+    );
+    assert_eq!(watch.next_value().await, json!({"type":"reread"}));
+    let id = f.request(&filer(), body()).await;
+    for round in 0..=2 {
+        let item = watch.next_value().await;
+        assert_eq!(item["type"], "changed");
+        assert_eq!(item["card"]["elicitationId"], id);
+        assert_round(&item["card"], round);
+        let list = f
+            .ok(
+                &phone(),
+                "consent.list_pending",
+                json!({"clientFeatures":["config-plan"]}),
+            )
+            .await;
+        assert_round(&list["records"][0], round);
+        for state in ["pending", "answered"] {
+            let phone_record = f.ok(&phone(), "consent.get", get(&id)).await;
+            assert_eq!(phone_record["state"], state);
+            assert_round(&phone_record, round);
+            for method in ["consent.get", "consent.await"] {
+                let requester_record = f
+                    .ok(
+                        &filer(),
+                        method,
+                        json!({"elicitation_id":id,"timeout_ms":0}),
+                    )
+                    .await;
+                assert_eq!(requester_record["state"], state);
+                assert_round(&requester_record, round);
+            }
+            let notice_round: u64 = f.sql().query_row(
+                "SELECT round FROM access_notices WHERE elicitation_id=?1 ORDER BY rowid DESC LIMIT 1",
+                [&id], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(notice_round, round);
+            if state == "pending" {
+                let answer = f
+                    .ok(&phone(), "consent.answer", answer(&id, "approve"))
+                    .await;
+                assert_round(&answer["elicitation"], round);
+                let answered = watch.next_value().await;
+                assert_eq!(answered["type"], "changed");
+                assert_eq!(answered["card"]["state"], "answered");
+                assert_round(&answered["card"], round);
+            }
+        }
+        if round < 2 {
+            f.ok(
+                &filer(),
+                "consent.report_unverified",
+                json!({"elicitation_id":id,"answer_seq":round+1,"code":"signature"}),
+            )
+            .await;
+        }
+    }
+    watch.unsubscribe();
+    assert!(matches!(
+        watch.outcome().await,
+        subc_client_rs::HandlerOutcome::Streamed
+    ));
 }
 
 #[tokio::test]
