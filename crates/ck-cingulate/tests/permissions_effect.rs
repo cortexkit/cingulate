@@ -40,18 +40,22 @@ impl PermissionsRuntime for Provider {
         assert_eq!(module, "plexus");
         assert_eq!(method, "permissions.list");
         assert_eq!(params, json!({}));
-        Ok(json!({"grants":[self.0]}))
+        Ok(self.0.clone())
     }
 }
 
 async fn listing(row: Value, params: Value) -> Value {
+    listing_reply(json!({"grants":[row]}), params).await
+}
+
+async fn listing_reply(reply: Value, params: Value) -> Value {
     let scratch = tempfile::tempdir().unwrap();
     let handler = Handler::new(Options {
         data_home: scratch.path().to_str().unwrap().into(),
         sweep_timer: false,
         ..Options::default()
     });
-    handler.set_permissions_runtime(Arc::new(Provider(row)));
+    handler.set_permissions_runtime(Arc::new(Provider(reply)));
     let stamp = Stamp::from_principal(Some(&Principal::Direct));
     let request =
         serde_json::to_vec(&json!({"method":"permissions.list_all","params":params})).unwrap();
@@ -61,6 +65,26 @@ async fn listing(row: Value, params: Value) -> Value {
         }
         other => panic!("unexpected permissions reply: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn permissions_list_all_relays_federated_deny_provider_vector() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test-vectors/permissions-v1/provider-list-federated-deny.json");
+    let vector: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(vector["method"], "permissions.list");
+    let reply = vector["reply"].clone();
+    let grants = reply["grants"].as_array().unwrap();
+    assert!(grants
+        .iter()
+        .any(|row| row["holder"]["kind"] == "federated" && row["effect"] == "deny"));
+
+    let result = listing_reply(reply.clone(), json!({})).await;
+    let modules = result["modules"].as_array().unwrap();
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0]["module"], "plexus");
+    assert_eq!(modules[0]["status"], "ok");
+    assert_eq!(modules[0]["grants"], reply["grants"]);
 }
 
 #[tokio::test]
