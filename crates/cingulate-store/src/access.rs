@@ -350,6 +350,7 @@ pub struct Notice {
     /// order that pinned wire formats specify; `body` is the same JSON parsed.
     pub body_json: String,
     pub attempts: i64,
+    pub round: u64,
 }
 
 fn load(conn: &Connection, id: &str) -> Result<Option<AccessRecord>> {
@@ -575,13 +576,13 @@ impl ConsentStore {
 
 impl ConsentStore {
     pub fn access_notice_pending(&self, notice: &Notice) -> Result<bool> {
-        self.read(|conn| Ok(conn.query_row("SELECT status='pending' FROM access_notices WHERE elicitation_id=?1 AND purpose=?2", params![notice.elicitation_id,notice.purpose], |r| r.get(0)).optional()?.unwrap_or(false)))
+        self.read(|conn| Ok(conn.query_row("SELECT status='pending' FROM access_notices WHERE elicitation_id=?1 AND purpose=?2 AND round=?3", params![notice.elicitation_id,notice.purpose,notice.round], |r| r.get(0)).optional()?.unwrap_or(false)))
     }
     pub fn access_notices(&self, now: i64) -> Result<Vec<Notice>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare("SELECT elicitation_id,purpose,body_json,attempts FROM access_notices WHERE status='pending' AND retry_at_ms<=?1 ORDER BY rowid")?;
-            let rows = stmt.query_map([now], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
-            rows.into_iter().map(|(elicitation_id,purpose,raw,attempts)| Ok(Notice { elicitation_id,purpose,body:serde_json::from_str(&raw)?,body_json:raw,attempts })).collect()
+            let mut stmt = conn.prepare("SELECT elicitation_id,purpose,body_json,attempts,round FROM access_notices AS current WHERE status='pending' AND retry_at_ms<=?1 AND NOT EXISTS (SELECT 1 FROM access_notices AS earlier WHERE earlier.elicitation_id=current.elicitation_id AND earlier.round<current.round AND earlier.status='pending') ORDER BY rowid")?;
+            let rows = stmt.query_map([now], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, u64>(4)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            rows.into_iter().map(|(elicitation_id,purpose,raw,attempts,round)| Ok(Notice { elicitation_id,purpose,body:serde_json::from_str(&raw)?,body_json:raw,attempts,round })).collect()
         })
     }
     /// Persist delivery results independently of the ask. A definitive refusal
@@ -600,7 +601,7 @@ impl ConsentStore {
             let missing = matches!(result, "unknown_session" | "session_not_live");
             let status = if retry { "pending" } else if result == "ok" { "delivered" } else if missing && matches!(notice.purpose.as_str(), "settled" | crate::LATE_ANSWER_PURPOSE) { "unclaimed" } else { "refused" };
             let backoff = crate::maintenance_backoff_ms(notice.attempts.clamp(0, 8) as u32);
-            tx.execute("UPDATE access_notices SET status=?3,attempts=attempts+1,retry_at_ms=?4,last_error=?5 WHERE elicitation_id=?1 AND purpose=?2 AND status='pending'", params![notice.elicitation_id,notice.purpose,status,now.saturating_add(backoff),if result == "ok" { None } else { Some(result) }])?;
+            tx.execute("UPDATE access_notices SET status=?3,attempts=attempts+1,retry_at_ms=?4,last_error=?5 WHERE elicitation_id=?1 AND purpose=?2 AND status='pending' AND round=?6", params![notice.elicitation_id,notice.purpose,status,now.saturating_add(backoff),if result == "ok" { None } else { Some(result) }, notice.round])?;
             let Some(mut record) = load(tx, &notice.elicitation_id)? else { return Ok(None); };
             if missing && notice.purpose == "head_ask" && record.state == "pending:head" {
                 settle(tx, &mut record, "access_head_gone", now)?;

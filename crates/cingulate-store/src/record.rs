@@ -64,6 +64,16 @@ pub struct ElicitationRecord {
     pub secret_use_answer: Option<cingulate_decode::SecretUseAnswer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_binding_answer: Option<cingulate_decode::ManifestBindingAnswer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_b64url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unverified: Option<Value>,
+    #[serde(default, skip_serializing_if = "zero")]
+    pub notice_round: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,6 +109,7 @@ impl ElicitationRecord {
         object.remove("asker");
         object.remove("head");
         object.remove("late");
+        object.remove("noticeRound");
         for (key, value) in serde_json::to_value(&self.request)
             .expect("request serialization")
             .as_object()
@@ -242,6 +253,10 @@ fn camel(key: &str) -> String {
         }
     }
     result
+}
+
+fn zero(value: &u64) -> bool {
+    *value == 0
 }
 
 fn snake_object(value: Value) -> Value {

@@ -741,3 +741,108 @@ unchanged. Cingulate does not render statement `use` content into card text or
 labels; it relays all statement bytes unchanged to the phone, which renders the
 complete scope. The [pinned vault samples](../../test-vectors/secret-statements-v3/README.md)
 cover canonical multi-rule and wildcard scopes and multiple origins.
+
+## Config-plan requester (0.19.0)
+
+**Readers first.** Callosum checks `catalog.list` for `consent-config-plan/v1`
+and CKIOS reads the [handler-generated samples](../../test-vectors/config-plan-v1/README.md)
+before any card is sent. Only the full daemon-attested principal
+`reserved:callosum` may file, get, await, withdraw or report on `config_plan`.
+Every other principal is refused `elicitation_requester_refused`. Callosum may
+file no other kind. No carried agent or session scope is required. Ownership is
+Callosum's principal, not its transport session or scope. Federated requester
+scopes cannot file these cards. The daemon is the subject: **This computer's
+settings**. Even if the filing route has a scope, the card has no agent, asker or
+`head` attribution field (the asking worker's parent session), and produces no
+agent/session notices. Scope-less person-facing escalated,
+settled and withdrawn notices still drive phone pushes/retractions, as on other
+cards. Notification metadata never includes change values or signed bytes.
+
+`consent.request` params are closed, including the typed plan and each change
+row. Unknown keys refuse `elicitation_invalid_request`. Example:
+
+```json
+{"kind":"config_plan","expires_in_ms":300000,"binding":{"correlation":"fake-correlation"},"config_plan":{"plan_digest":"fake-plan-digest","base_revision":"42","changes":[{"module_id":"example-module","project_id":"example-project","path":"settings.enabled","old":false,"new":true,"old_source":"default","new_source":"project","apply":"live"}],"other_sections":{"policy_changes":{"example":true}}}}
+```
+
+| Field | Rule |
+|---|---|
+| `expires_in_ms` | Required integer, 1–300,000. No omitted/null or longer lifetime. |
+| `binding` | Required opaque JSON object, at most 4,096 serialized UTF-8 bytes. Returned only to the requester, never the phone. |
+| `dedup_key` | Optional, with the existing pending-card dedup/refresh behavior. |
+| `config_plan.plan_digest` | String, 1–128 UTF-8 bytes. |
+| `config_plan.base_revision` | Nonempty decimal string (ASCII digits only). Not a JSON number. |
+| `config_plan.changes` | 1–64 closed rows. |
+| row `module_id`, optional `project_id` | Strings, 1–128 UTF-8 bytes each. A present project id cannot be null. |
+| row `path` | String, 1–1,024 UTF-8 bytes. |
+| row `old`, `new` | Required recorded JSON values, including null; at most 4,096 serialized UTF-8 bytes each. |
+| row `old_source`, `new_source`, `apply` | Strings, 1–64 UTF-8 bytes each. `apply` is open; known values are `live`, `module_restart`, `daemon_restart`, `next_supervision`, `route_rebind`. Unknown values are preserved. |
+| `config_plan.other_sections` | Optional object of section name to raw JSON, at most 16,384 serialized UTF-8 bytes in total. Present null is invalid. The phone displays unknown sections raw. |
+
+The existing 1,310,720-byte frame bound remains. Cingulate fixes the card presentation and
+options: `approve` (effect `choose`) and `decline` (effect `decline`, default),
+with `on_expiry: "deny"`. Silence, timeout, expiry and errors never approve.
+Success is `{"elicitation_id":"el_1"}`. Use owned `consent.get
+{elicitation_id}` or `consent.await {elicitation_id,timeout_ms}` (0–120,000 ms)
+to read the snake_case record. Pending records start at `answer_seq: 0`.
+Each new accepted answer increments `answer_seq`; identical retries of the same
+settled choice and signed bytes do not increment it. Conflicting retries never
+replace an answer. After an approval, reads include these fields unchanged:
+
+```json
+{"answer_seq":1,"answered_choice_id":"approve","statement":"_wABeCBub3QtSlNPTgo","signature_b64url":"AQIDBA"}
+```
+
+This is a record excerpt; full get/await replies are in the
+[handler-generated samples](../../test-vectors/config-plan-v1/README.md).
+`statement` is unpadded base64url of at most 4,096 decoded bytes;
+`signature_b64url` is unpadded base64url of at most 1,024 decoded bytes. Present
+empty, malformed, padded, noncanonical trailing-bit or overlong encodings are
+refused `elicitation_invalid_request`. Approve requires both; decline may carry
+either or neither. Cingulate stores and returns the exact strings byte for byte;
+it checks only encoding and size, never parses the statement, canonicalizes its
+content, checks its decision or verifies its signature. **Only Callosum verifies.**
+
+### `consent.report_unverified`
+
+Callosum reports an answer that failed verification:
+
+```json
+{"elicitation_id":"el_1","answer_seq":1,"code":"signature"}
+```
+
+Params are closed; `code` is exactly `time`, `plan`, `decision`, `signature` or
+`key`. The card must be answered and still within its original expiry. A stale
+or nonexistent `answer_seq` refuses `elicitation_invalid_request`, naming
+`answer_seq`; an expired card refuses `elicitation_expired`. Wrong kind or
+principal refuses `elicitation_requester_refused`. A valid report atomically
+returns the card to pending for its remaining lifetime, removes the old current
+answer/feed row, advances the person-notice round and preserves prior answer metadata
+in the audit. No old choice or signed bytes remain in the pending projection.
+The response is the current requester record; it and the phone projection add:
+
+```json
+{"unverified":{"code":"signature","reported_at_ms":10000}}
+```
+
+The phone shows “The approval couldn't be verified. Nothing was changed.” A new
+answer clears `unverified`, receives `answer_seq: 2`, and is verified again by
+Callosum. A repeated report on an already pending card is refused. Awaiters and
+pending revisions are notified on reopening just as for a new pending card.
+Each reopened `config_plan` sends a fresh scope-less `escalated` person notice
+and phone pointer with `eventAtMs` equal to `reported_at_ms`, not the original
+creation time. Person lifecycle notices have an optional nonnegative integer
+`round`: the number of times the card has reopened. Round zero is omitted, so
+existing notices and the initial round remain byte-identical. The outbox and
+Core's intake, phone-push receipts and settled/withdrawn checks key each notice
+by `(elicitation_id, purpose, round)`, interpreting an omitted round as zero.
+Earlier rounds remain as outbox history. Each round queues its own `settled`
+notice when the phone answers; that notice is delivered before the next round's
+`escalated`, including across delivery retry backoff. The exact four-notice
+sequence is in `person-notices-two-rounds.json` in the served samples. Core must
+ship round-aware intake and phone-push handling before reopening is deployed.
+`consent.withdraw` and the expiry sweep retract pending cards normally. No
+execution report, detach, ack or answer-feed operation is admitted to Callosum.
+Payloads are pruned 24 hours after settlement, as for manifest bindings. The audit
+retains choice, sequence, answer time, statement SHA-256 and decoded length, and
+unverified code/time, never statement or signature bytes.

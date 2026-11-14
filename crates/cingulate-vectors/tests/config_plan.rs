@@ -1,0 +1,612 @@
+#[path = "support/config_plan.rs"]
+mod config_plan;
+mod support;
+
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use cingulate_decode::ConsentRequest;
+use config_plan::*;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+
+fn invalid(body: Value, field: &str) {
+    let e = ConsentRequest::decode(body).unwrap_err();
+    assert_eq!(e.code, "elicitation_invalid_request");
+    assert!(
+        e.message.contains(field) || e.message.starts_with("config_plan filing:"),
+        "{e}"
+    );
+}
+
+#[test]
+fn config_plan_closed_shapes_and_required_fields() {
+    for pointer in ["", "/config_plan", "/config_plan/changes/0"] {
+        let mut b = body();
+        b.pointer_mut(pointer).unwrap()["unexpected"] = json!(true);
+        invalid(b, "unexpected");
+    }
+    for pointer in ["", "/config_plan", "/config_plan/changes/0"] {
+        let original = body();
+        for field in original
+            .pointer(pointer)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+        {
+            if ["dedup_key", "other_sections", "project_id"].contains(&field.as_str()) {
+                continue;
+            }
+            let mut b = original.clone();
+            b.pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            if field == "kind" {
+                assert!(ConsentRequest::decode(b).is_err());
+            } else {
+                invalid(b, field);
+            }
+        }
+    }
+}
+
+#[test]
+fn config_plan_lifetime_binding_and_row_count_bounds() {
+    for value in [json!(0), json!(300001), Value::Null, json!("1")] {
+        let mut b = body();
+        b["expires_in_ms"] = value;
+        invalid(b, "expires_in_ms");
+    }
+    for value in [Value::Null, json!([]), json!({"x":"x".repeat(4096)})] {
+        let mut b = body();
+        b["binding"] = value;
+        invalid(b, "binding");
+    }
+    for n in [0, 65] {
+        let mut b = body();
+        b["config_plan"]["changes"] = json!(vec![body()["config_plan"]["changes"][0].clone(); n]);
+        invalid(b, "changes");
+    }
+}
+
+#[test]
+fn config_plan_text_and_json_bounds() {
+    for (path, max) in [
+        ("/config_plan/plan_digest", 128),
+        ("/config_plan/changes/0/module_id", 128),
+        ("/config_plan/changes/0/project_id", 128),
+        ("/config_plan/changes/0/path", 1024),
+        ("/config_plan/changes/0/old_source", 64),
+        ("/config_plan/changes/0/new_source", 64),
+        ("/config_plan/changes/0/apply", 64),
+    ] {
+        for value in [String::new(), "x".repeat(max + 1)] {
+            let mut b = body();
+            *b.pointer_mut(path).unwrap() = json!(value);
+            invalid(b, path.rsplit('/').next().unwrap());
+        }
+        let mut b = body();
+        *b.pointer_mut(path).unwrap() = json!("x".repeat(max));
+        ConsentRequest::decode(b).unwrap();
+    }
+    for revision in ["", "-1", "1.0", " 1", "a"] {
+        let mut b = body();
+        b["config_plan"]["base_revision"] = json!(revision);
+        invalid(b, "base_revision");
+    }
+    for field in ["old", "new"] {
+        let mut b = body();
+        b["config_plan"]["changes"][0][field] = json!("x".repeat(4095));
+        invalid(b, field);
+        let mut b = body();
+        b["config_plan"]["changes"][0][field] = Value::Null;
+        ConsentRequest::decode(b).unwrap();
+    }
+    let mut b = body();
+    b["config_plan"]["other_sections"] = json!({"x":"x".repeat(16384)});
+    invalid(b, "other_sections");
+    let mut b = body();
+    b["config_plan"]["other_sections"] = json!([]);
+    invalid(b, "other_sections");
+    let mut b = body();
+    b["config_plan"]["other_sections"] = Value::Null;
+    invalid(b, "other_sections");
+    let mut b = body();
+    b["config_plan"]["changes"][0]["project_id"] = Value::Null;
+    invalid(b, "project_id");
+    let mut b = body();
+    b["config_plan"]["changes"][0]["apply"] = json!("future_apply_mode");
+    ConsentRequest::decode(b).unwrap();
+}
+
+#[tokio::test]
+async fn config_plan_requester_admission_and_scope_independence() {
+    let f = support::Fixture::open(None).await;
+    for principal in [
+        "direct",
+        "callosum",
+        "reserved:plexus",
+        "reserved:aft",
+        "reserved:prefrontal-core",
+        "enrolled:callosum",
+    ] {
+        assert_eq!(
+            f.call(&support::stamp(principal), "consent.request", body())
+                .await
+                .unwrap_err()["code"],
+            "elicitation_requester_refused"
+        );
+    }
+    for kind in [
+        "consent",
+        "manifest_binding",
+        "secret_use",
+        "flow_install",
+        "package",
+        "tool_permission",
+    ] {
+        assert_eq!(
+            f.call(&filer(), "consent.request", json!({"kind":kind}))
+                .await
+                .unwrap_err()["code"],
+            "elicitation_requester_refused"
+        );
+    }
+    let mut scoped = support::worker::stamp("callosum", subc_protocol::scope::ScopeKind::Head);
+    scoped.bind_session = "other-session".into();
+    scoped.carried_agent_id = "not-the-subject".into();
+    let id = f.request(&scoped, body()).await;
+    let r = f
+        .ok(&filer(), "consent.get", json!({"elicitation_id":id}))
+        .await;
+    assert_eq!(r["subject"], json!({"label":"This computer's settings"}));
+    assert!(f.stored_record(&id).asker.is_none());
+    assert!(f.stored_record(&id).head.is_none());
+    let notice: String = f
+        .sql()
+        .query_row(
+            "SELECT body_json FROM access_notices WHERE elicitation_id=?1 AND purpose='escalated'",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let notice: Value = serde_json::from_str(&notice).unwrap();
+    assert!(notice.get("asker").is_none());
+    assert!(notice.get("head").is_none());
+    assert_eq!(notice["fields"]["card_kind"], "config_plan");
+    for method in [
+        "consent.get",
+        "consent.await",
+        "consent.withdraw",
+        "consent.report_unverified",
+    ] {
+        let e = f
+            .call(
+                &support::stamp("reserved:plexus"),
+                method,
+                json!({"elicitation_id":id,"timeout_ms":0,"answer_seq":1,"code":"key"}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(e["code"], "elicitation_requester_refused");
+    }
+    for method in [
+        "consent.detach",
+        "consent.report_execution",
+        "consent.answers",
+        "consent.ack",
+    ] {
+        assert_eq!(
+            f.call(&filer(), method, json!({"elicitation_id":id}))
+                .await
+                .unwrap_err()["code"],
+            "elicitation_requester_refused"
+        );
+    }
+}
+
+#[tokio::test]
+async fn config_plan_phone_opt_in_and_binding_privacy() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    let list = f.ok(&phone(), "consent.list_pending", json!({})).await;
+    assert_eq!(list["records"], json!([]));
+    assert_eq!(
+        f.call(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await
+            .unwrap_err()["code"],
+        "elicitation_not_found"
+    );
+    let mut p = answer(&id, "approve");
+    p["clientFeatures"] = json!([]);
+    assert_eq!(
+        f.call(&phone(), "consent.answer", p).await.unwrap_err()["code"],
+        "elicitation_config_plan_required"
+    );
+    let mut impostor = phone();
+    impostor.harness = "fed-sim:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into();
+    assert_eq!(
+        f.call(&impostor, "consent.answer", answer(&id, "decline"))
+            .await
+            .unwrap_err()["code"],
+        "elicitation_config_plan_required"
+    );
+    let p = f.ok(&phone(), "consent.get", get(&id)).await;
+    assert!(p.get("binding").is_none());
+    assert_eq!(p["requesterName"], "This computer's settings");
+    let p = f
+        .ok(
+            &phone(),
+            "consent.list_pending",
+            json!({"clientFeatures":["config-plan"]}),
+        )
+        .await;
+    assert!(p["records"][0].get("binding").is_none());
+}
+
+#[tokio::test]
+async fn config_plan_approve_requires_both_signed_fields() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    for field in ["statement", "signature_b64url"] {
+        let mut p = answer(&id, "approve");
+        p.as_object_mut().unwrap().remove(field);
+        assert_eq!(
+            f.call(&phone(), "consent.answer", p).await.unwrap_err()["code"],
+            "elicitation_invalid_request"
+        );
+    }
+    assert_eq!(f.stored_record(&id).answer_seq, Some(0));
+}
+
+#[tokio::test]
+async fn config_plan_answer_encoding_size_and_choice_refusals() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    for field in ["statement", "signature_b64url"] {
+        for value in [
+            json!(""),
+            json!("AB"),
+            json!("AA=="),
+            json!("!"),
+            json!("A".repeat(6000)),
+            Value::Null,
+            json!(3),
+        ] {
+            let mut p = answer(&id, "approve");
+            p[field] = value;
+            assert_eq!(
+                f.call(&phone(), "consent.answer", p).await.unwrap_err()["code"],
+                "elicitation_invalid_request"
+            );
+        }
+        let max = if field == "statement" { 4096 } else { 1024 };
+        let mut p = answer(&id, "approve");
+        p[field] = json!(URL_SAFE_NO_PAD.encode(vec![0; max + 1]));
+        assert_eq!(
+            f.call(&phone(), "consent.answer", p).await.unwrap_err()["code"],
+            "elicitation_invalid_request"
+        );
+    }
+    let mut p = answer(&id, "approve");
+    p["envelope_b64url"] = json!("AA");
+    assert_eq!(
+        f.call(&phone(), "consent.answer", p).await.unwrap_err()["code"],
+        "elicitation_invalid_request"
+    );
+    assert_eq!(
+        f.call(&phone(), "consent.answer", answer(&id, "allow"))
+            .await
+            .unwrap_err()["code"],
+        "elicitation_invalid_choice"
+    );
+}
+
+#[tokio::test]
+async fn config_plan_passthrough_and_reopen_sequence() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    for method in ["consent.get", "consent.await"] {
+        let r = f
+            .ok(
+                &filer(),
+                method,
+                json!({"elicitation_id":id,"timeout_ms":0}),
+            )
+            .await;
+        assert_eq!(r["statement"], STATEMENT);
+        assert_eq!(r["signature_b64url"], SIGNATURE);
+        assert_eq!(r["answer_seq"], 1);
+        assert_eq!(r["answered_choice_id"], "approve");
+        assert_eq!(r["binding"], body()["binding"]);
+    }
+    let r = f
+        .ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    assert_eq!(r["alreadyAnswered"], true);
+    let before = f
+        .ok(
+            &phone(),
+            "consent.list_pending",
+            json!({"clientFeatures":["config-plan"]}),
+        )
+        .await["revision"]
+        .clone();
+    f.clock.set(support::NOW + 1);
+    let r = f
+        .ok(
+            &filer(),
+            "consent.report_unverified",
+            json!({"elicitation_id":id,"answer_seq":1,"code":"signature"}),
+        )
+        .await;
+    assert_eq!(r["state"], "pending");
+    assert!(r.get("statement").is_none());
+    let p = f.ok(&phone(), "consent.get", get(&id)).await;
+    assert_eq!(
+        p["unverified"],
+        json!({"code":"signature","reported_at_ms":support::NOW + 1})
+    );
+    assert!(p.get("binding").is_none());
+    let after = f
+        .ok(
+            &phone(),
+            "consent.list_pending",
+            json!({"clientFeatures":["config-plan"]}),
+        )
+        .await;
+    assert_ne!(after["revision"], before);
+    assert_eq!(
+        f.payloads().last().unwrap(),
+        &json!({"elicitationId":id,"kind":"elicitation","eventAtMs":support::NOW+1})
+    );
+    let count: i64 = f
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM elicitation_answers WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    let notices:i64=f.sql().query_row("SELECT COUNT(*) FROM access_notices WHERE elicitation_id=?1 AND purpose='escalated' AND status='pending'",[&id],|r|r.get(0)).unwrap();
+    assert_eq!(notices, 1);
+    let core = f
+        .ok(
+            &support::stamp("reserved:prefrontal-core"),
+            "consent.outcomes",
+            json!({"since":0}),
+        )
+        .await;
+    assert_eq!(core["records"], json!([]));
+    let r = f
+        .ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    assert_eq!(r["elicitation"]["answerSeq"], 2);
+    let count: i64 = f
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM config_plan_audit WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+    let notices: Vec<(String, u64)> = f
+        .sql()
+        .prepare("SELECT purpose,round FROM access_notices WHERE elicitation_id=?1 ORDER BY rowid")
+        .unwrap()
+        .query_map([&id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        notices,
+        vec![
+            ("escalated".into(), 0),
+            ("settled".into(), 0),
+            ("escalated".into(), 1),
+            ("settled".into(), 1)
+        ]
+    );
+    let (hash,len):(String,i64)=f.sql().query_row("SELECT statement_sha256,statement_length FROM config_plan_audit WHERE elicitation_id=?1 AND answer_seq=1",[&id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(len, 14);
+    assert_eq!(
+        hash,
+        format!(
+            "{:x}",
+            Sha256::digest([255, 0, 1, 120, 32, 110, 111, 116, 45, 74, 83, 79, 78, 10])
+        )
+    );
+}
+
+#[tokio::test]
+async fn config_plan_report_guards() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    for seq in [0, 1] {
+        assert_eq!(
+            f.call(
+                &filer(),
+                "consent.report_unverified",
+                json!({"elicitation_id":id,"answer_seq":seq,"code":"key"})
+            )
+            .await
+            .unwrap_err()["code"],
+            "elicitation_invalid_request"
+        );
+    }
+    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    for p in [
+        json!({"elicitation_id":id,"answer_seq":0,"code":"key"}),
+        json!({"elicitation_id":id,"answer_seq":2,"code":"key"}),
+        json!({"elicitation_id":id,"answer_seq":1,"code":"unknown"}),
+        json!({"elicitation_id":id,"answer_seq":1,"code":"key","extra":1}),
+    ] {
+        assert_eq!(
+            f.call(&filer(), "consent.report_unverified", p)
+                .await
+                .unwrap_err()["code"],
+            "elicitation_invalid_request"
+        );
+    }
+    f.ok(
+        &filer(),
+        "consent.report_unverified",
+        json!({"elicitation_id":id,"answer_seq":1,"code":"key"}),
+    )
+    .await;
+    assert_eq!(
+        f.call(
+            &filer(),
+            "consent.report_unverified",
+            json!({"elicitation_id":id,"answer_seq":1,"code":"key"})
+        )
+        .await
+        .unwrap_err()["code"],
+        "elicitation_invalid_request"
+    );
+    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    let e = f
+        .call(
+            &filer(),
+            "consent.report_unverified",
+            json!({"elicitation_id":id,"answer_seq":1,"code":"key"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(e["message"].as_str().unwrap().contains("answer_seq"));
+    f.clock.set(support::NOW + 300000);
+    assert_eq!(
+        f.call(
+            &filer(),
+            "consent.report_unverified",
+            json!({"elicitation_id":id,"answer_seq":2,"code":"key"})
+        )
+        .await
+        .unwrap_err()["code"],
+        "elicitation_expired"
+    );
+}
+
+#[tokio::test]
+async fn config_plan_reopen_rollback_keeps_settlement_and_audit() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    // Abort after feed and notice deletion, before saving the pending record.
+    f.sql().execute_batch("CREATE TRIGGER fail_reopen BEFORE UPDATE ON elicitation_records WHEN NEW.state='pending' BEGIN SELECT RAISE(ABORT,'injected crash'); END;").unwrap();
+    assert!(f
+        .call(
+            &filer(),
+            "consent.report_unverified",
+            json!({"elicitation_id":id,"answer_seq":1,"code":"plan"})
+        )
+        .await
+        .is_err());
+    assert_eq!(f.stored_record(&id).state, cingulate_store::State::Answered);
+    let count: i64 = f
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM elicitation_answers WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    let reported: Option<i64> = f
+        .sql()
+        .query_row(
+            "SELECT reported_at_ms FROM config_plan_audit WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(reported, None);
+    f.sql().execute_batch("DROP TRIGGER fail_reopen").unwrap();
+    f.ok(
+        &filer(),
+        "consent.report_unverified",
+        json!({"elicitation_id":id,"answer_seq":1,"code":"plan"}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn config_plan_decline_withdraw_expiry_and_retention() {
+    for mode in ["decline", "signed_decline", "withdraw", "expiry"] {
+        let f = support::Fixture::open(None).await;
+        let id = f.request(&filer(), body()).await;
+        match mode {
+            "decline" => {
+                f.ok(&phone(), "consent.answer", answer(&id, "decline"))
+                    .await;
+            }
+            "signed_decline" => {
+                let mut p = answer(&id, "approve");
+                p["choiceId"] = json!("decline");
+                f.ok(&phone(), "consent.answer", p).await;
+            }
+            "withdraw" => {
+                f.ok(&filer(), "consent.withdraw", json!({"elicitation_id":id}))
+                    .await;
+            }
+            _ => f.clock.set(support::NOW + 300000),
+        }
+        if ["withdraw", "expiry"].contains(&mode) {
+            let r = f
+                .call(&phone(), "consent.answer", answer(&id, "approve"))
+                .await;
+            if mode == "expiry" {
+                assert_eq!(r.unwrap_err()["code"], "elicitation_expired");
+            } else {
+                assert_eq!(r.unwrap()["code"], "conflict");
+            }
+        }
+        let r = f
+            .ok(&filer(), "consent.get", json!({"elicitation_id":id}))
+            .await;
+        assert_ne!(r["state"], "pending");
+        assert_ne!(r["answered_choice_id"], "approve");
+        f.clock
+            .set(support::NOW + 300000 + cingulate_store::RETENTION_MS);
+        assert_eq!(
+            f.call(&filer(), "consent.get", json!({"elicitation_id":id}))
+                .await
+                .unwrap_err()["code"],
+            "elicitation_not_found"
+        );
+    }
+}
+
+#[tokio::test]
+async fn config_plan_served_vectors_and_checksums() {
+    let manifest = serde_json::to_value(ck_cingulate::manifest()).unwrap();
+    assert!(manifest["capabilities"]["provides"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("consent-config-plan/v1")));
+    for (name, bytes) in generate().await {
+        assert_eq!(
+            std::fs::read(support::corpus(CORPUS).join(name)).unwrap(),
+            bytes
+        );
+    }
+    let sums = std::fs::read_to_string(support::corpus(CORPUS).join("SHA256SUMS")).unwrap();
+    for line in sums.lines() {
+        let (hash, name) = line.split_once("  ").unwrap();
+        assert_eq!(
+            hash,
+            format!(
+                "{:x}",
+                Sha256::digest(std::fs::read(support::corpus(CORPUS).join(name)).unwrap())
+            )
+        );
+    }
+}

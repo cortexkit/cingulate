@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "cingulate-decode"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64",
  "serde",
@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "cingulate-store"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "cingulate-decode",
  "cortexkit-lease",
@@ -123,11 +123,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
 name = "cingulate-vectors"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -147,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.18.4"
+version = "0.19.0"
 dependencies = [
  "async-trait",
  "cingulate-decode",

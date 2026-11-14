@@ -622,6 +622,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
             "manifest-binding-approval/v1",
+            "consent-config-plan/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1",
             "scope-federated/v1"
@@ -655,6 +656,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "consent.list_pending",
             "consent.outcomes",
             "consent.report_execution",
+            "consent.report_unverified",
             "consent.request",
             "consent.watch_pending",
             "consent.withdraw",

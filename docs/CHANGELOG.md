@@ -7,6 +7,22 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.19.0 (ck-cingulate), 0.10.0 (cingulate-decode), 0.8.0 (cingulate-store), 0.11.0 (cingulate-vectors)
+
+- Add `consent-config-plan/v1`: Callosum-only, fail-closed settings approval
+  cards with typed changes and private requester bindings. Subjects and pushes
+  describe this computer, never an agent or session.
+- Carry bounded phone statement/signature bytes unchanged to Callosum, without
+  parsing or verifying them. Record only statement SHA-256 and decoded length
+  in the additive config-plan audit table (migration 12).
+- Add sequence-checked `consent.report_unverified` to reopen an unexpired card
+  atomically, invalidate its old current answer and push it again. Preserve
+  person lifecycle outbox history with round-aware uniqueness and delivery order.
+  Retain prior
+  answer audit metadata; each new answer increments `answer_seq`.
+- Add reader-first phone/requester contracts and checksum-pinned, real-handler
+  samples in `test-vectors/config-plan-v1/`.
+
 ## 0.18.4 (ck-cingulate)
 
 - Add fixed, log-only refusal reasons to distinguish invalid requests, including

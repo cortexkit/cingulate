@@ -9,6 +9,8 @@ use crate::{ids, load, ConsentStore, ElicitationRecord, Result, ScopeIdentity, S
 struct PersonNotice<'a> {
     elicitation_id: &'a str,
     purpose: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    round: Option<u64>,
     // Absent when the card was filed without a daemon-stamped session scope,
     // such as an install card core files itself. Core then pushes the card
     // with no agent label.
@@ -47,6 +49,7 @@ impl ElicitationRecord {
             "consent" | "package" | "flow_decision" => "consent",
             "secret_use" => "secret_use",
             "manifest_binding" => "manifest_binding",
+            "config_plan" => "config_plan",
             "flow_install" => "flow_install",
             _ => return None,
         };
@@ -76,6 +79,7 @@ impl ElicitationRecord {
         Some(PersonNotice {
             elicitation_id: &self.elicitation_id,
             purpose,
+            round: (self.notice_round > 0).then_some(self.notice_round),
             asker: asker.map(ScopeIdentity::target),
             head: self.head.as_ref().map(|head| head.target()),
             fields,
@@ -89,7 +93,13 @@ pub(crate) fn enqueue_person_notice(
     purpose: &str,
 ) -> Result<()> {
     if let Some(body) = person_notice_body(conn, record, purpose)? {
-        insert_person_notice(conn, &record.elicitation_id, purpose, &body)?;
+        insert_person_notice(
+            conn,
+            &record.elicitation_id,
+            purpose,
+            record.notice_round,
+            &body,
+        )?;
     }
     Ok(())
 }
@@ -129,10 +139,16 @@ fn person_notice_body(
         .transpose()
 }
 
-fn insert_person_notice(conn: &Connection, id: &str, purpose: &str, body: &str) -> Result<()> {
+fn insert_person_notice(
+    conn: &Connection,
+    id: &str,
+    purpose: &str,
+    round: u64,
+    body: &str,
+) -> Result<()> {
     conn.execute(
-        "INSERT OR IGNORE INTO access_notices(elicitation_id,purpose,body_json) VALUES (?1,?2,?3)",
-        params![id, purpose, body],
+        "INSERT OR IGNORE INTO access_notices(elicitation_id,purpose,body_json,round) VALUES (?1,?2,?3,?4)",
+        params![id, purpose, body, round],
     )?;
     Ok(())
 }
@@ -142,10 +158,10 @@ impl ConsentStore {
         // An already-backfilled store must not open a backfill write transaction.
         let missing = self.read(|conn| {
             let mut missing = Vec::new();
-            for id in ids(conn, "SELECT elicitation_id FROM elicitation_records AS records WHERE state='pending' AND NOT EXISTS (SELECT 1 FROM access_notices AS notices WHERE notices.elicitation_id=records.elicitation_id AND notices.purpose='escalated') ORDER BY elicitation_id", [])? {
+            for id in ids(conn, "SELECT elicitation_id FROM elicitation_records AS records WHERE state='pending' AND NOT EXISTS (SELECT 1 FROM access_notices AS notices WHERE notices.elicitation_id=records.elicitation_id AND notices.purpose='escalated' AND notices.round=COALESCE(json_extract(records.record_json,'$.noticeRound'),0)) ORDER BY elicitation_id", [])? {
                 if let Some(record) = load(conn, &id)? {
                     if let Some(body) = person_notice_body(conn, &record, "escalated")? {
-                        missing.push((id, body));
+                        missing.push((id, record.notice_round, body));
                     }
                 }
             }
@@ -155,8 +171,8 @@ impl ConsentStore {
             return Ok(());
         }
         self.transaction(|tx| {
-            for (id, body) in missing {
-                insert_person_notice(tx, &id, "escalated", &body)?;
+            for (id, round, body) in missing {
+                insert_person_notice(tx, &id, "escalated", round, &body)?;
             }
             Ok(())
         })

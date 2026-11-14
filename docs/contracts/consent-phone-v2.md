@@ -432,3 +432,72 @@ Approval envelopes, statement digests, signatures and the recorded
 [pinned v3 samples](../../test-vectors/secret-statements-v3/README.md) and the
 [requester contract](consent-requester-v2.md#extended-secret-statements-v3-ck-cingulate-0162)
 for closed shapes and reserved flow-id tags.
+
+## Config-plan approvals (0.19.0)
+
+**Readers first:** CKIOS must read the checksum-pinned
+[config-plan v1 samples](../../test-vectors/config-plan-v1/README.md) before
+Callosum files one. Declare `clientFeatures: ["config-plan"]` on list/get/answer.
+Cingulate serves these cards only to daemon-attested Callosum phone routes;
+local desktop operator authority, simulators and older readers do not qualify.
+Without opt-in, lists omit the card, get refuses `elicitation_not_found`, and
+answer refuses `elicitation_config_plan_required` (including a decline).
+
+The card subject and “who asks” line are **This computer's settings**, never an
+agent, even if the requester route carries an agent scope. The phone renders all
+recorded `old`/`new` JSON values and sources, and treats `apply` as an open string
+(known: `live`, `module_restart`, `daemon_restart`, `next_supervision`,
+`route_rebind`). Unknown apply modes and `other_sections` remain visible as raw
+values, not silently omitted. Nested plan keys retain snake_case; only the
+record's top-level `config_plan` becomes `configPlan`. The exact pending get
+result for the invented sample is:
+
+```json
+{"answerSeq":0,"configPlan":{"base_revision":"42","changes":[{"apply":"live","module_id":"example-module","new":true,"new_source":"project","old":false,"old_source":"default","path":"settings.enabled","project_id":"example-project"}],"other_sections":{"policy_changes":{"example":true}},"plan_digest":"fake-plan-digest"},"createdAtMs":10000,"default":"decline","elicitationId":"el_1","expiresAtMs":310000,"expiresInMs":300000,"facts":[],"kind":"config_plan","lateExecution":"notify_only","materialDamage":false,"onExpiry":"deny","options":[{"effect":"choose","id":"approve","label":"Approve"},{"effect":"decline","id":"decline","label":"Decline"}],"prompt":"Review this computer's settings changes.","requesterLabel":"reserved:callosum","requesterName":"This computer's settings","scope":{},"state":"pending","subject":{"label":"This computer's settings"},"target":{"kind":"config_plan","label":"This computer's settings"},"title":"Settings change approval","urgency":"normal"}
+```
+
+Pending list records use the same projection. Phone list/get/answer readbacks
+**never include the requester's opaque `binding`**. The options and default are
+fixed: approve (`choose`) or decline (`decline`, default); expiry is denial.
+Before asking for Face ID or passcode, the phone must check the plan digest of
+what it rendered, then sign the config-consent statement with its consent key.
+Callosum owns that statement's grammar, key registration and verification.
+Cingulate does not parse or verify it. The following intentionally fake bytes
+show only Cingulate's transport shape, not a valid consent statement/signature:
+
+```json
+{"elicitationId":"el_1","choiceId":"approve","clientFeatures":["config-plan"],"statement":"_wABeCBub3QtSlNPTgo","signature_b64url":"AQIDBA"}
+```
+
+Approve without either signed field refuses `elicitation_invalid_request`.
+`statement` must be nonempty, strict unpadded base64url with at most 4,096 decoded
+bytes; `signature_b64url` has the same encoding and at most 1,024 decoded bytes.
+Cingulate preserves both exact strings, without parsing signed content or
+canonicalizing it, and returns them unchanged to Callosum on get/await.
+Do not use `envelope_b64url` on this kind. A decline can omit the signed fields:
+
+```json
+{"elicitationId":"el_1","choiceId":"decline","clientFeatures":["config-plan"]}
+```
+
+Accepted answers use the existing `ok: true`, `alreadyAnswered: false` wrapper
+with the settled `elicitation`; it adds `answeredChoiceId`, `answeredAtMs`,
+`answeredDevice`, `answerSeq: 1`, `statement` and `signatureB64url` (if supplied).
+Repeating exactly the same answer returns `alreadyAnswered: true`; any different
+answer to a settled card conflicts. A Cingulate accepted approval is **not** a
+verified or applied plan: Callosum alone decides that.
+
+When Callosum reports failed verification while time remains, the same card
+reopens. Its old choice, answer time/device and signed bytes disappear; its
+`answerSeq` remains 1 and its phone projection includes exactly:
+
+```json
+{"unverified":{"code":"signature","reported_at_ms":10000}}
+```
+
+Possible codes are `time`, `plan`, `decision`, `signature`, `key`. Show **The
+approval couldn't be verified. Nothing was changed.**, not “Declined”. Permit a
+new signed answer within the remaining original lifetime. The next answer uses
+`answerSeq: 2` and clears `unverified`. Reopening bumps the pending revision and
+pushes the card again. Withdrawal and expiry retract it; no timeout or missing
+signature grants anything. Retained settled cards are readable for 24 hours.

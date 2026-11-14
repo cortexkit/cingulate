@@ -199,7 +199,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7,8,9,10,11"
+        "1,2,3,4,5,6,7,8,9,10,11,12"
     );
     let answer_schema: String = conn
         .query_row(
@@ -287,14 +287,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,12,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,13,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 12"));
-    assert!(error.to_string().contains("migration 11"));
+    assert!(error.to_string().contains("version 13"));
+    assert!(error.to_string().contains("migration 12"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1264,6 +1264,7 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
             "DROP TRIGGER cingulate_change_card_insert;
         DROP TRIGGER cingulate_change_card_update;
         DROP TRIGGER cingulate_change_card_delete;
+        DROP TABLE config_plan_audit;
         DROP TABLE manifest_binding_requests;
         ALTER TABLE elicitation_records DROP COLUMN manifest_binding;
         DROP TABLE secret_use_requests;
@@ -1330,6 +1331,11 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         answered_device: None,
         secret_use_answer: None,
         manifest_binding_answer: None,
+        answer_seq: None,
+        statement: None,
+        signature_b64url: None,
+        unverified: None,
+        notice_round: 0,
         answered_choice_id: None,
         execution: None,
         execution_reason: None,
@@ -1579,6 +1585,10 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
         Value::Null,
     ]];
     expected.extend(notices);
+    // Migration 12 adds round zero without changing any earlier outbox value.
+    for row in &mut expected {
+        row.push(json!(0));
+    }
     assert_eq!(rows(&scratch.sql(), "access_notices"), expected);
     assert!(rows(&scratch.sql(), "pragma_foreign_key_check").is_empty());
     let info = rows(&scratch.sql(), "pragma_table_info('elicitation_records')");

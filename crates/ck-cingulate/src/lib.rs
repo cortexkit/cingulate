@@ -52,7 +52,7 @@ pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, W
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 17] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 18] = [
     ("presence.report", ManagementOperationKind::Mutate),
     ("presence.get", ManagementOperationKind::Query),
     ("presence.watch", ManagementOperationKind::Query),
@@ -62,6 +62,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 17] = [
     ("consent.answers", ManagementOperationKind::Query),
     ("consent.ack", ManagementOperationKind::Mutate),
     ("consent.report_execution", ManagementOperationKind::Mutate),
+    ("consent.report_unverified", ManagementOperationKind::Mutate),
     ("consent.withdraw", ManagementOperationKind::Mutate),
     ("consent.detach", ManagementOperationKind::Mutate),
     ("consent.answer", ManagementOperationKind::Mutate),
@@ -97,6 +98,12 @@ struct RequesterAdmission {
 // legacy generic-consent caller without a stable human identity, so it has no
 // display name and must never be shown as a raw principal.
 const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
+    RequesterAdmission {
+        principal: "reserved:callosum",
+        requester_name: Some("This computer's settings"),
+        kinds: &["config_plan"],
+        agent: SubjectAgent::Never,
+    },
     RequesterAdmission {
         principal: "reserved:cerebellum",
         requester_name: Some("Cerebellum"),
@@ -176,6 +183,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-no-expiry/v1".into(),
                 "secret-use-approval/v1".into(),
                 "manifest-binding-approval/v1".into(),
+                "consent-config-plan/v1".into(),
                 "flow-install-secrets/v1".into(),
                 "scope-workdir/v1".into(),
                 "scope-federated/v1".into(),
@@ -333,6 +341,9 @@ impl Stamp {
             .then_some(fingerprint)
     }
     fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
+        if record.request.kind == "config_plan" {
+            return self.secret_use_phone().is_some() && feature_declared(params, "config-plan");
+        }
         !record.request.is_secret_card()
             || (self.secret_use_phone().is_some()
                 && feature_declared(
@@ -345,6 +356,9 @@ impl Stamp {
                 ))
     }
     fn owner(&self) -> String {
+        if self.label() == "reserved:callosum" {
+            return json!([self.label(), ""]).to_string();
+        }
         if let Ok(Some(facts)) = federated::facts(self) {
             if let Ok(session) = federated::session(facts) {
                 return json!([self.label(), session]).to_string();
@@ -864,8 +878,10 @@ impl Handler {
     }
     async fn pointer(&self, record: &ElicitationRecord, retraction: bool) {
         let mut value = json!({"elicitationId": record.elicitation_id,
-            "kind": if retraction { "retraction" } else { "elicitation" },
-            "eventAtMs": if retraction { record.answered_at_ms.expect("settlement time") } else { record.created_at_ms }});
+        "kind": if retraction { "retraction" } else { "elicitation" },
+        "eventAtMs": if retraction { record.answered_at_ms.expect("settlement time") } else {
+            record.unverified.as_ref().and_then(|v| v["reported_at_ms"].as_i64()).unwrap_or(record.created_at_ms)
+        }});
         if let Some(machine) = self.inner.machine_id.lock().expect("machine lock").clone() {
             value["machineId"] = json!(machine);
         }
@@ -943,6 +959,22 @@ impl Handler {
                 },
                 resolved_name: None,
                 // Remote scopes must never drive local-agent notices or session checks.
+                asker: None,
+                head: None,
+            });
+        }
+        if request.kind == "config_plan" {
+            return Ok(RequestIdentity {
+                owner: stamp.owner(),
+                requester: stamp.label().into(),
+                subject: Subject {
+                    agent_id: None,
+                    head_agent_id: String::new(),
+                    label: "This computer's settings".into(),
+                    via_worker: false,
+                    federated: None,
+                },
+                resolved_name: None,
                 asker: None,
                 head: None,
             });
@@ -1192,6 +1224,29 @@ impl Handler {
             return reply;
         }
         let operator_surface = stamp.operator_handles(method, &params);
+        if stamp.label() == "reserved:callosum"
+            && method == "consent.get"
+            && !operator_surface
+            && params.get("elicitationId").is_some()
+        {
+            return Err(stamp.refuse());
+        }
+        if (method == "consent.report_unverified" && stamp.label() != "reserved:callosum")
+            || (stamp.label() == "reserved:callosum"
+                && !matches!(
+                    method,
+                    "consent.request"
+                        | "consent.get"
+                        | "consent.await"
+                        | "consent.withdraw"
+                        | "consent.report_unverified"
+                        | "consent.answer"
+                        | "consent.list_pending"
+                        | "consent.watch_pending"
+                ))
+        {
+            return Err(stamp.refuse());
+        }
         match method {
             "consent.answer" | "consent.list_pending" | "consent.watch_pending" => operator(stamp)?,
             "consent.get" if operator_surface => {}
@@ -1220,6 +1275,13 @@ impl Handler {
             false
         };
         if method == "consent.request" {
+            if (params.get("kind").and_then(Value::as_str) == Some("config_plan")
+                && (!stamp.admits_kind("config_plan") || federated::facts(stamp)?.is_some()))
+                || (stamp.label() == "reserved:callosum"
+                    && params.get("kind").and_then(Value::as_str) != Some("config_plan"))
+            {
+                return Err(stamp.refuse());
+            }
             if params.get("kind").and_then(Value::as_str) == Some("manifest_binding")
                 && !stamp.admits_kind("manifest_binding")
             {
@@ -1255,6 +1317,7 @@ impl Handler {
             | "consent.await"
             | "consent.withdraw"
             | "consent.detach"
+            | "consent.report_unverified"
             | "consent.report_execution" => Some(text(&params, "elicitation_id")?),
             _ => None,
         };
@@ -1277,6 +1340,7 @@ impl Handler {
                 | "consent.await"
                 | "consent.withdraw"
                 | "consent.detach"
+                | "consent.report_unverified"
                 | "consent.report_execution"
         ) && !(method == "consent.get" && operator_surface)
         {
@@ -1284,11 +1348,40 @@ impl Handler {
                 .with_store(|store| store.owner(id.expect("owner id")))
                 .await?;
             if owner.as_deref() != Some(stamp.owner().as_str()) {
+                if owner.as_deref() == Some(json!(["reserved:callosum", ""]).to_string().as_str()) {
+                    return Err(stamp.refuse());
+                }
                 return Err(Refusal::new(
                     "elicitation_not_owner",
                     "elicitation has no matching owner",
                 ));
             }
+        }
+        if method == "consent.report_unverified" {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Report {
+                elicitation_id: String,
+                answer_seq: u64,
+                code: String,
+            }
+            let report: Report = serde_json::from_value(params)
+                .map_err(|e| invalid(format!("report_unverified: {e}")))?;
+            let record = self
+                .with_store(|store| {
+                    store.report_unverified(
+                        &stamp.owner(),
+                        &report.elicitation_id,
+                        report.answer_seq,
+                        &report.code,
+                        self.inner.options.clock.now_ms(),
+                    )
+                })
+                .await?;
+            self.wake(&record.elicitation_id);
+            self.pointer(&record, false).await;
+            self.spawn_pending_notices().await;
+            return Ok(self.project(&record, false));
         }
         if method == "consent.await" {
             return self
@@ -1351,7 +1444,9 @@ impl Handler {
                 if !stamp.card_visible(&record, &params) {
                     return Err(Refusal::new(
                         if method == "consent.answer" {
-                            if record.request.kind == "manifest_binding" {
+                            if record.request.kind == "config_plan" {
+                                "elicitation_config_plan_required"
+                            } else if record.request.kind == "manifest_binding" {
                                 "elicitation_manifest_binding_approval_required"
                             } else {
                                 "elicitation_secret_use_approval_required"
@@ -1360,7 +1455,9 @@ impl Handler {
                             "elicitation_not_found"
                         },
                         if method == "consent.answer" {
-                            if record.request.kind == "manifest_binding" {
+                            if record.request.kind == "config_plan" {
+                                "config_plan requires a phone with clientFeatures config-plan"
+                            } else if record.request.kind == "manifest_binding" {
                                 "manifest binding requires a phone with clientFeatures manifest-binding-approval"
                             } else {
                                 "secret use requires a phone with clientFeatures secret-use-approval"
@@ -1604,8 +1701,40 @@ impl Handler {
                     reply
                 }
                 "consent.answer" => {
-                    let mutation = store
-                        .answer_with_envelope(
+                    let config = store
+                        .get_phone(id.expect("answer id"), now)
+                        .map_err(store_error)?
+                        .is_some_and(|r| r.request.kind == "config_plan");
+                    let signed_field = |field: &str| {
+                        params
+                            .get(field)
+                            .map(|v| {
+                                v.as_str()
+                                    .ok_or_else(|| invalid(format!("{field} must be a string")))
+                            })
+                            .transpose()
+                    };
+                    let mutation = if config {
+                        if params.get("envelope_b64url").is_some() {
+                            return Err(invalid("envelope_b64url is not a config_plan answer"));
+                        }
+                        store.answer_config_plan(
+                            id.expect("answer id"),
+                            choice.expect("choice"),
+                            stamp.secret_use_phone(),
+                            signed_field("statement")?,
+                            signed_field("signature_b64url")?,
+                            now,
+                        )
+                    } else {
+                        if params.get("statement").is_some()
+                            || params.get("signature_b64url").is_some()
+                        {
+                            return Err(invalid(
+                                "statement and signature_b64url require config_plan",
+                            ));
+                        }
+                        store.answer_with_envelope(
                             id.expect("answer id"),
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
@@ -1621,7 +1750,8 @@ impl Handler {
                                 .transpose()?,
                             now,
                         )
-                        .map_err(store_error)?;
+                    }
+                    .map_err(store_error)?;
                     events.extend(mutation.settlements);
                     match mutation.value {
                         AnswerOutcome::NotFound => json!({"ok":false,"code":"not_found"}),
@@ -2026,6 +2156,11 @@ mod tests {
         assert_eq!(
             admissions,
             [
+                (
+                    "reserved:callosum",
+                    Some("This computer's settings"),
+                    vec!["config_plan"]
+                ),
                 (
                     "reserved:cerebellum",
                     Some("Cerebellum"),

@@ -524,6 +524,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
             "manifest-binding-approval/v1",
+            "consent-config-plan/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1",
             "scope-federated/v1"
@@ -549,6 +550,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
         ("consent.answers", false),
         ("consent.ack", true),
         ("consent.report_execution", true),
+        ("consent.report_unverified", true),
         ("consent.withdraw", true),
         ("consent.detach", true),
         ("consent.answer", true),
@@ -701,6 +703,7 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
             "consent-no-expiry/v1",
             "secret-use-approval/v1",
             "manifest-binding-approval/v1",
+            "consent-config-plan/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1",
             "scope-federated/v1"

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 mod access;
+mod config_plan;
 mod person_notice;
 mod record;
 pub use access::{
@@ -28,7 +29,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 11] = [
+pub const MIGRATIONS: [Migration; 12] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -72,6 +73,10 @@ pub const MIGRATIONS: [Migration; 11] = [
     Migration {
         version: 11,
         statements: include_str!("../migrations/011_manifest_binding.sql"),
+    },
+    Migration {
+        version: 12,
+        statements: include_str!("../migrations/012_config_plan.sql"),
     },
 ];
 
@@ -503,6 +508,7 @@ impl ConsentStore {
             let record = ElicitationRecord {
                 elicitation_id: format!("el_{seq}"),
                 expires_at_ms: deadline,
+                answer_seq: (request.kind == "config_plan").then_some(0),
                 request,
                 created_at_ms: now_ms,
                 subject,
@@ -512,6 +518,10 @@ impl ConsentStore {
                 answered_device: None,
                 secret_use_answer: None,
                 manifest_binding_answer: None,
+                statement: None,
+                signature_b64url: None,
+                unverified: None,
+                notice_round: 0,
                 answered_choice_id: None,
                 execution: None,
                 execution_reason: None,
@@ -646,6 +656,18 @@ impl ConsentStore {
         envelope: Option<&str>,
         now_ms: i64,
     ) -> Result<Mutation<AnswerOutcome>> {
+        if self
+            .get_phone(id, now_ms)?
+            .is_some_and(|r| r.request.kind == "config_plan")
+        {
+            if envelope.is_some() {
+                return Err(refuse(
+                    "invalid_params",
+                    "envelope_b64url is not a config_plan answer",
+                ));
+            }
+            return self.answer_config_plan(id, choice, device, None, None, now_ms);
+        }
         self.transaction(|tx| {
             let Some(mut record) = load(tx, id)? else {
                 return Ok(Mutation {

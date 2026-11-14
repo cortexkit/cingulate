@@ -9,10 +9,12 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 mod access;
+mod config_plan;
 mod flow_secrets;
 mod manifest_binding;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
+pub use config_plan::{config_answer_bytes, ConfigChange, ConfigPlan};
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};
 pub use secret_use::{SecretUse, SecretUseAnswer, SecretUseItem, UseStatement};
@@ -120,6 +122,8 @@ pub struct AuthorText {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_plan: Option<ConfigPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_binding: Option<ManifestBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -369,6 +373,8 @@ impl ConsentRequest {
                 }
             }
             secret_use::normalize(body)?
+        } else if body.get("kind").and_then(Value::as_str) == Some("config_plan") {
+            config_plan::normalize(body)?
         } else if body.get("kind").and_then(Value::as_str) == Some("manifest_binding") {
             manifest_binding::normalize(body)?
         } else {
@@ -387,6 +393,11 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        if (self.kind == "config_plan") != self.config_plan.is_some() {
+            return Err(Refusal::invalid(
+                "config_plan body requires config_plan kind",
+            ));
+        }
         for (field, value) in [
             ("explanation", &self.explanation),
             ("changes", &self.changes),
@@ -513,10 +524,11 @@ impl ConsentRequest {
             if self.flow_decision.is_none() {
                 return Err(Refusal::invalid("flow_decision body is required"));
             }
-        } else if self
-            .options
-            .iter()
-            .any(|option| option.effect == FLOW_DECISION_EFFECT)
+        } else if self.kind != "config_plan"
+            && self
+                .options
+                .iter()
+                .any(|option| option.effect == FLOW_DECISION_EFFECT)
         {
             return Err(Refusal::invalid("choose is only valid for flow_decision"));
         }
@@ -555,6 +567,7 @@ impl ConsentRequest {
                 | "package"
                 | "secret_use"
                 | "manifest_binding"
+                | "config_plan"
         ) {
             return Err(Refusal::new(
                 "elicitation_unknown_kind",
