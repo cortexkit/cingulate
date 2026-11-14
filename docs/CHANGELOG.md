@@ -7,6 +7,12 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.18.3 (ck-cingulate)
+
+- Install a log subscriber at start, writing INFO and above to stderr, which the
+  daemon captures as the module's log. Without one, every log line, including
+  the per-refusal line from 0.18.2, was dropped.
+
 ## 0.18.2 (ck-cingulate)
 
 - Log one line per refusal: method, refusal code, the caller's daemon-stamped

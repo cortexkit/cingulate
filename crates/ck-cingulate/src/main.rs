@@ -13,6 +13,13 @@ fn production_options(
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Consume the supervisor nonce before any application background tasks.
     let _nonce = subc_client_rs::launch_nonce()?;
+    // The daemon captures stderr as this module's log. Without a subscriber every
+    // tracing event, including the one line logged per refusal, is dropped.
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .init();
     let resolver = std::sync::Arc::new(ck_cingulate::EntorhinalResolver::default());
     let handler = ck_cingulate::Handler::new(production_options(resolver.clone()));
     let (module, serving) =
