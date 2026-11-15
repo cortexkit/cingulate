@@ -6,6 +6,9 @@ from that contract, not captured from an implementation: no cingulate release
 serves the `group` field yet, and an implementation must match these bytes, not
 regenerate them.
 
+Every value in them is invented test data; no real person, device or
+deployment is behind any of them.
+
 ## Encoding
 
 Each case has three files:

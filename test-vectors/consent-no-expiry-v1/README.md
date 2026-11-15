@@ -6,6 +6,10 @@ are untouched handler response bytes; refusal files encode the handler's transpo
 error as `{"error":{"code":...,"message":...}}`. Stored JSON uses the durable
 record serialization. The clock begins at 10000 ms.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 `no-deadline-request.json` omits `expires_in_ms`. Requesters may do this only after
 `catalog.list` advertises `consent-no-expiry/v1`; older Cingulate rejects omission.
 The stored, requester and phone records omit expiry fields. A future get at

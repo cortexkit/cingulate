@@ -99,7 +99,7 @@ fn watch_pending_manifest_is_pinned_and_covers_exact_bytes() {
     let manifest = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         sha256(&manifest),
-        "54df2f4f6c7d29df9a146ddab53e41032251143325d87d4179d10ca6d18997a3",
+        "034af23b7f1787a528e12ee10ea7b87f71b59f35b1322704fff65bdb5019e6ee",
         "consent-watch-pending-v1 manifest pin"
     );
     let mut listed = BTreeSet::new();

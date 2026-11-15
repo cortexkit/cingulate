@@ -6,6 +6,10 @@ the phone answers `allow_once` at 11000 ms. The daemon liveness runtime then
 definitively reports that recorded asker scope gone, and the maintenance tick
 installs `approved_not_executed` with reason `session_ended`.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 `requester-get` and `phone-get` pin the two projections of that backstopped card.
 The requester uses `execution_reason`; the phone uses `executionReason`. Neither
 projection exposes the private asker scope. No requester execution report is sent.

@@ -8,6 +8,10 @@ followed by 32 lowercase hex characters, naming the computer the agent is on.
 Every other key, the canonical JSON bytes and the envelope's `statement_sha256`
 binding are the same as v1. Requests made on the home computer stay v1.
 
+Everything here is invented test data. The vault statements, keys and
+signatures are Claustrum's published test values, and every agent, device,
+secret name and id names no real person, device or account.
+
 `secret-approval-v2.json` is copied byte for byte from Claustrum commit
 `af71c1648da4aeccd624e84894c4a6671c78b676`, at
 `crates/credentials-core/tests/vectors/secret-approval-v2.json`.

@@ -1,14 +1,15 @@
 # Consent request vectors v1
 
-These are raw `elicitation/create` params bodies decoded by
-`ConsentRequest::decode` / `ConsentRequest::validate` in
-`crates/prefrontal-core-store/src/elicitation.rs`, not JSON-RPC envelopes.
-Requester ownership comes from the transport, not these bodies.
+These are raw consent request params bodies, not JSON-RPC envelopes, with the
+verdict the decoder must reach for each: `ConsentRequest::decode` and
+`ConsentRequest::validate` in `crates/cingulate-decode`. Every title, prompt,
+scope, origin and digest in them is invented test data. Requester ownership
+comes from the transport, not these bodies.
 
 Core treats `scope` as an opaque, provider-defined object and requires a present
 scope or a nonblank `args_digest`. Scope contents in these vectors are
 illustrative, not Cerebellum's schema; Cerebellum owns its scope shapes. The
-`target.label` values are illustrative too. These vectors pin core's decoder
+`target.label` values are illustrative too. These vectors pin the decoder's
 verdicts, not provider scope formats.
 
 Consumers copy the files byte for byte and
@@ -66,6 +67,6 @@ part of the decoder diagnostic rather than the complete serde wording.
 - `empty-options`: `elicitation_invalid_request`, diagnostic contains `title, prompt and nonempty options are required`.
 - `nested-unknown-field`: `elicitation_invalid_request`, diagnostic contains ``unknown field `unknown` ``.
 
-The core-store integration suite discovers every body and expectation and checks
-manifest coverage and byte hashes. Change verdicts deliberately, with consumer
+`crates/cingulate-decode/tests/corpus.rs` discovers every body and expectation,
+checks the verdicts, and checks manifest coverage and byte hashes. Change verdicts deliberately, with consumer
 coordination, rather than silently updating pinned vectors.

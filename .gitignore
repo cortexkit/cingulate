@@ -4,26 +4,17 @@ target/
 # Local editor and OS files
 .DS_Store
 
-# Per-run agent working state: gathered copies of other repositories' files,
-# hydrated campaign specs, reports, and the task briefs handed to delegated
-# workers. None of it is source. A committed gather copy makes this repository's
-# code search answer with another repository's details, and a worker brief is
-# already summarized by the commit it produced.
+# Local agent tooling state under .cortexkit/: working copies, reports, saved
+# answers and per-machine settings. None of it is source, and committing it would
+# put one maintainer's local setup into everyone's checkout.
 #
-# The two config files beside this directory are NOT ignored on purpose:
-# .cortexkit/alfonso.jsonc (renamed .cortexkit/prefrontal.jsonc) chooses where
-# this repository's delegated workers run, and .cortexkit/WORKER.md is the
-# instruction file every one of them receives. Both change how work is done
-# here, so they are reviewed and versioned like any other config. The scratch
-# directory is listed under both names while the rename from alfonso to
-# prefrontal rolls out.
+# .cortexkit/WORKER.md is NOT ignored on purpose: it is the repository's
+# instruction file for automated contributors, reviewed like any other file.
+# The maintainer's own tool configuration (the .jsonc files) stays local.
+.cortexkit/*.jsonc
 .cortexkit/alfonso/
 .cortexkit/prefrontal/
 .cortexkit/magic-context/
-
-# Maintainer-only folders that stay on this machine: internal design and audit
-# documents, private scripts, and saved review answers. None of it is source,
-# and a delegated worker's helper scripts land here too.
 .cortexkit/internal-docs/
 .cortexkit/scripts/
 .cortexkit/sidekick-answers/

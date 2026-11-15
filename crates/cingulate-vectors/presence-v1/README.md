@@ -7,6 +7,10 @@ The phone and two computer apps merge in `get-merged.json`; `watch-sequence.json
 contains opening, coalesced change and expiry frames. `route.json` includes inline
 suppression, stale attention, kinds the watched agent's apps don't draw inline and every fallback location.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 Generate from the repository root:
 
 ```

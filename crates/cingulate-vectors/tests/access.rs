@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "02f49c9331c26c83d2794d7322b32fc055626819542c13285a3ecf76442afe5e"
+        "b979121e02e2bb6e1dd1b7df8071dc689e8205e11a0b25d71796f007081d06de"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {

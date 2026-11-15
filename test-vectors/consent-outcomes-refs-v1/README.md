@@ -8,6 +8,10 @@ settlement after detach, and detach followed by a dedup refresh before settlemen
 They also pin refusal of `single_use` on a non-consent kind and refusal of a
 non-boolean value.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 `single-use-get-reply.json` confirms requester reads retain the field, while
 `single-use-phone-get-reply.json` confirms phone projections omit it. Existing
 phone vector sets remain byte-for-byte unchanged.

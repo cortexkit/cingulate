@@ -32,7 +32,7 @@ fn paths_under(directory: &str) -> BTreeSet<String> {
 fn corpus_manifest_hash_is_pinned() {
     assert_eq!(
         sha256(&fs::read(corpus().join("SHA256SUMS")).unwrap()),
-        "70617099cddb426b8ce4b6cf49d04337e58dd61230f909bc0bcba31c73c64c88"
+        "518db1510d9dd85ae977a3787cc5c871c5a2269139519498e28ac8be963ffe32"
     );
 }
 

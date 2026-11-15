@@ -2,8 +2,10 @@
 
 Synchronous consent persistence with no dependency on an orchestrator or subc.
 `cortexkit-store` owns the connection, WAL configuration and single-writer lease.
-The schema is namespaced `cingulate`; migration 1 is prefrontal migration 194
-unchanged, and migration 2 seeds the persistent `el_` id counter.
+The schema is namespaced `cingulate`. Migration 1 creates the card table
+(`elicitation_records`) and the settled-card answer log (`elicitation_answers`),
+and migration 2 seeds the persistent `el_` id counter. Later migrations in
+`migrations/` are numbered in order and each runs once.
 
 ## Module integration
 

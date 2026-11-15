@@ -1,7 +1,9 @@
 # Elicitation requester v1
 
-Exact requester operation payloads from the core module's `ManagerRuntime::dispatch`
-(`crates/prefrontal-core-module`).
+Requester operation payloads for the earlier `elicitation.*` requester
+operations, whose shapes Cingulate's `consent.*` requester operations keep. The
+head name ALF, the session names, the card and every other value in them are
+invented test data.
 Phone records are separately pinned in `../elicitation-records-v1/`. These are
 operation payloads, not JSON-RPC framing. JSON is UTF-8, pretty-printed by
 `serde_json`, with one trailing newline. The test compares **bytes**, not parsed
@@ -9,20 +11,17 @@ JSON. `tag` and `method` identify the fixture; `request` is the dispatched body
 before transport identity injection; `reply` is the returned success value.
 Refusal fixtures instead contain `request.params` and `request.route` (the
 injected `__elicitation_route`, or null when missing), plus `error.code` and
-`error.message` from the actual dispatch error. Messages are illustrative for
+`error.message` from the dispatch error. Messages are illustrative for
 that input; clients should branch on codes.
 
-## Reproduction and placeholders
+## Scenario and placeholders
 
-Run from the repository root:
+`crates/cingulate-vectors/tests/requester.rs` replays every step through
+Cingulate's handler with a scratch store and requires the same reply (or the
+same error code, with nothing written and nothing notified). `pins.rs` checks the
+hash table below and the manifest.
 
-```sh
-UPDATE_ELICITATION_REQUESTER_VECTORS=1 cargo nextest run -p prefrontal-core-module --lib -E 'test(elicitation_requester_vectors_match_live_dispatch)'
-cargo nextest run -p prefrontal-core-module --lib -E 'test(elicitation_requester_vectors_match_live_dispatch)'
-```
-
-The opt-in writer regenerates every JSON file and the hash table below from live
-dispatch. Normal runs never write. Fixture setup creates a registry head named
+The scenario has a registry head named
 ALF at `ses_head`, with requester route session `provider-session`. It requests a
 card, gets/awaits it while pending, exercises refusals, answers it through the
 operator route, reports execution, reads the feed, acknowledges it, then withdraws
@@ -118,8 +117,8 @@ trimmed). `get`, `await`, `report_execution`, `withdraw` check ownership first.
 | `elicitation.report_execution` | `elicitation_id`: string; `execution`: nonempty string | Requester record with `execution`. Accepted values: `executed`, `approved_not_executed`, `outcome_unknown`. Only answered cards may be reported (core does not require that the chosen effect was grant). Reports overwrite prior reports, do not execute actions or create new feed events. |
 | `elicitation.withdraw` | `elicitation_id`: string | Requester record. Pending card becomes `withdrawn`, with settlement timestamp and no chosen option; retracts the phone card, wakes existing awaits and schedules notice delivery. A settled card keeps its first outcome; expiry wins when already due. |
 
-Stage-2 plan C9 adds `approved_waiting` and `not_run` reasons `scope_ended`,
-`delegation_withdrawn`, `scope_unverifiable`. These are **not yet served** by this
+The reasons `approved_waiting` and `not_run` (`scope_ended`,
+`delegation_withdrawn`, `scope_unverifiable`) are **not served** by this
 operation: `execution: "not_run"` is pinned as `elicitation_invalid_execution`.
 There is currently no `reason` request field interpreted by report_execution.
 
@@ -197,8 +196,8 @@ invalid choice is a store error, not a separately raised requester code.
 | `elicitation_not_found.json` | `550e8eb22261f49a6373843b7a56c6159cd4e19d47bb06170b685438ada763be` |
 | `withdraw.json` | `65adbbb9a7b1c07576dc3bedc79125e20fd7c39ab260d73f239049208da5bbee` |
 
-## Vendored integrity manifest
+## Integrity manifest
 
-Cingulate generated `SHA256SUMS` at hydration from prefrontal `1d4c9b885`.
-The seventeen JSON vectors are unchanged source bytes. The manifest covers those
-files and this README; the consuming test pins the manifest's SHA-256.
+`SHA256SUMS` covers the seventeen JSON vectors and this README.
+`crates/cingulate-vectors/tests/pins.rs` pins the manifest's SHA-256 and checks
+that it covers every file.

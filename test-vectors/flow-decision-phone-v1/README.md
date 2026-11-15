@@ -2,6 +2,10 @@
 
 These vectors serve Basal's three supplied `consent.request` parameter bodies through Cingulate's real handler, then read each pending card and the combined pending page through the phone route. The request bodies are copied byte-for-byte from `crates/cingulate-vectors/tests/inputs/flow-decision-phone-v1`; the generator embeds them unchanged as the `params` value in each handler request. Fresh scratch storage starts at `el_1` and the fixed test clock is 10,000 ms.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 | Files | What they show |
 |---|---|
 | `decision-reconcile-request.json`, `decision-reconcile-request-reply.json` | Unchanged reconcile params submitted by Basal and the real handler reply. |

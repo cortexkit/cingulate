@@ -5,21 +5,21 @@ files are its untouched JSON bytes, including `result` and no appended newline.
 Fresh scratch stores start at `el_1` and clock 10,000 ms. Answers, withdrawals and
 dedup changes happen at 11,000 ms; grant-lost expiry happens at 70,000 ms.
 
-The three `*-body.json` files are byte-for-byte copies of prefrontal's
-`test-vectors/flow-decision-card-v2/*-request.json` inputs. They are emitted from
-the same copied input bytes parsed into the handler envelopes, not invented or
-normalized examples. Prefrontal's design document calls the flow-decision card
-format "v2.2". The only published example bodies for that format are in
-`test-vectors/flow-decision-card-v2`; the three request bodies in these vectors
-are copied from that corpus. These vectors prove acceptance of those examples,
-not semantic parity with the format called "v2.2". Basal's route is
-`reserved:basal` with a fixed bound session; no phone harness is needed.
+The three `*-body.json` files are invented example flow-decision request bodies
+(reconcile, re-enable and grant-lost), kept byte for byte as
+`crates/cingulate-vectors/tests/fixtures/flow-decision-card-v2/*-request.json`.
+The handler envelopes are built by parsing those same bytes; nothing in them is
+normalized. Their flow, run and grant values are test data, not a real flow. The
+flow-decision format is versioned "v2.2" by its requesters; these vectors prove
+acceptance of these three examples, not semantic parity with every rule of that
+format. Basal's route is `reserved:basal` with a fixed bound session; no phone
+harness is needed. All other request values are invented too.
 
 Every row below expands to the literal files named by its prefix and suffix.
 
 | Files | What they show |
 |---|---|
-| `reconcile-body.json` | Four-choice reconcile requester body, unchanged from prefrontal's `test-vectors/flow-decision-card-v2/reconcile-request.json`. |
+| `reconcile-body.json` | Four-choice reconcile requester body, unchanged from `crates/cingulate-vectors/tests/fixtures/flow-decision-card-v2/reconcile-request.json`. |
 | `reenable-body.json` | Unchanged two-choice re-enable requester body. |
 | `grant_lost-body.json` | Unchanged informational lost-grant body, opaque grant and two choices. |
 | `reconcile-request.json`, `reconcile-reply.json` | Basal request and resulting new id. |
@@ -61,5 +61,5 @@ files. Running without `--check` rewrites this corpus's files, including
 change to what the module returns. After such a change, update `SHA256SUMS`, its
 pinned manifest hash in the integrity test, and the corpus version tag. Tests
 compare all 44 JSON files byte-for-byte, check directory/hash coverage, and pin
-the manifest hash and the three unchanged upstream input hashes. See the
+the manifest hash and the three unchanged example input hashes. See the
 [requester contract](../../docs/contracts/consent-requester-v1.md).

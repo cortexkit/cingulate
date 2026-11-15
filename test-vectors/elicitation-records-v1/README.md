@@ -1,9 +1,14 @@
 # Elicitation records v1
 
-Tag: `elicitation-records-v1`. The producer tests in
-`crates/prefrontal-core-module/src/elicitation_tests.rs` pin every JSON file by
-SHA-256 and compare the vectors to live operation replies (normalizing only
-minted IDs and clock timestamps).
+Tag: `elicitation-records-v1`. These are the phone and push record shapes of the
+earlier `elicitation.*` operations, which Cingulate's `consent.*` operations
+keep. Every agent, card, option and timestamp in them is invented test data.
+Ids are symbolic (`el_head`) and the clock starts at 1000.
+
+`crates/cingulate-vectors/tests/records.rs` files the same cards in a scratch
+store and requires the stored phone projections to equal these vectors,
+normalizing only minted ids and clock timestamps (and removing the
+`requesterLabel` and `atConsole` fields, which Cingulate adds).
 
 Phone operations (grant to both phone peers through the daemon-attested
 Callosum operator route):
@@ -41,13 +46,12 @@ The push plaintext stays inside the existing sealed envelope. A new card carries
 the event, while the id key distinguishes the record type. Lock-screen copy
 remains generic.
 
-External phone-grant configuration is not in this repository. The existing
-`crates/prefrontal-core-module/tests/it/agent_fleet_overview.rs` avatar vector test
-similarly calls out grants to both phone peers as an integration prerequisite.
-The rollout must grant the three phone operations before enabling typed cards.
+Granting the three phone operations to the phone's routes is deployment
+configuration and is not in this repository. A deployment must grant them before
+enabling typed cards.
 
-## Vendored integrity manifest
+## Integrity manifest
 
-Cingulate generated `SHA256SUMS` at hydration from prefrontal `1d4c9b885`.
-The eight JSON vectors are unchanged source bytes. The manifest covers those
-files and this README; the consuming test pins the manifest's SHA-256.
+`SHA256SUMS` covers the eight JSON vectors and this README.
+`crates/cingulate-vectors/tests/pins.rs` pins the manifest's SHA-256 and checks
+that it covers every file.

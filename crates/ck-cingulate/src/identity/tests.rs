@@ -538,7 +538,8 @@ async fn warnings_are_throttled_per_kind_for_one_minute() {
 
 #[tokio::test]
 async fn fleet_sample_unchanged_preserves_display_names() {
-    // Byte-for-byte owner capture published with cortexkit-agent-identity 0.1.1:
+    // The published agent-identity vector, byte for byte: the invented Ada/Lin/Sam
+    // fleet shipped with cortexkit-agent-identity 0.1.1 as
     // test-vectors/agent-identity-reads-v1/fleet-identity.json.
     let samples: Vec<Value> =
         serde_json::from_str(include_str!("../../tests/fixtures/fleet-identity.json")).unwrap();

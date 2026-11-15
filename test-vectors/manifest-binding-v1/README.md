@@ -4,6 +4,10 @@ Readers first: phone and desktop renderers must implement this kind before Plexu
 files one. A phone advertises `manifest-binding-approval` only after implementing
 independent statement decoding and refusing disagreements with the served fields.
 
+Everything here is invented test data. The vault statements, keys and
+signatures are Claustrum's published test values, and every agent, device,
+secret name and id names no real person, device or account.
+
 `vault-samples.json` copies the statement, envelope, propose reply and approve
 request from claustrum tag `manifest-binding-vectors-v1`, commit
 `c2a9ce2eaf99da646160eeb0c73d6b11d9341cbf`, from

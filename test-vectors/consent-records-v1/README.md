@@ -5,6 +5,10 @@ Op files contain `tag`, `method`, `request`, and `reply` or `error`; push files
 contain `tag` and `reply`. They are operation payloads, not result envelopes.
 Tests compare parsed JSON after placeholder substitution, with nothing removed.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 ## Scenario steps
 
 All stores are fresh scratch stores, the sweep timer is stopped, and the clock

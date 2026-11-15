@@ -6,6 +6,10 @@ at `crates/credentials-core/tests/vectors/secret-approval-v1.json`.
 Its SHA-256 is `efd4ba60641586e143bce81087e4f9f5aaf8a99ffede74190303da7d4495cc27`.
 These are public deterministic test keys, never production credentials.
 
+Everything here is invented test data. The vault statements, keys and
+signatures are Claustrum's published test values, and every agent, device,
+secret name and id names no real person, device or account.
+
 `single-phone-get.json` and `batch-phone-get.json` are untouched response bytes
 from Cingulate's real `consent.get` path on a stamped phone route advertising
 `clientFeatures: ["secret-use-approval"]`. They file the `approval` and

@@ -1,18 +1,16 @@
 # Tool-permission asks
 
-Status: **approved for building** (Ufuk's rulings of 2026-10-11 are folded in; see the last
-section).
+Status: **implemented.** The wire contracts are
+[consent-requester-v2](../contracts/consent-requester-v2.md),
+[consent-phone-v2](../contracts/consent-phone-v2.md) and the
+[tool-permission outcomes contract](../contracts/tool-permission-outcomes-v1.md); where they
+differ from this document, they win. This document keeps the reasoning behind the design.
 
 When AFT's policy says a tool call needs permission ("ask"), something has to put that question
-to the right party and bring the answer back. Ufuk ruled on 2026-10-10 that this is Cingulate's
-job, not prefrontal-core's, so that every approval in the ecosystem goes through the one consent
-module, with one card format, one answer rule and one audit trail. This design replaces
-prefrontal's `docs/designs/access-asks-core.md`, a draft that had core doing the routing, and
-reuses its decisions where they still fit; "keeps D1" and the like name the decision of that
-draft a section carries over.
-
-**Nothing here is built.** Today Cingulate accepts neither kind below from AFT, and answers only
-come from the phone. Every rule below about requesters, answerers and legs is a change to make.
+to the right party and bring the answer back. That is Cingulate's job, not core's, so that every
+approval in the ecosystem goes through the one consent module, with one card format, one answer
+rule and one audit trail. An earlier approach had core doing the routing; this design moves it
+into Cingulate.
 
 ## Who does what
 
@@ -44,7 +42,7 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
   start runs, core will set the run scope's `parent` to the worker's scope, and Cingulate will
   walk run, then worker (through the daemon's `scope.describe`), then head; nothing else changes.
   When a run's scope ends (its deadline passes), AFT withdraws the run's open ask.
-- **Which calls ask through Cingulate (changes D2's test):** a call whose stamped scope is owned by
+- **Which calls ask through Cingulate:** a call whose stamped scope is owned by
   `reserved:prefrontal-core` with `kind` `head`, `worker` or `ephemeral`. Testing `agent_id` alone
   would miss every worker, because worker scopes carry no `agent_id`. A call with no stamp, or a
   scope from any other owner, belongs to AFT alone, and its plugin asks in the host UI as it does
@@ -54,7 +52,7 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
   AFT denies an Alfonso agent's call with `access_unavailable`; it never falls back to a host
   prompt for a worker, since nobody would answer it.
 
-## Routing (keeps D1)
+## Routing
 
 - **Worker ask:** the answerer is the worker's head. The user sees it only if the head escalates.
 - **Head ask:** the answerer is the user, in the Alfonso apps only: the phone now, the desktop
@@ -73,13 +71,13 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
   it, and `not_held` otherwise. Options are fixed: `allow_once` and `allow_scope` (effect grant)
   and `deny` (effect decline); `deny` is the default answer. Nothing expires, so there is no expiry
   outcome. An option the current answerer may not give is left out.
-- **`macos_permission`** (keeps D9), requested by `reserved:aft` only, informational: no options,
+- **`macos_permission`**, requested by `reserved:aft` only, informational: no options,
   nothing waits on it. It names the folder, the program to grant and the steps in System
   Settings. One open card per (folder, program): a repeat request returns the open card. AFT
   closes it with `consent.withdraw` when it sees the folder readable again. Refused on platforms
   other than macOS.
 
-## Answers (keeps D5)
+## Answers
 
 | Answer | Effect for AFT | Who may give it |
 |---|---|---|
@@ -94,7 +92,7 @@ escalated ask, "for this task" included, applies to the worker's scope only, nev
 
 ## How each party answers
 
-- **Head (changes D4's carrier, keeps its surface):** the head answers with the work tool it
+- **Head:** the head answers with the work tool it
   already has, `work(action="prompt", id="acc_…", prompt="<answer>[: note]")`, where `acc_…` is
   the ask's id from the notice. The work tool already routes prompts by id prefix, so no head's
   tool list or cached prompt changes. Core relays it to Cingulate as `consent.answer` from
@@ -138,7 +136,7 @@ deny share one store transaction: whichever settles first wins and the loser get
 - **After an AFT restart:** AFT re-sends `consent.request` with the persisted `call_key`; the same
   `call_key` returns the same ask, and AFT awaits or withdraws it.
 
-## Waiting and waking (replaces D6)
+## Waiting and waking
 
 - **No timers.** An ask stays pending until it is answered, escalated, withdrawn, or its head is
   gone. Neither leg expires. This is how a worker's question to its head already works.
@@ -150,7 +148,7 @@ deny share one store transaction: whichever settles first wins and the loser get
 - **Ending a turn is not finishing:** this is the same parked path a worker's question to its head
   already uses. Core records the worker as awaiting an answer when it receives the `head_ask`
   notice (which names the asking session). While that record is open, core's completion gate
-  answers "blocked", not "completed", and its stall and nudge detectors stand down, so a mason
+  answers "blocked", not "completed", and its stall and nudge detectors stand down, so a worker
   that ends its turn on `access_pending` is never treated as done. When the ask leaves its pending
   states (answered, refused or withdrawn), the `settled` notice clears the record and steers the
   result into the same worker session, which resumes the turn; the agent then runs the call again,
@@ -246,7 +244,7 @@ What Cingulate does with each refusal:
 - **Transport failure or core unavailable:** retried with backoff. This never blocks the ask's
   own state.
 
-## Refusals (keeps D8)
+## Refusals
 
 Every refusal has a name, and none grants: `access_no_head` (no parent head, or its scope not
 live), `access_head_gone`, `access_asker_gone` (the stamped asking session ended),
@@ -281,7 +279,7 @@ the surfaces offered, every answer attempt with surface and time (losers include
 escalation note, and the final state. Standing grants stay with AFT (`grants.list`,
 `grants.revoke`), as for every provider.
 
-## Rulings (Ufuk, 2026-10-11)
+## Decisions
 
 1. A worker's ask goes to its head first. The head may allow (once or for the scope) whenever it
    already holds the permission itself, by AFT's policy or a covering grant; otherwise it may only

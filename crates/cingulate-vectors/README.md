@@ -1,13 +1,14 @@
 # Consent wire vectors
 
 This test-only workspace crate compares persisted record projections and actual
-in-process handler replies and notifier payloads against the vendored vectors.
+in-process handler replies and notifier payloads against the checked-in vectors
+in `test-vectors/`. Every value in those vectors is invented test data.
 All stores are scratch SQLite stores; the injected clock is fixed unless the
 scenario advances it, and the sweep timer is disabled.
 
 - `records.rs` covers every phone projection, including the verbatim worker
   subject, and delivery/retraction pointers with and without a machine id.
-- `requester.rs` follows the upstream README scenario and its refusal-table order.
+- `requester.rs` follows the `elicitation-requester-v1` README scenario and its refusal-table order.
   It adapts transport route fields to an internal stamp, maps `elicitation.*` to
   `consent.*`, and excludes `elicitation_unavailable`, which cingulate never emits.
 - `consent.rs` pins cingulate's additive fields and the console refusal without
@@ -29,7 +30,7 @@ then update the manifest pins in `pins.rs`.
 The core outcomes vectors use
 `cargo run -p cingulate-vectors --example generate_consent_outcomes_refs_vectors --locked -- --check`.
 
-Comparisons remove only `requesterLabel` and `atConsole` from upstream phone
-projections, or `requester_label` from upstream requester records. Opaque nested
+Comparisons remove only `requesterLabel` and `atConsole` from the vectors' phone
+projections, or `requester_label` from their requester records. Opaque nested
 JSON is never filtered. Placeholder substitution preserves numeric clock values
 as JSON integers. No test regenerates fixtures from the implementation.

@@ -33,7 +33,7 @@ fn presence_checksum_manifest_pin() {
     let manifest = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&manifest)),
-        "9bb85e38455bb6cb8ff1c42b294cd3b89081ce48cf11b0c6cedac702ce3ac5aa"
+        "248dcf56628d7c8212551cf54152c3979b10f45066ad8e4968d20d0eabbc0427"
     );
     for line in std::str::from_utf8(&manifest).unwrap().lines() {
         let (digest, name) = line.split_once("  ").unwrap();

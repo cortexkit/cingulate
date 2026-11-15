@@ -8,6 +8,9 @@ must decode them. Each file is compact JSON with no trailing newline. Its keys
 appear in the order the files themselves use, the same as the example in the
 contract, and the implementation must emit that order.
 
+Every value in them is invented test data; no real person, device or
+deployment is behind any of them.
+
 - `notice-answered.json`: a detached card answered by the operator.
 - `notice-expired.json`: a detached card that expired. No `choice_id` or `choice_label`.
 - `notice-withdrawn.json`: a detached card withdrawn by its requester. No `choice_id` or `choice_label`.

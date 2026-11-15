@@ -1,6 +1,9 @@
 # Consent as its own module (`cingulate`)
 
-Status: draft for review (ALF, 2026-10-03). Reviewers: ENTO, CEREB, CKIOS, the Callosum owner, BASAL, PLEX.
+Status: the original design record, kept for its reasoning. It was reviewed by the owners of
+Entorhinal, Cerebellum, the phone app, Callosum, Basal and Plexus, and the review rulings
+below supersede the draft where they differ. Current behavior is specified by the contracts in
+[contracts/](contracts/) and summarized in [STATUS.md](STATUS.md).
 
 ## Why
 
@@ -35,7 +38,7 @@ Each machine runs its own modules, including its own consent module. A card is n
 
 ## Interface sketch (`consent/v1`)
 
-Carried over from core's ops, which have run in production since migration 194:
+Carried over from core's earlier `elicitation.*` ops:
 
 - `consent.request`: a requester raises a card. The fields are as today: kind, title, prompt, 2 to 4 options with effects (grant, decline, choose), default, urgency, facts, target, expiry of at most 24 h, late_execution, and the subject agent. The requester's identity comes from the daemon stamp, checked against a per-kind allowlist.
 - `consent.await`: a bounded blocking wait (at most 2 minutes per call).
@@ -87,7 +90,7 @@ The consent module depends on Entorhinal and the surfaces, never on the orchestr
 2. Requesters switch to the capability. Core's ops then become relays to it, and are deleted in the same cut once callers have moved; there is no long coexistence.
 3. Core keeps only two things: raising cards for its heads (the Cerebellum reverse-consent path) and the notice delivery from the outcome feed.
 4. Surfaces move to the module's answer and list ops; the phone's operator route becomes one of the surface stamps.
-5. **Push leaves core too.** Today core sends APNs itself (`DirectApnsTransport` in `push_sender.rs`, holding the APNs key) and reads only device tokens and sealing keys from Callosum's device registry. Waking a device is a federation and surface job, so the APNs sender moves next to Callosum as a notify-a-surface capability. The consent module, asks and anything else that wakes a device request it, instead of each holding an Apple key.
+5. **Push leaves core too.** Today core sends APNs itself, holding the APNs key, and reads only device tokens and sealing keys from Callosum's device registry. Waking a device is a federation and surface job, so the APNs sender moves next to Callosum as a notify-a-surface capability. The consent module, asks and anything else that wakes a device request it, instead of each holding an Apple key.
 
 ## Open questions
 
@@ -102,9 +105,9 @@ The consent module depends on Entorhinal and the surfaces, never on the orchestr
 6. **Sequencing with the identity move:** Entorhinal refuses agent-initiated identity writes with a typed error until a consent capability is bound, so neither move waits for the other.
 7. **Revoking on an offline machine.** A revoke goes from a surface to the owning provider through Callosum. If that machine is off the federation but still running agents, the grant keeps working there until the revoke arrives. Proposal: Callosum queues the revoke and delivers it on reconnect, and the app shows "revoke pending" until then; broad grants carry an expiry; and the riskiest kinds (for example "always allow on all sites") may require the machine to be federated at the moment of use.
 
-## Review round 1: settled (2026-10-03, #consent-module)
+## Review round 1: settled
 
-The module is named `cingulate` (operator approval), and ALF owns it. These rulings supersede the draft where they differ:
+The module is named `cingulate` (operator approval). These rulings supersede the draft where they differ:
 
 1. **Cingulate renders nothing.** Facts are opaque labelled rows, shown with the requester the daemon stamped ("Prefrontal core asks ...", "basal asks ..."). Typed bodies travel unrendered for the phone and the vectors. The authority that holds the record raises the card: core raises `flow_install` (it holds the hashed manifest and runs the `grants.would_ask` checks), and Basal raises `flow_decision`. This answers open question 2.
 2. **A provider mints a grant only from an answer to a card it raised itself.** `grant_lost` becomes a routing card ("Ask <provider> for access again", "Keep the flow disabled" as default, "Uninstall"). "Ask again" calls the provider's `grants.offer {agent_id, flow_id, items}`, which only the flows plane may call. The provider raises its own standing-grant card or answers `offer_not_available {reason}` (Plexus always does: always-allow is an operator action there). Basal resumes only when `grants.would_ask` answers `yes`. The first card's outcome text says what happens next ("Cerebellum will ask you to confirm access to <origin>"), and the provider raises its card before replying.
@@ -118,10 +121,10 @@ The module is named `cingulate` (operator approval), and ALF owns it. These ruli
    - Callosum's local `sessions_read`.
    Unknown never means present, and the consent module and wake routing both read it.
 7. **`at_console` applies to the takeover card only.** Cerebellum already refuses app actions on a locked screen before raising a card, and app cards stay answerable from anywhere. An answer stamped `reserved:callosum` never satisfies `at_console`. The phone lists such cards read-only as "Answer at <Mac>". Only an answer whose route the daemon stamps as a registered console surface satisfies it: a daemon-attested module or principal identity on cingulate's own allowlist. A bare `direct` route never does, because any process of the same user can open one, and a harness string sent by the caller never does. The desktop app therefore needs a daemon-registered identity of its own.
-8. **Push goes through Callosum's `callosum.push_submit` and `callosum.push_targets_read`** (live since 10-05; `surface-notify/v1` will not be built). The sender seals the payload and passes a `kind` (`delivery | thread_update | retraction | resolved`), a `collapse_id` and an interruption level; the rendezvous worker composes the alert text from the kind and holds the only APNs key. Consent cards use `delivery` ("A decision needs you"). Both ops admit only `reserved:prefrontal-core` today; Callosum adds `reserved:cingulate` when the push sender switches from core to cingulate. The rest of the push plan:
-   - **Auth mode (HPKE `mode_auth`):** belongs to the sender and the phone. It needs the Mac's notification private key, which lives in Callosum's enrollment files today, so it waits on moving that key into Claustrum (CALLO's recommendation, matching the dedicated vault KEM key rule; CKCRED to confirm). Order after that: the phone ships Auth-mode opening, then the sender switches.
+8. **Push goes through Callosum's `callosum.push_submit` and `callosum.push_targets_read`** (already live; `surface-notify/v1` will not be built). The sender seals the payload and passes a `kind` (`delivery | thread_update | retraction | resolved`), a `collapse_id` and an interruption level; the rendezvous worker composes the alert text from the kind and holds the only APNs key. Consent cards use `delivery` ("A decision needs you"). Both ops admit only `reserved:prefrontal-core` today; Callosum adds `reserved:cingulate` when the push sender switches from core to cingulate. The rest of the push plan:
+   - **Auth mode (HPKE `mode_auth`):** belongs to the sender and the phone. It needs the Mac's notification private key, which lives in Callosum's enrollment files today, so it waits on moving that key into Claustrum, matching the rule that each vault key has one dedicated purpose. Order after that: the phone ships Auth-mode opening, then the sender switches.
    - **Ids:** card ids are never reused across raises, and retractions carry the raise's id.
-   - **Machines:** the alert shows the agent name only (operator ruling 10-07). The sender puts `machine_id` inside the sealed payload so the phone opens the right card.
+   - **Machines:** the alert shows the agent name only. The sender puts `machine_id` inside the sealed payload so the phone opens the right card.
    - **Corpus:** the Auth case belongs to the sender's and phone's sealed-push corpus, not Callosum's.
 9. **Multiple machines.**
    - **Inbox:** cards are keyed by (machine_id, id); the inbox merges per-machine list calls, with an explicit "machine unreachable" row.
@@ -134,12 +137,12 @@ The module is named `cingulate` (operator approval), and ALF owns it. These ruli
 
 **Immediate hardening, ahead of the cutover:** the `sim` expose profile loses `elicitation.answer` and every other mutating op, keeping reads. Until then a same-user process can answer cards as a simulator. Cerebellum holds its standing browser grants, including "always allow on all sites", until that is done. Entorhinal admits no `reserved:callosum` identity mutations until simulators are out of the answering and mutating profiles.
 
-**On-behalf-of: settled by targeted carriers** (SUBC, ENTO). A provider raising a card for the agent that called it (Cerebellum, Plexus, Entorhinal) opens its route to cingulate under that agent's session scope. At `route.open` the daemon checks that the provider is a listed carrier on the scope and that cingulate is among its allowed destinations. Cingulate reads the subject agent from the stamp on its own inbound route; the requester is the carrier. Both fields are daemon-attested, so `consent.request` carries no requester-supplied subject.
+**On-behalf-of: settled by targeted carriers.** A provider raising a card for the agent that called it (Cerebellum, Plexus, Entorhinal) opens its route to cingulate under that agent's session scope. At `route.open` the daemon checks that the provider is a listed carrier on the scope and that cingulate is among its allowed destinations. Cingulate reads the subject agent from the stamp on its own inbound route; the requester is the carrier. Both fields are daemon-attested, so `consent.request` carries no requester-supplied subject.
 - **What the stamp proves:** the provider was entitled to carry that session to cingulate, not that the agent called the provider just now. Carrier entitlement is per session, not per call. The remaining trust is "this provider may act for this agent, toward cingulate only", which the orchestrator grants and the daemon checks. That is bounded, but it is not zero.
 - **Destinations are module ids,** not capabilities. Carrier entries name `cingulate`, so discovery binds by `consent/v1`, but replacing the implementation means the orchestrator rewrites the carrier lists it owns.
 - **Core's work:** list `reserved:entorhinal`, `reserved:cerebellum` and `reserved:plexus` as carriers on the agent sessions that can call them, with `destinations: ["cingulate"]` only. Cerebellum today raises cards on the reverse lane of core's inbound route; it becomes an outbound carrier like the others.
-- **Plexus is a real change, not a rename** (PLEX, measured): it opens its card route to prefrontal-core unscoped under one fixed bind session and puts the subject in the request body; its `reserved:plexus` carrier entry is declared but unused. At cutover it opens the route per card under the held call's scope selector and drops the body subject; a card for an ended or re-epoched scope fails `scope_ended` at `route.open`.
-- **Carrier restraint:** a provider opens its scoped route to cingulate only while it holds a live inbound call from that session (CEREB, ENTO). The daemon can't enforce this, so each provider pins it with a test.
-- **Simulators can't answer** (CALLO, live 16:37Z): the `sim` expose profile carries only query ops; `elicitation.answer` and the other ten mutating ops reach the `phone` profile only. Entorhinal's future phone-facing creates go to `phone`, never `sim`.
+- **Plexus is a real change, not a rename:** it opens its card route to prefrontal-core unscoped under one fixed bind session and puts the subject in the request body; its `reserved:plexus` carrier entry is declared but unused. At cutover it opens the route per card under the held call's scope selector and drops the body subject; a card for an ended or re-epoched scope fails `scope_ended` at `route.open`.
+- **Carrier restraint:** a provider opens its scoped route to cingulate only while it holds a live inbound call from that session. The daemon can't enforce this, so each provider pins it with a test.
+- **Simulators can't answer:** the `sim` expose profile carries only query ops; `elicitation.answer` and the other ten mutating ops reach the `phone` profile only. Entorhinal's future phone-facing creates go to `phone`, never `sim`.
 - **Unscoped `direct` callers** have no scope, so their cards name "an unverified local process".
 - The daemon keeps no per-call record, so after-the-fact call lookups are not available.

@@ -7,6 +7,10 @@ read `consent.answers` and acknowledge its cursor as core, then capture the phon
 from the vector fixture. The generator captures raw success replies; the pruned
 case records the handler's `elicitation_not_found` refusal as `{code, message}`.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 The answered card with no reported execution shows that the selected choice and
 both option labels remain available while execution is pending. The completed
 card reports `executed`. The not-run case is also supported for a core-raised

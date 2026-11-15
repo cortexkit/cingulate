@@ -9,6 +9,10 @@ or edit these samples in Cingulate; their sole writer is claustrum's
 owner's sign-off, as specified by that tag's `docs/wire-contract-v1.md`, section
 "Conformance corpus and its single writer".
 
+Everything here is invented test data. The vault statements, keys and
+signatures are Claustrum's published test values, and every agent, device,
+secret name and id names no real person, device or account.
+
 `crates/cingulate-vectors/tests/multi_host_secrets.rs` pins both file digests and
 every statement's canonical JSON (JCS) bytes and digest. All eight
 `approval_required` cases per file decode, file, project to the phone unchanged

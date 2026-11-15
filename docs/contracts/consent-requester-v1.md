@@ -139,23 +139,25 @@ a flow. Basal interprets explicit `check_now` / `keep_disabled` answers in its
 own policy. Expiry supplies no choice; the decline default is not an implicit
 operator answer.
 
-### Compatibility with prefrontal's decision corpus
+### Compatibility with the flow-decision example bodies
 
-**All three raw request bodies from `test-vectors/flow-decision-card-v2` are
-accepted unchanged as `reserved:basal` requests.** The copied inputs are hash
-pinned, submitted to the real handler, and their fields checked on readback.
-Prefrontal's design document calls the flow-decision card format "v2.2". Its only
-published example bodies are in `test-vectors/flow-decision-card-v2`; the three
-request bodies pinned here are copied from that corpus. Acceptance of those
-examples is **not a claim of semantic parity with the format called "v2.2"**.
+**Three example flow-decision request bodies (reconcile, re-enable and
+grant-lost) are accepted unchanged as `reserved:basal` requests.** They are
+invented test data, kept byte for byte in
+`crates/cingulate-vectors/tests/fixtures/flow-decision-card-v2/` and
+`test-vectors/consent-requester-v1/`; their hashes are pinned, they are
+submitted to the real handler, and their fields are checked on readback. The
+flow-decision format is versioned "v2.2" by its requesters. Acceptance of these
+examples is **not a claim of semantic parity with every rule of that format**.
 
 Cingulate renders nothing and carries typed bodies opaquely. The authority that
 holds the flow record raises and validates its card. Cingulate validates the
 envelope (kind, allowed requester, option structure/effects, size, fact shape),
 then stores the `flow_decision` JSON object verbatim. The requester owns that
-body's validity. Field-by-field comparison with the copied core schema:
+body's validity. The flow-decision format's own field rules, and what Cingulate
+does with each:
 
-| Core-side field or rule | Cingulate behavior |
+| Format field or rule | Cingulate behavior |
 |---|---|
 | Nested `decision` discriminator and variant-specific required fields | No discriminator/variant validation; any object is accepted, even an empty one. No nested field is required by the module. |
 | Unknown nested keys | Preserved, not rejected. |
@@ -188,9 +190,9 @@ Lifecycle differences also matter:
   refreshes its label/refusal details. Cingulate derives no key from the body:
   Basal must send `dedup_key`; changed label/refusal/body content **replaces** the
   pending card instead of refreshing it in place.
-* Core's corpus describes expiry selecting the decline choice for reconcile and
-  re-enable. Cingulate expiry omits `answered_choice_id` for **every** kind,
-  including those two. No choice is applied on silence.
+* The flow-decision format describes expiry selecting the decline choice for
+  reconcile and re-enable. Cingulate expiry omits `answered_choice_id` for
+  **every** kind, including those two. No choice is applied on silence.
 
 ## Requester record shape and `consent.get`
 
@@ -391,11 +393,6 @@ principal admission are checked before request decoding; the per-kind requester
 check follows decoding. These behaviors are also checked by the requester,
 module and store lifecycle tests.
 
-The read-only schema comparison uses prefrontal's
-`test-vectors/flow-decision-card-v2/{reconcile,reenable,grant_lost}-request.json`,
-its corpus README, `crates/prefrontal-core-store/src/elicitation.rs` (decision
-variants, validation and request envelope), and `docs/designs/consent-module.md`.
-That design document calls the flow-decision card format "v2.2"; the only
-published example bodies for it are the `test-vectors/flow-decision-card-v2`
-corpus, from which the three request bodies in these vectors are copied. These
-source paths identify the comparison, not runtime dependencies.
+The comparison above is between Cingulate's behavior and the flow-decision
+format's published rules; the three example bodies are the only inputs it uses.
+Neither is a runtime dependency.

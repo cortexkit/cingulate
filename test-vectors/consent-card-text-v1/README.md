@@ -7,6 +7,10 @@ untouched JSON bytes from the handler, including the `result` envelope and no
 trailing newline. Refusal reply files serialize the actual handler error code and
 message as JSON.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 Both requests carry `facts`, the card's label-and-value detail rows, written as
 plain sentences rather than JSON, with labels such as `Runs`, `Can wake` and
 `Token limit`. The `flow_install` dry run has an

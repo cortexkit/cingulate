@@ -29,7 +29,7 @@ fn requester_sha256sums_cover_and_match_every_file() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "58c9af1ec3dabbfa0b7f480035008de3fe128b09bd2f1a2a5f139e38f69f0e17"
+        "6b717e72b34dc2a6aface9c5ba43d4eb97c4cbaba39a386d70a68cc19dd0b020"
     );
     let mut names = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -303,7 +303,7 @@ fn requester_v2_sha256sums_cover_and_match_every_file() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "736fb211a199f7b13fa9f401ca956e149341821c37c631f9fdcb7c943a126720"
+        "e992f6fed5f562fe94dcc10514e493a8257f5b8fd69a3dd6a885d6016dc6f98c"
     );
     let mut names = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {

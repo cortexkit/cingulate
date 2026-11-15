@@ -9,6 +9,10 @@ neither identity is supplied in request params. Phone records use the
 daemon-attested Callosum phone surface. Outcome records are read through the daemon-stamped
 `reserved:prefrontal-core` route.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 - `cerebellum-*`: a generic request without `requester_ref`.
 - `cerebellum-ref-*`: a generic request with opaque reference `tool-call-42`,
   including get, await, answers and outcomes carrying it unchanged, and phone

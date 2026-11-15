@@ -1,6 +1,10 @@
 # Cerebellum agent-permission phone cards, v1
 
-These vectors send Cerebellum's four supplied `consent.request` parameter bodies through Cingulate's real handler. The three head cards use Cerebellum's head scope; the worker card resolves its subject through the live head returned by the worker `scope.describe` fixture. Each request reply and phone `consent.get` reply is recorded, followed by one phone `consent.list_pending` reply containing all four cards. The requests are preserved byte-for-byte under `requests/`; the fixed test clock is 10,000 ms and fresh scratch storage assigns IDs `el_1` through `el_4`.
+These vectors send four `consent.request` parameter bodies, in the shape Cerebellum files for agent permissions, through Cingulate's real handler. The three head cards use Cerebellum's head scope; the worker card resolves its subject through the live head returned by the worker `scope.describe` fixture. Each request reply and phone `consent.get` reply is recorded, followed by one phone `consent.list_pending` reply containing all four cards. The requests are preserved byte-for-byte under `requests/`; the fixed test clock is 10,000 ms and fresh scratch storage assigns IDs `el_1` through `el_4`.
+
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
 
 Both phone methods declare `clientFeatures: ["option-group"]`, so the danger options remain visible. The phone vectors pin each card's elicitation ID, pending state, subject and requester name.
 
@@ -15,8 +19,8 @@ Both phone methods declare `clientFeatures: ["option-group"]`, so the danger opt
 | `requests/worker-app-control.json`, `worker-app-control-request-reply.json` | Unchanged worker app-control params and the real handler reply. |
 | `worker-app-control-phone-get.json` | Phone `consent.get` reply for the worker card with its head subject. |
 | `list-pending.json` | Phone `consent.list_pending` reply containing all four pending cards. |
-| `requests/SHA256SUMS` | The original checksums for the four supplied request bodies. |
-| `SHA256SUMS` | Hashes of every other file in this corpus, including the original request checksums. |
+| `requests/SHA256SUMS` | The checksums of the four request bodies, fixed before any reply was generated. |
+| `SHA256SUMS` | Hashes of every other file in this corpus, including the request checksums. |
 | `README.md` | This index and reproduction instructions. |
 
 From the workspace root:

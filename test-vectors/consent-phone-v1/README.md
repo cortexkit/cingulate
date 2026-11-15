@@ -6,6 +6,10 @@ examples or normalized projections. The phone route is bound as
 `reserved:callosum` with harness `fed-phone:vector-device`. Stores are temporary,
 the clock starts at 10,000 ms, and fresh-store ids start at `el_1`.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 The package request comes from the existing `consent-package-card-v1` request
 fixture, unchanged. Answer and withdrawal happen at 11,000 ms; expiry happens at
 the request's exact deadline. The other three requests are defined in the shared

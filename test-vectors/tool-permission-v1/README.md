@@ -7,6 +7,10 @@ is untouched real handler response bytes. `bind-stamps.json` supplies the truste
 fixture identity. The clock is fixed at 1000 ms and every generation uses a fresh
 scratch store. The macOS fixture explicitly models macOS even on Linux.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 Scenarios, in order: worker opening and head-leg get; refused phone head-leg
 answer; unheld head grant refusal; escalation with a note; phone get and pending
 list; user scope grant applying to the worker; losing late head answer; persistent

@@ -1,7 +1,7 @@
-# Status (handover)
+# Status
 
-Owner: SUBC (from ALF). Cingulate is the consent module: it serves `consent/v1`,
-stores consent cards and records their outcome. Design and review rulings:
+Cingulate is the consent module: it serves `consent/v1`,
+stores consent cards and records their outcome. Design rationale:
 [design.md](design.md). The [danger option group](contracts/danger-option-group.md)
 contract is written ahead of implementation. Cingulate serves the aggregator
 side of [permissions/v1](contracts/permissions-v1.md); grant-holding providers
@@ -81,7 +81,7 @@ Since 0.13.3, subjects append `in project <name>` using only the filing route's 
 ### Package cards and bounded feeds
 
 `reserved:prefrontal-core` may raise `package` cards as well as `flow_install`.
-Package payloads are typed and closed; the tagged prefrontal vector is copied and
+Package payloads are typed and closed; an invented sample package request is
 SHA-256 checked in `test-vectors/consent-package-card-v1/`. The consent envelope
 limit is 1,310,720 bytes with `elicitation_request_too_large` on overflow.
 The phone's pending list omits package script and manifest bodies; answers and
@@ -94,8 +94,8 @@ projections and pinned corpus bytes are unchanged.
 ### Store
 
 `crates/cingulate-store` holds cards in SQLite through `cortexkit-store`
-(connection, WAL, single-writer lease). Migration 1 is prefrontal migration 194
-unchanged; migration 2 seeds a persistent `el_` id counter, so card ids are never
+(connection, WAL, single-writer lease). Migration 1 creates the card and answer
+tables; migration 2 seeds a persistent `el_` id counter, so card ids are never
 reused (`crates/cingulate-store/migrations/`). Settled cards are retained for 24
 hours (`RETENTION_MS`, `crates/cingulate-store/src/lib.rs:19`) and then read as
 tombstones until pruned. The store's own contract is in
@@ -130,15 +130,14 @@ tombstones until pruned. The store's own contract is in
 | Corpus integrity | `crates/cingulate-vectors/tests/pins.rs` |
 | Danger option group and permissions/v1 contracts (vectors only) | `crates/cingulate-vectors/tests/contracts.rs`; `cargo run -p cingulate-vectors --example generate_vectors --locked -- --check` |
 
-The gates are in `.cortexkit/WORKER.md`. All tests use scratch stores under the
+The gates are in [CONTRIBUTING.md](../CONTRIBUTING.md). All tests use scratch stores under the
 system temp directory.
 
 ## Placement and what is left
 
-- **Production placement.** `ck-cingulate` runs under the production daemon
-  (`cingulate` in `subc.jsonc`) and owns the live cards; prefrontal-core's
-  `elicitation.*` operations are deleted and the phone reads `consent.*`. The
-  bullets below record what is still left after placement.
+- **Placement.** `ck-cingulate` runs as the `cingulate` module under the subc
+  daemon and owns the live cards; the phone reads them through `consent.*`. The
+  bullets below record what is still left.
 - **Attested stamp fields.** The production adapter now reads the SDK's daemon
   `RouteBindRequest.scope`: bind session is `[owner, ref, epoch]` serialized as
   JSON, and carried agent is `attributes.agent_id`. Scoped Cerebellum, Plexus
@@ -158,10 +157,10 @@ system temp directory.
   `Options` use wall time, an unavailable resolver (no Entorhinal names; cards
   show raw agent ids) and a no-op notifier (no pushes until Callosum's
   `surface-notify/v1` exists) (`Options::default`, `lib.rs:192-205`).
-- **Push sender switch.** prefrontal-core still pushes card notifications. The
-  switch to cingulate's notifier follows the consent push runbook: the Mac's
-  notification key moves to Claustrum, the phone ships Auth-mode opening, then the
-  sender switches and Callosum admits `reserved:cingulate` on `push_submit`.
+- **Push sender switch.** Core still sends card push notifications. Cingulate's
+  notifier takes over after the computer's notification key moves into the
+  Claustrum vault, the phone can open authenticated (HPKE Auth mode) pushes, and
+  Callosum admits `reserved:cingulate` on `push_submit`, in that order.
 - **Not built:** the phone and desktop presence reporters (Cingulate serves
   `presence/v1` from 0.15.0, with tagged samples to build against) and holding
   `at_console` cards until unlock.
@@ -170,7 +169,7 @@ system temp directory.
 
 | Consumer | Operations | Where the code or vectors show it |
 |---|---|---|
-| prefrontal-core | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (core's dispatch is the source of the requester shapes) |
+| prefrontal-core | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (the requester operation shapes core uses) |
 | Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `reserved:callosum` and the literal `fed-phone:` harness prefix retain `operator_surface` independently of the local development switch (`Stamp::from_bind`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
 | Plexus | Requester of `consent` cards as a carrier, then owner ops | `allowed_kind` (`lib.rs:106`), carrier check (`lib.rs:498-504`); `test-vectors/elicitation-requester-v1/README.md` names `reserved:plexus` as the requester |
 | Basal | Requester of `flow_decision` cards, then owner ops | `allowed_kind` (`lib.rs:110`) |

@@ -56,7 +56,7 @@ fn coverage(name: &str, count: usize) {
 fn records_manifest_hash_is_pinned() {
     pin(
         "elicitation-records-v1",
-        "f3f569f6de07091c51e2efe1e66b284ec536c9c9f73b2fb8928b8844652d9296",
+        "2254ccebc065107a5df2fb876932bddf7e28f3f960d21c906c1d8c3e87412f34",
     );
 }
 
@@ -64,7 +64,7 @@ fn records_manifest_hash_is_pinned() {
 fn requester_manifest_hash_is_pinned() {
     pin(
         "elicitation-requester-v1",
-        "93b626ff5a95f99a3d9bcedda0be14e80a8ffcd8c8109721c28faf1beeb3baf6",
+        "0701f1f3f1ec489a616a4b1ceb46328e93b4f9e524c265036b69880c81b50095",
     );
 }
 
@@ -72,7 +72,7 @@ fn requester_manifest_hash_is_pinned() {
 fn consent_phone_settled_manifest_hash_is_pinned() {
     pin(
         "consent-phone-settled-v1",
-        "e4e3e90421f5a470636d74ca69c0b0bbad7f878c78ef7f5d7f5164280a2202c9",
+        "9345562b76f33784cbd2cefe2f8cfddfbfb16fbf012bf7d3f5dc81cd20877c8c",
     );
 }
 
@@ -85,7 +85,7 @@ fn consent_phone_settled_manifest_covers_exact_bytes() {
 fn consent_manifest_hash_is_pinned() {
     pin(
         "consent-records-v1",
-        "af276ebaccb2dbfecdba095a7b5f13f0b31a3869c24285b8d746705615e1e11c",
+        "383fc5632149c47abf9e8c3c7f0e6e8ea8b23b7a0525d57644e196e57dd894aa",
     );
 }
 
@@ -93,7 +93,7 @@ fn consent_manifest_hash_is_pinned() {
 fn danger_option_group_manifest_hash_is_pinned() {
     pin(
         "danger-option-group-v1",
-        "2f3fc873cb1d4d2f110f85a369b88efd753ed667fe7a6fe21ef9ec524fd8c171",
+        "d69d02a1fb00a20582dcaefb8eda78baa07cb4237a2cede26228ff2651e54426",
     );
 }
 
@@ -114,7 +114,7 @@ fn danger_option_group_manifest_covers_exact_bytes() {
 fn consent_outcomes_refs_manifest_covers_exact_bytes() {
     pin(
         "consent-outcomes-refs-v1",
-        "ca09772e1a0bce7380699f2cb917138f0cb7ee78e1873d6412d9db07f96a8e92",
+        "58bca98402570d3b62cb7d938d99644bb59f574d315c50e0e09b0f0ee234e28a",
     );
     coverage("consent-outcomes-refs-v1", 41);
 }
@@ -128,7 +128,7 @@ fn permissions_manifest_covers_exact_bytes() {
 fn cerebellum_agent_permission_manifest_hash_is_pinned() {
     pin(
         "cerebellum-agent-permission-v1",
-        "6ca3525683919dc6453ea257eef56cc43993df621ae03793fc666b4389a2d9b0",
+        "f31a149982d10526e2cf221e14cbb2fd52ad314c82ecee4af03707454c9bde7b",
     );
 }
 

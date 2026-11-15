@@ -6,6 +6,10 @@ store, a fixed clock and the store's change-log instance pinned to
 envelope; every other file is one stream item exactly as emitted, or a refusal
 encoded as `{"code","message"}`. Items carry no trailing newline.
 
+All inputs here are invented test data: agents, sessions, cards, devices, ids
+and times name no real person, device or deployment. Principals such as
+`reserved:callosum` are protocol identifiers, not accounts.
+
 `live-*` follow one watch opened without a cursor (`live-request.json`) on the
 phone's route:
 
