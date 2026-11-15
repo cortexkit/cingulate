@@ -224,10 +224,8 @@ impl ConsentStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use crate::test_support::scratch_root;
+    use std::path::PathBuf;
 
     struct Scratch {
         root: PathBuf,
@@ -236,14 +234,7 @@ mod tests {
     impl Scratch {
         fn new() -> Self {
             Self {
-                root: std::env::temp_dir().join(format!(
-                    "cingulate-config-plan-{}-{}",
-                    std::process::id(),
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos()
-                )),
+                root: scratch_root("cingulate-config-plan"),
                 store: None,
             }
         }

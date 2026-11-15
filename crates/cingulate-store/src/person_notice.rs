@@ -182,12 +182,10 @@ impl ConsentStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::scratch_root;
     use crate::{RequestIdentity, StorageBackend, Subject};
     use cingulate_decode::ConsentRequest;
-    use std::{
-        path::PathBuf,
-        time::{Duration, SystemTime, UNIX_EPOCH},
-    };
+    use std::{path::PathBuf, time::Duration};
 
     struct Scratch(PathBuf);
     impl Drop for Scratch {
@@ -198,14 +196,7 @@ mod tests {
 
     #[test]
     fn fully_backfilled_cards_need_no_write_transaction() {
-        let scratch = Scratch(std::env::temp_dir().join(format!(
-                "cingulate-backfill-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            )));
+        let scratch = Scratch(scratch_root("cingulate-backfill"));
         let descriptor = crate::storage_descriptor(None, scratch.0.to_str().unwrap());
         let store = ConsentStore::open(&descriptor, 100).unwrap().0;
         let identity = RequestIdentity {

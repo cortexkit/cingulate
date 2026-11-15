@@ -17,6 +17,8 @@ mod access;
 mod config_plan;
 mod person_notice;
 mod record;
+#[cfg(test)]
+mod test_support;
 pub use access::{
     AccessAnswer, AccessIdentity, AccessMutation, AccessRecord, AnswerAttempt, Notice,
     ScopeIdentity,

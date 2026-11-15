@@ -7,6 +7,13 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.9.1 (cingulate-store)
+
+- Give config-plan and person-notice tests distinct scratch stores even when
+  parallel threads read the same clock value. Reserve each root exclusively and
+  cover opening both databases together, cleanup and reopening with a repeated-clock test.
+  Test-only change; production storage is unchanged.
+
 ## 0.21.0 (ck-cingulate), 0.12.0 (cingulate-decode), 0.13.0 (cingulate-vectors)
 
 - Type the true-only launch-manifest `program_changed_since_target` and
