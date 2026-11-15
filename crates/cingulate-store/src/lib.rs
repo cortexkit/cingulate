@@ -21,6 +21,7 @@ pub use access::{
     AccessAnswer, AccessIdentity, AccessMutation, AccessRecord, AnswerAttempt, Notice,
     ScopeIdentity,
 };
+pub use config_plan::ConfigPlanAnswer;
 use person_notice::enqueue_person_notice;
 pub use record::{ElicitationRecord, State, Subject, LATE_ANSWER_PURPOSE};
 
@@ -173,6 +174,8 @@ pub enum AnswerOutcome {
     Answered(ElicitationRecord),
     AlreadyAnswered(ElicitationRecord),
     Conflict(ElicitationRecord),
+    RoundChanged { current_round: u64 },
+    StatementReused,
 }
 
 #[derive(Debug, Clone)]
@@ -666,7 +669,7 @@ impl ConsentStore {
                     "envelope_b64url is not a config_plan answer",
                 ));
             }
-            return self.answer_config_plan(id, choice, device, None, None, now_ms);
+            return self.answer_unsigned_config_plan(id, choice, device, now_ms);
         }
         self.transaction(|tx| {
             let Some(mut record) = load(tx, id)? else {

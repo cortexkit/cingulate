@@ -433,11 +433,11 @@ Approval envelopes, statement digests, signatures and the recorded
 [requester contract](consent-requester-v2.md#extended-secret-statements-v3-ck-cingulate-0162)
 for closed shapes and reserved flow-id tags.
 
-## Config-plan approvals (0.19.0)
+## Config-plan approvals (0.20.0)
 
 **Readers first:** CKIOS must read the checksum-pinned
-[config-plan v1 samples](../../test-vectors/config-plan-v1/README.md) before
-Callosum files one. Declare `clientFeatures: ["config-plan"]` on list/get/answer.
+[config-plan v2 samples](../../test-vectors/config-plan-v2/README.md) and render
+all new members before Callosum files them. Declare `clientFeatures: ["config-plan"]` on list/get/answer.
 Cingulate serves these cards only to daemon-attested Callosum phone routes;
 local desktop operator authority, simulators and older readers do not qualify.
 Without opt-in, lists omit the card, get refuses `elicitation_not_found`, and
@@ -445,16 +445,59 @@ answer refuses `elicitation_config_plan_required` (including a decline).
 
 The card subject and “who asks” line are **This computer's settings**, never an
 agent, even if the requester route carries an agent scope. The phone renders all
-recorded `old`/`new` JSON values and sources, and treats `apply` as an open string
+recorded `old`/`new` JSON values and sources, and treats a field row's `apply` as an open string
 (known: `live`, `module_restart`, `daemon_restart`, `next_supervision`,
-`route_rebind`). Unknown apply modes and `other_sections` remain visible as raw
-values, not silently omitted. Nested plan keys retain snake_case; only the
+`route_rebind`). Unknown field apply modes and `other_sections` remain visible as raw
+values, not silently omitted. Nonempty `other_sections` makes the card Decline-only.
+The plan-level `apply` object is distinct from the field string and has a closed
+transition enum. Nested plan keys retain snake_case; only the
 record's top-level `config_plan` becomes `configPlan`. The exact pending get
 result for the invented sample is:
 
 ```json
-{"answerSeq":0,"configPlan":{"base_revision":"42","changes":[{"apply":"live","module_id":"example-module","new":true,"new_source":"project","old":false,"old_source":"default","path":"settings.enabled","project_id":"example-project"}],"other_sections":{"policy_changes":{"example":true}},"plan_digest":"fake-plan-digest"},"createdAtMs":10000,"default":"decline","elicitationId":"el_1","expiresAtMs":310000,"expiresInMs":300000,"facts":[],"kind":"config_plan","lateExecution":"notify_only","materialDamage":false,"onExpiry":"deny","options":[{"effect":"choose","id":"approve","label":"Approve"},{"effect":"decline","id":"decline","label":"Decline"}],"prompt":"Review this computer's settings changes.","requesterLabel":"reserved:callosum","requesterName":"This computer's settings","scope":{},"state":"pending","subject":{"label":"This computer's settings"},"target":{"kind":"config_plan","label":"This computer's settings"},"title":"Settings change approval","urgency":"normal"}
+{"answerSeq":0,"configPlan":{"apply":{"operation":"change","rollback_to":null,"modules":[],"review":null},"base_revision":"42","changes":[{"apply":"live","module_id":"example-module","new":true,"new_source":"project","old":false,"old_source":"default","path":"settings.enabled","project_id":"example-project"}],"other_sections":{"policy_changes":{"example":true}},"plan_digest":"fake-plan-digest"},"createdAtMs":10000,"default":"decline","elicitationId":"el_1","expiresAtMs":310000,"expiresInMs":300000,"facts":[],"kind":"config_plan","lateExecution":"notify_only","materialDamage":false,"onExpiry":"deny","options":[{"effect":"choose","id":"approve","label":"Approve"},{"effect":"decline","id":"decline","label":"Decline"}],"prompt":"Review this computer's settings changes.","requesterLabel":"reserved:callosum","requesterName":"This computer's settings","scope":{},"state":"pending","subject":{"label":"This computer's settings"},"target":{"kind":"config_plan","label":"This computer's settings"},"title":"Settings change approval","urgency":"normal"}
 ```
+
+All section objects and rows are closed. The decoder refuses unknown members,
+missing required members, invalid types/enums, duplicate ids and exceeded caps
+as `elicitation_invalid_request` at filing, never truncating a section.
+
+| `configPlan` member | Shape and filing caps |
+|---|---|
+| `plan_digest`, `base_revision` | Digest is 1–128 UTF-8 bytes; revision is a nonempty ASCII decimal string. |
+| `changes` | Required 0–64 rows: `module_id`, optional `project_id` (each 1–128 UTF-8 bytes), `path` (1–1,024), `old`, `new`, `old_source`, `new_source`, `apply` (the last three strings each 1–64). Values are recorded JSON, including null/redaction, at most 4,096 serialized UTF-8 bytes each. |
+| `apply` | Required `{operation, rollback_to, modules, review}`. Operation is `change` or `rollback`; `rollback_to` is a nonempty ASCII decimal string exactly for rollback, otherwise null. |
+| `apply.modules` | 0–64 rows with required unique `module_id` (1–128 UTF-8 bytes), `transition` (`live`, `module_restart`, `next_start`, `daemon_restart`), booleans `whole_generation`, `waits_for_next_start`, `waits_for_daemon_restart`, `deferred_live_fields` (0–64 paths, each 1–1,024 UTF-8 bytes), and plain-text `explanation` (1–512 UTF-8 bytes). |
+| `apply.review` | Required null or closed `{"supervisor_reconcile":true}`; false is refused. |
+| `affected_projects` | Optional 0–64 unique ids, each 1–128 UTF-8 bytes. |
+| `policy_changes` | Optional 0–64 rows `{kind, module_id?, layer?, old, new, reason?}`. Kind is `declaration`, `subc_jsonc`, `reviewed_program` or `layer_file`. Module id (1–128 UTF-8 bytes) is required except for `subc_jsonc`, where it must be absent. |
+| policy values/reason | Non-`layer_file` values use the same JSON/redaction form and 4,096-byte cap as `changes`; optional reason is at most 512 UTF-8 bytes. |
+| `layer_file` policy | Required `layer` (1–64 UTF-8 bytes), allowed only on this kind. Each value is a closed `{"absent":true}` or `{"sha256":"<64 lowercase hex>","bytes":<non-negative integer>}` object. No `reason`. |
+| `launch_manifests` | Optional 0–64 entries `{module_id, origin, programs}`, unique by module id (1–128 UTF-8 bytes), origin 1–64 UTF-8 bytes, programs 1–16 rows `{input, old, new}`. Input is 1–1,024 UTF-8 bytes; values use the same JSON/redaction form and 4,096-byte cap as `changes`. |
+| `other_sections` | Optional raw JSON object, at most 16,384 serialized UTF-8 bytes; present null is invalid. Nonempty means Decline-only. |
+
+`apply` shows when the change takes effect, including restarts and reconciliation.
+Its explanation is literal plain text, not HTML or Markdown; whitespace is
+preserved and controls U+0000–U+001F and U+007F–U+009F other than U+000A newline
+are refused, as on other card explanations.
+`affected_projects` names the impacted projects. `policy_changes` shows changes
+to authority; `subc_jsonc` identifies the daemon's subc.jsonc policy configuration.
+Word `layer_file` rows as **settings file changed; no setting changed**
+because comments, formatting, same-value replacements, file creation or removal
+can leave effective settings unchanged. `launch_manifests` shows changes to
+programs that will run. `changes` shows field values and sources, and
+`other_sections` preserves information the reader cannot yet render safely.
+Approval requires rendering all these sections, not just field rows.
+
+At least one row is required across `changes`, `policy_changes` and all manifest
+programs. A program-only or `layer_file`-only plan can therefore have zero field
+rows. Optional lists and optional row strings cannot be present null. `binding`
+remains a private requester object capped at 4,096 serialized UTF-8 bytes and is
+never sent to the phone; the existing frame bound is 1,310,720 bytes.
+Legacy stored cards missing `apply` remain readable but are projected Decline-only;
+an approval attempt refuses `elicitation_invalid_choice`.
+All sections survive filing and round reopening unchanged in phone get/list/watch
+and requester get/await, with nested snake_case names preserved.
 
 Pending list records use the same projection. Phone list/get/answer readbacks
 **never include the requester's opaque `binding`**. The options and default are
@@ -468,6 +511,24 @@ show only Cingulate's transport shape, not a valid consent statement/signature:
 ```json
 {"elicitationId":"el_1","choiceId":"approve","clientFeatures":["config-plan"],"statement":"_wABeCBub3QtSlNPTgo","signature_b64url":"AQIDBA"}
 ```
+
+Include `expectedRound` with the non-negative integer round the person reviewed;
+omission means 0, the first round. This member is camelCase like `elicitationId`.
+Cingulate checks the round inside the transaction that records the answer,
+before exact-retry and replay checks. A mismatch returns a typed answer result,
+for example `{"ok":false,"code":"round_changed","detail":{"currentRound":1}}`.
+Nothing is recorded. Reread the current card and ask for a new decision; never
+silently resubmit a stale decision with the newer round number.
+
+An exact retry of the current round's recorded choice and signed strings stays
+idempotent (`alreadyAnswered: true`). Any other answer whose decoded statement
+SHA-256 was already recorded on this card, in any round or choice, returns
+`{"ok":false,"code":"statement_reused"}` without recording it. Signing the same
+statement again does not make it fresh. A reopened round requires a new decision,
+fresh statement bytes and a matching `expectedRound`; an omitted round on a
+reopened card returns `round_changed` first. Both refusals are typed answer
+results, not transport errors. Other card kinds ignore `expectedRound` if
+present, just as they ignore unrelated unknown answer params.
 
 Approve without either signed field refuses `elicitation_invalid_request`.
 `statement` must be nonempty, strict unpadded base64url with at most 4,096 decoded
@@ -483,8 +544,9 @@ Do not use `envelope_b64url` on this kind. A decline can omit the signed fields:
 Accepted answers use the existing `ok: true`, `alreadyAnswered: false` wrapper
 with the settled `elicitation`; it adds `answeredChoiceId`, `answeredAtMs`,
 `answeredDevice`, `answerSeq: 1`, `statement` and `signatureB64url` (if supplied).
-Repeating exactly the same answer returns `alreadyAnswered: true`; any different
-answer to a settled card conflicts. A Cingulate accepted approval is **not** a
+Repeating exactly the same answer in the current round returns `alreadyAnswered: true`;
+a different answer to a settled card conflicts unless its statement digest is
+reused, which returns `statement_reused` first. A Cingulate accepted approval is **not** a
 verified or applied plan: Callosum alone decides that.
 
 When Callosum reports failed verification while time remains, the same card

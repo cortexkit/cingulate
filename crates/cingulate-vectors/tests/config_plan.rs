@@ -389,7 +389,7 @@ async fn config_plan_passthrough_and_reopen_sequence() {
         .await;
     assert_eq!(core["records"], json!([]));
     let r = f
-        .ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .ok(&phone(), "consent.answer", answer_round(&id, "approve", 1))
         .await;
     assert_eq!(r["elicitation"]["answerSeq"], 2);
     let count: i64 = f
@@ -476,7 +476,7 @@ async fn config_plan_report_guards() {
         .unwrap_err()["code"],
         "elicitation_invalid_request"
     );
-    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+    f.ok(&phone(), "consent.answer", answer_round(&id, "approve", 1))
         .await;
     let e = f
         .call(
@@ -610,12 +610,15 @@ async fn config_plan_reopened_projections_expose_notice_round() {
         json!({"clientFeatures":["config-plan"]}),
     );
     assert_eq!(watch.next_value().await, json!({"type":"reread"}));
-    let id = f.request(&filer(), body()).await;
+    let filing = all_sections_body();
+    let expected = filing["config_plan"].clone();
+    let id = f.request(&filer(), filing).await;
     for round in 0..=2 {
         let item = watch.next_value().await;
         assert_eq!(item["type"], "changed");
         assert_eq!(item["card"]["elicitationId"], id);
         assert_round(&item["card"], round);
+        assert_eq!(item["card"]["configPlan"], expected);
         let list = f
             .ok(
                 &phone(),
@@ -624,10 +627,12 @@ async fn config_plan_reopened_projections_expose_notice_round() {
             )
             .await;
         assert_round(&list["records"][0], round);
+        assert_eq!(list["records"][0]["configPlan"], expected);
         for state in ["pending", "answered"] {
             let phone_record = f.ok(&phone(), "consent.get", get(&id)).await;
             assert_eq!(phone_record["state"], state);
             assert_round(&phone_record, round);
+            assert_eq!(phone_record["configPlan"], expected);
             for method in ["consent.get", "consent.await"] {
                 let requester_record = f
                     .ok(
@@ -638,6 +643,7 @@ async fn config_plan_reopened_projections_expose_notice_round() {
                     .await;
                 assert_eq!(requester_record["state"], state);
                 assert_round(&requester_record, round);
+                assert_eq!(requester_record["config_plan"], expected);
             }
             let notice_round: u64 = f.sql().query_row(
                 "SELECT round FROM access_notices WHERE elicitation_id=?1 ORDER BY rowid DESC LIMIT 1",
@@ -646,13 +652,19 @@ async fn config_plan_reopened_projections_expose_notice_round() {
             assert_eq!(notice_round, round);
             if state == "pending" {
                 let answer = f
-                    .ok(&phone(), "consent.answer", answer(&id, "approve"))
+                    .ok(
+                        &phone(),
+                        "consent.answer",
+                        answer_round(&id, "approve", round),
+                    )
                     .await;
                 assert_round(&answer["elicitation"], round);
+                assert_eq!(answer["elicitation"]["configPlan"], expected);
                 let answered = watch.next_value().await;
                 assert_eq!(answered["type"], "changed");
                 assert_eq!(answered["card"]["state"], "answered");
                 assert_round(&answered["card"], round);
+                assert_eq!(answered["card"]["configPlan"], expected);
             }
         }
         if round < 2 {
@@ -672,6 +684,169 @@ async fn config_plan_reopened_projections_expose_notice_round() {
 }
 
 #[tokio::test]
+async fn config_plan_legacy_stored_card_reads_decline_only() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    f.sql().execute(
+        "UPDATE elicitation_records SET record_json=json_remove(record_json,'$.request.config_plan.apply') WHERE elicitation_id=?1",
+        [&id],
+    ).unwrap();
+    let record = f.ok(&phone(), "consent.get", get(&id)).await;
+    assert!(record["configPlan"].get("apply").is_none());
+    assert_eq!(
+        record["options"],
+        json!([{"id":"decline","label":"Decline","effect":"decline"}])
+    );
+    for method in ["consent.get", "consent.await"] {
+        let record = f
+            .ok(
+                &filer(),
+                method,
+                json!({"elicitation_id":id,"timeout_ms":0}),
+            )
+            .await;
+        assert_eq!(record["options"].as_array().unwrap().len(), 1);
+        assert_eq!(record["options"][0]["id"], "decline");
+    }
+    assert_eq!(
+        f.call(&phone(), "consent.answer", answer(&id, "approve"))
+            .await
+            .unwrap_err()["code"],
+        "elicitation_invalid_choice"
+    );
+    f.ok(&phone(), "consent.answer", answer(&id, "decline"))
+        .await;
+}
+
+#[tokio::test]
+async fn config_plan_round_guard_refuses_stale_answers_without_writes() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    f.ok(
+        &filer(),
+        "consent.report_unverified",
+        json!({"elicitation_id":id,"answer_seq":1,"code":"signature"}),
+    )
+    .await;
+    for expected in [None, Some(0), Some(2)] {
+        let mut params = answer(&id, "approve");
+        if let Some(round) = expected {
+            params["expectedRound"] = json!(round);
+        }
+        assert_eq!(
+            f.ok(&phone(), "consent.answer", params).await,
+            json!({"ok":false,"code":"round_changed","detail":{"currentRound":1}})
+        );
+        let record = f.stored_record(&id);
+        assert_eq!(record.answer_seq, Some(1));
+        assert_eq!(record.state, cingulate_store::State::Pending);
+        assert!(record.statement.is_none());
+    }
+    let audits: i64 = f
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM config_plan_audit WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let notices: i64 = f
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM access_notices WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audits, 1);
+    assert_eq!(notices, 3);
+}
+
+#[tokio::test]
+async fn config_plan_round_guard_rejects_reused_statements_and_keeps_exact_retries() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+        .await;
+    assert_eq!(
+        f.ok(&phone(), "consent.answer", answer(&id, "approve"))
+            .await["alreadyAnswered"],
+        true
+    );
+    for round in 1..=2 {
+        f.ok(
+            &filer(),
+            "consent.report_unverified",
+            json!({"elicitation_id":id,"answer_seq":round,"code":"signature"}),
+        )
+        .await;
+        let mut reused = answer(&id, "approve");
+        reused["expectedRound"] = json!(round);
+        assert_eq!(
+            f.ok(&phone(), "consent.answer", reused).await,
+            json!({"ok":false,"code":"statement_reused"})
+        );
+        let record = f.stored_record(&id);
+        assert_eq!(record.answer_seq, Some(round));
+        assert_eq!(record.state, cingulate_store::State::Pending);
+        let mut fresh = answer(&id, "approve");
+        fresh["expectedRound"] = json!(round);
+        fresh["statement"] =
+            json!(URL_SAFE_NO_PAD.encode(format!("fresh statement for round {round}")));
+        assert_eq!(
+            f.ok(&phone(), "consent.answer", fresh.clone()).await["alreadyAnswered"],
+            false
+        );
+        assert_eq!(
+            f.ok(&phone(), "consent.answer", fresh).await["alreadyAnswered"],
+            true
+        );
+    }
+    let mut changed_signature = answer(&id, "approve");
+    changed_signature["expectedRound"] = json!(2);
+    changed_signature["statement"] = json!(URL_SAFE_NO_PAD.encode("fresh statement for round 2"));
+    changed_signature["signature_b64url"] = json!("BQ");
+    assert_eq!(
+        f.ok(&phone(), "consent.answer", changed_signature).await,
+        json!({"ok":false,"code":"statement_reused"})
+    );
+    let audits: i64 = f
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM config_plan_audit WHERE elicitation_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audits, 3);
+}
+
+#[tokio::test]
+async fn config_plan_expected_round_is_integer_but_other_kinds_ignore_it() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    for value in [Value::Null, json!(-1), json!(1.5), json!("0"), json!(false)] {
+        let mut params = answer(&id, "decline");
+        params["expectedRound"] = value;
+        let error = f
+            .call(&phone(), "consent.answer", params)
+            .await
+            .unwrap_err();
+        assert_eq!(error["code"], "elicitation_invalid_request");
+        assert!(error["message"].as_str().unwrap().contains("expectedRound"));
+    }
+    let id = f
+        .request(
+            &support::stamp("reserved:prefrontal-core"),
+            phone::package_body(),
+        )
+        .await;
+    assert_eq!(f.ok(&phone::phone_stamp(), "consent.answer", json!({"elicitationId":id,"choiceId":"allow","expectedRound":{"ignored":true},"unknown":true})).await["ok"], true);
+}
+
+#[tokio::test]
 async fn config_plan_served_vectors_and_checksums() {
     let manifest = serde_json::to_value(ck_cingulate::manifest()).unwrap();
     assert!(manifest["capabilities"]["provides"]
@@ -684,15 +859,17 @@ async fn config_plan_served_vectors_and_checksums() {
             bytes
         );
     }
-    let sums = std::fs::read_to_string(support::corpus(CORPUS).join("SHA256SUMS")).unwrap();
-    for line in sums.lines() {
-        let (hash, name) = line.split_once("  ").unwrap();
-        assert_eq!(
-            hash,
-            format!(
-                "{:x}",
-                Sha256::digest(std::fs::read(support::corpus(CORPUS).join(name)).unwrap())
-            )
-        );
+    for corpus in ["config-plan-v1", CORPUS] {
+        let sums = std::fs::read_to_string(support::corpus(corpus).join("SHA256SUMS")).unwrap();
+        for line in sums.lines() {
+            let (hash, name) = line.split_once("  ").unwrap();
+            assert_eq!(
+                hash,
+                format!(
+                    "{:x}",
+                    Sha256::digest(std::fs::read(support::corpus(corpus).join(name)).unwrap())
+                )
+            );
+        }
     }
 }

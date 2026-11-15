@@ -1720,10 +1720,22 @@ impl Handler {
                         }
                         store.answer_config_plan(
                             id.expect("answer id"),
-                            choice.expect("choice"),
-                            stamp.secret_use_phone(),
-                            signed_field("statement")?,
-                            signed_field("signature_b64url")?,
+                            cingulate_store::ConfigPlanAnswer {
+                                choice: choice.expect("choice"),
+                                device: stamp.secret_use_phone(),
+                                statement: signed_field("statement")?,
+                                signature: signed_field("signature_b64url")?,
+                                expected_round: params
+                                    .get("expectedRound")
+                                    .map(|value| {
+                                        value.as_u64().ok_or_else(|| {
+                                            invalid("expectedRound must be a nonnegative integer")
+                                                .reason("param_type")
+                                        })
+                                    })
+                                    .transpose()?
+                                    .unwrap_or(0),
+                            },
                             now,
                         )
                     } else {
@@ -1755,6 +1767,12 @@ impl Handler {
                     events.extend(mutation.settlements);
                     match mutation.value {
                         AnswerOutcome::NotFound => json!({"ok":false,"code":"not_found"}),
+                        AnswerOutcome::RoundChanged { current_round } => {
+                            json!({"ok":false,"code":"round_changed","detail":{"currentRound":current_round}})
+                        }
+                        AnswerOutcome::StatementReused => {
+                            json!({"ok":false,"code":"statement_reused"})
+                        }
                         AnswerOutcome::Conflict(record) => {
                             json!({"ok":false,"code":"conflict","elicitation":surface_options(self.project(&record, true), option_group)})
                         }

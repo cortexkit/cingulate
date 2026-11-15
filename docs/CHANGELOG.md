@@ -7,6 +7,26 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.20.0 (ck-cingulate), 0.11.0 (cingulate-decode), 0.9.0 (cingulate-store), 0.12.0 (cingulate-vectors)
+
+- Add closed, bounded `config_plan` apply/restart scope, affected projects,
+  policy changes and launch manifests. Allow zero field changes when a policy
+  or program row records the change; keep unknown sections Decline-only.
+- Add the `layer_file` policy change for settings-file edits with no effective
+  setting change, carrying only absent/file-hash facts.
+- Bind config-plan answers to `expectedRound` (omitted means 0) inside the
+  recording transaction. Return typed `round_changed` results for stale rounds
+  and `statement_reused` for previously recorded statement digests, while
+  preserving exact current-round retries. Reuse the existing audit digest
+  column; no migration is needed.
+- The phone must read and render every new member in the checksum-pinned
+  `config-plan-v2` samples before Callosum files them. Preserve the original
+  `config-plan-v1` payload unchanged.
+- Persist all sections in the existing record JSON and project them unchanged
+  across phone/requester reads and reopened rounds. No schema migration is
+  needed. Historical cards without an apply summary remain readable and
+  Decline-only.
+
 ## 0.19.0 (ck-cingulate), 0.10.0 (cingulate-decode), 0.8.0 (cingulate-store), 0.11.0 (cingulate-vectors)
 
 - Add `consent-config-plan/v1`: Callosum-only, fail-closed settings approval

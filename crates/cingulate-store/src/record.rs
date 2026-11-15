@@ -122,6 +122,18 @@ impl ElicitationRecord {
                 object.insert(camel(key), value.clone());
             }
         }
+        // Historical cards without a restart summary cannot show the full
+        // change, so their only available decision is to decline.
+        if self
+            .request
+            .config_plan
+            .as_ref()
+            .is_some_and(|plan| plan.apply.is_none())
+        {
+            if let Some(options) = object.get_mut("options").and_then(Value::as_array_mut) {
+                options.retain(|option| option["id"] == "decline");
+            }
+        }
         object.insert("requesterLabel".into(), json!(self.requester));
         if self.state == State::Pending {
             if let Some(until) = block_until {

@@ -14,7 +14,11 @@ mod flow_secrets;
 mod manifest_binding;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
-pub use config_plan::{config_answer_bytes, ConfigChange, ConfigPlan};
+pub use config_plan::{
+    config_answer_bytes, ConfigApply, ConfigChange, ConfigLaunchManifest, ConfigModuleApply,
+    ConfigOperation, ConfigPlan, ConfigPolicyChange, ConfigPolicyKind, ConfigProgramChange,
+    ConfigReview, ConfigTransition,
+};
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};
 pub use secret_use::{SecretUse, SecretUseAnswer, SecretUseItem, UseStatement};

@@ -742,11 +742,11 @@ labels; it relays all statement bytes unchanged to the phone, which renders the
 complete scope. The [pinned vault samples](../../test-vectors/secret-statements-v3/README.md)
 cover canonical multi-rule and wildcard scopes and multiple origins.
 
-## Config-plan requester (0.19.0)
+## Config-plan requester (0.20.0)
 
 **Readers first.** Callosum checks `catalog.list` for `consent-config-plan/v1`
-and CKIOS reads the [handler-generated samples](../../test-vectors/config-plan-v1/README.md)
-before any card is sent. Only the full daemon-attested principal
+and CKIOS reads the [typed-section samples](../../test-vectors/config-plan-v2/README.md),
+including every new member, before Callosum files them. Only the full daemon-attested principal
 `reserved:callosum` may file, get, await, withdraw or report on `config_plan`.
 Every other principal is refused `elicitation_requester_refused`. Callosum may
 file no other kind. No carried agent or session scope is required. Ownership is
@@ -758,11 +758,11 @@ agent/session notices. Scope-less person-facing escalated,
 settled and withdrawn notices still drive phone pushes/retractions, as on other
 cards. Notification metadata never includes change values or signed bytes.
 
-`consent.request` params are closed, including the typed plan and each change
-row. Unknown keys refuse `elicitation_invalid_request`. Example:
+`consent.request` params are closed, including the typed plan and every nested
+section object and row. Unknown keys refuse `elicitation_invalid_request`. Example:
 
 ```json
-{"kind":"config_plan","expires_in_ms":300000,"binding":{"correlation":"fake-correlation"},"config_plan":{"plan_digest":"fake-plan-digest","base_revision":"42","changes":[{"module_id":"example-module","project_id":"example-project","path":"settings.enabled","old":false,"new":true,"old_source":"default","new_source":"project","apply":"live"}],"other_sections":{"policy_changes":{"example":true}}}}
+{"kind":"config_plan","expires_in_ms":300000,"binding":{"correlation":"fake-correlation"},"config_plan":{"plan_digest":"fake-plan-digest","base_revision":"42","apply":{"operation":"change","rollback_to":null,"modules":[],"review":null},"changes":[{"module_id":"example-module","project_id":"example-project","path":"settings.enabled","old":false,"new":true,"old_source":"default","new_source":"project","apply":"live"}],"other_sections":{"policy_changes":{"example":true}}}}
 ```
 
 | Field | Rule |
@@ -772,12 +772,49 @@ row. Unknown keys refuse `elicitation_invalid_request`. Example:
 | `dedup_key` | Optional, with the existing pending-card dedup/refresh behavior. |
 | `config_plan.plan_digest` | String, 1–128 UTF-8 bytes. |
 | `config_plan.base_revision` | Nonempty decimal string (ASCII digits only). Not a JSON number. |
-| `config_plan.changes` | 1–64 closed rows. |
+| `config_plan.changes` | Required array of 0–64 closed field-change rows. |
 | row `module_id`, optional `project_id` | Strings, 1–128 UTF-8 bytes each. A present project id cannot be null. |
 | row `path` | String, 1–1,024 UTF-8 bytes. |
 | row `old`, `new` | Required recorded JSON values, including null; at most 4,096 serialized UTF-8 bytes each. |
 | row `old_source`, `new_source`, `apply` | Strings, 1–64 UTF-8 bytes each. `apply` is open; known values are `live`, `module_restart`, `daemon_restart`, `next_supervision`, `route_rebind`. Unknown values are preserved. |
+| `config_plan.apply` | Required closed object with all four members: `operation`, `rollback_to`, `modules`, `review`. Present null is invalid. |
+| `apply.operation`, `rollback_to` | Operation is exactly `change` or `rollback`. `rollback_to` is a nonempty ASCII decimal string exactly for rollback; otherwise it is null. Both members are required. |
+| `apply.modules` | Required array of 0–64 closed rows, unique by `module_id` (1–128 UTF-8 bytes). Every row requires all seven members below. |
+| module `transition` | Exactly `live`, `module_restart`, `next_start` or `daemon_restart`; unknown transitions refuse. Unlike a field row's open `apply` string, this is a closed enum. |
+| module `whole_generation`, `waits_for_next_start`, `waits_for_daemon_restart` | Required booleans. |
+| module `deferred_live_fields`, `explanation` | Required array of 0–64 paths (1–1,024 UTF-8 bytes each), and required plain-text explanation (1–512 UTF-8 bytes). |
+| `apply.review` | Required null or closed object `{"supervisor_reconcile":true}`; false is invalid. |
+| `config_plan.affected_projects` | Optional array of 0–64 unique project ids, each 1–128 UTF-8 bytes. |
+| `config_plan.policy_changes` | Optional array of 0–64 closed rows: `kind`, conditional `module_id`/`layer`, required `old`/`new`, optional `reason`. |
+| policy `kind`, `module_id` | Kind is exactly `declaration`, `subc_jsonc`, `reviewed_program` or `layer_file`. `module_id` (1–128 UTF-8 bytes) is required except for `subc_jsonc`, where it must be absent. |
+| policy `old`, `new`, `reason` | For non-`layer_file` kinds, values have the same JSON/redaction form and 4,096-byte cap as field changes. Optional reason is at most 512 UTF-8 bytes. |
+| `layer_file` policy `layer`, `old`, `new` | `layer` is required, 1–64 UTF-8 bytes, and allowed only on this kind. Each value is a closed `{"absent":true}` or `{"sha256":"<64 lowercase hex>","bytes":<non-negative integer>}` object. `reason` must be absent. |
+| `config_plan.launch_manifests` | Optional array of 0–64 closed entries `{module_id, origin, programs}`, unique by `module_id` (1–128 UTF-8 bytes); origin is 1–64 UTF-8 bytes. |
+| manifest `programs` | Required array of 1–16 closed rows `{input, old, new}`; input is 1–1,024 UTF-8 bytes. Values have the same JSON/redaction form and 4,096-byte cap as field changes. |
 | `config_plan.other_sections` | Optional object of section name to raw JSON, at most 16,384 serialized UTF-8 bytes in total. Present null is invalid. The phone displays unknown sections raw. |
+
+`apply` explains when settings take effect and which restarts or reconciliation
+are needed. Its explanation renders as literal plain text, not HTML or Markdown;
+as with other card explanations, controls U+0000–U+001F and U+007F–U+009F
+other than U+000A newline are refused,
+and whitespace is preserved. `affected_projects` identifies the projects touched by the plan.
+`policy_changes` exposes changes to authority separately from ordinary settings;
+`subc_jsonc` records changes to the daemon's subc.jsonc policy configuration.
+its `layer_file` kind records settings-file edits with no effective setting change,
+including comments, formatting, same-value replacements, creation and removal.
+`launch_manifests` shows the programs that will be launched, so approval covers
+executable changes as well as settings. `changes` shows the field-level values
+and their sources; `other_sections` retains anything the typed reader cannot yet
+render, keeping such a card Decline-only.
+
+At least one row must exist across `changes`, `policy_changes` and all
+`launch_manifests[].programs`; restart scope or affected projects alone is not a
+plan. Missing required members, invalid types/enums, duplicate ids, empty plans
+and every exceeded cap refuse `elicitation_invalid_request` at filing, never
+truncate. Optional lists and optional row strings cannot be present null.
+The phone must render every section before approval; nonempty `other_sections`
+remains Decline-only. Historical stored cards without `apply` still read, but
+offer only decline, and approval attempts refuse `elicitation_invalid_choice`.
 
 The existing 1,310,720-byte frame bound remains. Cingulate fixes the card presentation and
 options: `approve` (effect `choose`) and `decline` (effect `decline`, default),
@@ -794,7 +831,9 @@ replace an answer. After an approval, reads include these fields unchanged:
 ```
 
 This is a record excerpt; full get/await replies are in the
-[handler-generated samples](../../test-vectors/config-plan-v1/README.md).
+[handler-generated samples](../../test-vectors/config-plan-v2/README.md).
+Every typed section is stored and returned unchanged in requester get/await and
+phone get/list/watch, including reopened rounds. Nested member names stay snake_case.
 `statement` is unpadded base64url of at most 4,096 decoded bytes;
 `signature_b64url` is unpadded base64url of at most 1,024 decoded bytes. Present
 empty, malformed, padded, noncanonical trailing-bit or overlong encodings are
@@ -802,6 +841,26 @@ refused `elicitation_invalid_request`. Approve requires both; decline may carry
 either or neither. Cingulate stores and returns the exact strings byte for byte;
 it checks only encoding and size, never parses the statement, canonicalizes its
 content, checks its decision or verifies its signature. **Only Callosum verifies.**
+
+Phone `consent.answer` accepts optional `expectedRound`, a non-negative JSON
+integer in the same camelCase style as `elicitationId`. Omission means round 0.
+Inside the recording transaction, Cingulate first compares it to the card's
+current `round` (also 0 when omitted on the card). A mismatch returns the typed
+answer result `{"ok":false,"code":"round_changed","detail":{"currentRound":1}}`
+without recording an answer. The phone must reread the card and obtain a new
+decision for its current round. Other card kinds ignore this member, preserving
+the existing handling of unrelated answer params.
+
+After the round check, an exact retry of the current round's recorded choice
+and signed strings remains `alreadyAnswered: true`. Otherwise, the SHA-256 of
+the decoded statement bytes is checked against every recorded answer on this
+card, across all rounds and choices. A reused digest returns
+`{"ok":false,"code":"statement_reused"}` without recording anything, even if
+the signature or choice differs. A new answer in a reopened round needs both
+the matching `expectedRound` and fresh statement bytes. These are typed answer
+result refusals, not code/message transport errors. Cingulate already stores
+the digest in `config_plan_audit`; no statement content is interpreted and no
+new schema migration is required.
 
 ### `consent.report_unverified`
 

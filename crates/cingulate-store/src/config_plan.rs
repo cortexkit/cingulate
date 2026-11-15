@@ -3,57 +3,176 @@ use sha2::{Digest, Sha256};
 
 use crate::*;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ConfigPlanAnswer<'a> {
+    pub choice: &'a str,
+    pub device: Option<&'a str>,
+    pub statement: Option<&'a str>,
+    pub signature: Option<&'a str>,
+    pub expected_round: u64,
+}
+
 impl ConsentStore {
     pub fn answer_config_plan(
         &self,
         id: &str,
-        choice: &str,
-        device: Option<&str>,
-        statement: Option<&str>,
-        signature: Option<&str>,
+        answer: ConfigPlanAnswer<'_>,
         now_ms: i64,
     ) -> Result<Mutation<AnswerOutcome>> {
         self.transaction(|tx| {
-            let Some(mut record) = load(tx, id)?.filter(|r| retained(r, now_ms)) else {
-                return Ok(Mutation { value: AnswerOutcome::NotFound, settlements: vec![] });
+            let Some(record) = load(tx, id)?.filter(|r| retained(r, now_ms)) else {
+                return Ok(Mutation {
+                    value: AnswerOutcome::NotFound,
+                    settlements: vec![],
+                });
             };
-            if record.request.kind != "config_plan" {
-                return Err(refuse("elicitation_invalid_request", "statement requires config_plan"));
+            Self::record_config_plan_answer(tx, id, record, answer, now_ms)
+        })
+    }
+
+    // Roundless store callers have no request params and can only submit an
+    // unsigned decline, never approval. Binding that decline to a reviewed
+    // round protects nothing, so read its current round in the recording
+    // transaction. The phone handler supplies its explicit expectedRound.
+    pub(super) fn answer_unsigned_config_plan(
+        &self,
+        id: &str,
+        choice: &str,
+        device: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Mutation<AnswerOutcome>> {
+        self.transaction(|tx| {
+            let Some(record) = load(tx, id)?.filter(|r| retained(r, now_ms)) else {
+                return Ok(Mutation {
+                    value: AnswerOutcome::NotFound,
+                    settlements: vec![],
+                });
+            };
+            let answer = ConfigPlanAnswer {
+                choice,
+                device,
+                statement: None,
+                signature: None,
+                expected_round: record.notice_round,
+            };
+            Self::record_config_plan_answer(tx, id, record, answer, now_ms)
+        })
+    }
+
+    fn record_config_plan_answer(
+        tx: &Transaction<'_>,
+        id: &str,
+        mut record: ElicitationRecord,
+        answer: ConfigPlanAnswer<'_>,
+        now_ms: i64,
+    ) -> Result<Mutation<AnswerOutcome>> {
+        let ConfigPlanAnswer {
+            choice,
+            device,
+            statement,
+            signature,
+            expected_round,
+        } = answer;
+        if record.request.kind != "config_plan" {
+            return Err(refuse(
+                "elicitation_invalid_request",
+                "statement requires config_plan",
+            ));
+        }
+        if expected_round != record.notice_round {
+            return Ok(Mutation {
+                value: AnswerOutcome::RoundChanged {
+                    current_round: record.notice_round,
+                },
+                settlements: vec![],
+            });
+        }
+        if record.expires_at_ms.is_some_and(|at| at <= now_ms) {
+            return Err(refuse("elicitation_expired", "config_plan has expired"));
+        }
+        if !matches!(choice, "approve" | "decline") {
+            return Err(refuse(
+                "elicitation_invalid_choice",
+                "choice must name an option",
+            ));
+        }
+        if device.is_none() {
+            return Err(refuse(
+                "elicitation_requester_refused",
+                "config_plan requires a phone",
+            ));
+        }
+        if choice == "approve" && (statement.is_none() || signature.is_none()) {
+            return Err(refuse(
+                "elicitation_invalid_request",
+                "config_plan approve requires statement and signature_b64url",
+            ));
+        }
+        if choice == "approve"
+            && record
+                .request
+                .config_plan
+                .as_ref()
+                .is_none_or(|plan| plan.apply.is_none())
+        {
+            return Err(refuse(
+                "elicitation_invalid_choice",
+                "config_plan without an apply summary is Decline-only",
+            ));
+        }
+        let bytes = statement
+            .map(|s| config_answer_bytes(s, 4096, "statement"))
+            .transpose()
+            .map_err(Error::Refused)?;
+        if let Some(signature) = signature {
+            config_answer_bytes(signature, 1024, "signature_b64url").map_err(Error::Refused)?;
+        }
+        let same = record.state == State::Answered
+            && record.answered_choice_id.as_deref() == Some(choice)
+            && record.statement.as_deref() == statement
+            && record.signature_b64url.as_deref() == signature;
+        if same {
+            return Ok(Mutation {
+                value: AnswerOutcome::AlreadyAnswered(record),
+                settlements: vec![],
+            });
+        }
+        let digest = bytes
+            .as_ref()
+            .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
+        if let Some(digest) = &digest {
+            let reused: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM config_plan_audit WHERE elicitation_id=?1 AND statement_sha256=?2)", params![id, digest], |row| row.get(0))?;
+            if reused {
+                return Ok(Mutation {
+                    value: AnswerOutcome::StatementReused,
+                    settlements: vec![],
+                });
             }
-            if record.expires_at_ms.is_some_and(|at| at <= now_ms) {
-                return Err(refuse("elicitation_expired", "config_plan has expired"));
-            }
-            if !matches!(choice, "approve" | "decline") {
-                return Err(refuse("elicitation_invalid_choice", "choice must name an option"));
-            }
-            if device.is_none() {
-                return Err(refuse("elicitation_requester_refused", "config_plan requires a phone"));
-            }
-            if choice == "approve" && (statement.is_none() || signature.is_none()) {
-                return Err(refuse("elicitation_invalid_request", "config_plan approve requires statement and signature_b64url"));
-            }
-            let bytes = statement.map(|s| config_answer_bytes(s, 4096, "statement"))
-                .transpose().map_err(Error::Refused)?;
-            if let Some(signature) = signature {
-                config_answer_bytes(signature, 1024, "signature_b64url").map_err(Error::Refused)?;
-            }
-            if record.state != State::Pending {
-                let same = record.state == State::Answered
-                    && record.answered_choice_id.as_deref() == Some(choice)
-                    && record.statement.as_deref() == statement
-                    && record.signature_b64url.as_deref() == signature;
-                return Ok(Mutation { value: if same { AnswerOutcome::AlreadyAnswered(record) } else { AnswerOutcome::Conflict(record) }, settlements: vec![] });
-            }
-            let seq = record.answer_seq.unwrap_or(0) + 1;
-            tx.execute("INSERT INTO config_plan_audit(elicitation_id,answer_seq,choice,answered_at_ms,statement_sha256,statement_length) VALUES (?1,?2,?3,?4,?5,?6)",
-                params![id, seq, choice, now_ms, bytes.as_ref().map(|b| format!("{:x}", Sha256::digest(b))), bytes.as_ref().map(|b| b.len() as i64)])?;
-            record.answer_seq = Some(seq);
-            record.statement = statement.map(str::to_owned);
-            record.signature_b64url = signature.map(str::to_owned);
-            record.unverified = None;
-            record.answered_device = device.map(str::to_owned);
-            terminal(tx, &mut record, State::Answered, Some(choice.into()), now_ms)?;
-            Ok(Mutation { value: AnswerOutcome::Answered(record.clone()), settlements: vec![record] })
+        }
+        if record.state != State::Pending {
+            return Ok(Mutation {
+                value: AnswerOutcome::Conflict(record),
+                settlements: vec![],
+            });
+        }
+        let seq = record.answer_seq.unwrap_or(0) + 1;
+        tx.execute("INSERT INTO config_plan_audit(elicitation_id,answer_seq,choice,answered_at_ms,statement_sha256,statement_length) VALUES (?1,?2,?3,?4,?5,?6)",
+                params![id, seq, choice, now_ms, digest, bytes.as_ref().map(|b| b.len() as i64)])?;
+        record.answer_seq = Some(seq);
+        record.statement = statement.map(str::to_owned);
+        record.signature_b64url = signature.map(str::to_owned);
+        record.unverified = None;
+        record.answered_device = device.map(str::to_owned);
+        terminal(
+            tx,
+            &mut record,
+            State::Answered,
+            Some(choice.into()),
+            now_ms,
+        )?;
+        Ok(Mutation {
+            value: AnswerOutcome::Answered(record.clone()),
+            settlements: vec![record],
         })
     }
 
@@ -138,10 +257,12 @@ mod tests {
             self.store.as_ref().unwrap()
         }
         fn file(&self) -> String {
-            let sample: Value = serde_json::from_str(include_str!(
+            let mut sample: Value = serde_json::from_str(include_str!(
                 "../../../test-vectors/config-plan-v1/filing.json"
             ))
             .unwrap();
+            sample["params"]["config_plan"]["apply"] =
+                json!({"operation":"change","rollback_to":null,"modules":[],"review":null});
             self.db()
                 .create(
                     &RequestIdentity {
@@ -182,7 +303,17 @@ mod tests {
         let id = f.file();
         assert_eq!(
             f.db()
-                .answer_config_plan(&id, "approve", None, Some("AA"), Some("AQ"), 101)
+                .answer_config_plan(
+                    &id,
+                    ConfigPlanAnswer {
+                        choice: "approve",
+                        device: None,
+                        statement: Some("AA"),
+                        signature: Some("AQ"),
+                        expected_round: 0
+                    },
+                    101
+                )
                 .unwrap_err()
                 .code(),
             "elicitation_requester_refused"
@@ -198,10 +329,13 @@ mod tests {
             f.db()
                 .answer_config_plan(
                     &id,
-                    "approve",
-                    Some("fake-phone"),
-                    Some("AA"),
-                    Some("AQ"),
+                    ConfigPlanAnswer {
+                        choice: "approve",
+                        device: Some("fake-phone"),
+                        statement: Some("AA"),
+                        signature: Some("AQ"),
+                        expected_round: 0
+                    },
                     101
                 )
                 .unwrap_err()
@@ -225,10 +359,13 @@ mod tests {
         f.db()
             .answer_config_plan(
                 &id,
-                "approve",
-                Some("fake-phone"),
-                Some("AA"),
-                Some("AQ"),
+                ConfigPlanAnswer {
+                    choice: "approve",
+                    device: Some("fake-phone"),
+                    statement: Some("AA"),
+                    signature: Some("AQ"),
+                    expected_round: 0,
+                },
                 101,
             )
             .unwrap();
@@ -251,7 +388,17 @@ mod tests {
         assert_eq!(escalated.body["round"], 1);
         assert!(settled.body.get("round").is_none());
         f.db()
-            .answer_config_plan(&id, "decline", Some("fake-phone"), None, None, 1001)
+            .answer_config_plan(
+                &id,
+                ConfigPlanAnswer {
+                    choice: "decline",
+                    device: Some("fake-phone"),
+                    statement: None,
+                    signature: None,
+                    expected_round: 1,
+                },
+                1001,
+            )
             .unwrap();
         let second = f.db().access_notices(1001).unwrap().pop().unwrap();
         assert_eq!((second.purpose.as_str(), second.round), ("settled", 1));
@@ -264,6 +411,93 @@ mod tests {
         assert_eq!(record.notice_round, 1);
         assert_eq!(record.answer_seq, Some(2));
         assert_eq!(f.db().access_notices(1002).unwrap()[0].round, 1);
+    }
+
+    #[test]
+    fn config_plan_reopened_unsigned_decline_from_device() {
+        assert_reopened_unsigned_decline(|store, id, choice| {
+            store.answer_from_device(id, choice, None, Some("fake-phone"), 103)
+        });
+    }
+
+    #[test]
+    fn config_plan_reopened_unsigned_decline_with_envelope() {
+        assert_reopened_unsigned_decline(|store, id, choice| {
+            store.answer_with_envelope(id, choice, None, Some("fake-phone"), None, 103)
+        });
+    }
+
+    fn assert_reopened_unsigned_decline(
+        answer: impl Fn(&ConsentStore, &str, &str) -> Result<Mutation<AnswerOutcome>>,
+    ) {
+        let mut f = Scratch::new();
+        f.open();
+        let id = f.file();
+        f.db()
+            .answer_config_plan(
+                &id,
+                ConfigPlanAnswer {
+                    choice: "approve",
+                    device: Some("fake-phone"),
+                    statement: Some("AA"),
+                    signature: Some("AQ"),
+                    expected_round: 0,
+                },
+                101,
+            )
+            .unwrap();
+        f.db()
+            .report_unverified("callosum-owner", &id, 1, "signature", 102)
+            .unwrap();
+
+        let declined = answer(f.db(), &id, "decline").unwrap();
+        let AnswerOutcome::Answered(record) = declined.value else {
+            panic!(
+                "reopened unsigned decline was not recorded: {:?}",
+                declined.value
+            );
+        };
+        assert_eq!(record.state, State::Answered);
+        assert_eq!(record.answered_choice_id.as_deref(), Some("decline"));
+        assert_eq!(record.notice_round, 1);
+        assert_eq!(record.answer_seq, Some(2));
+        assert!(record.statement.is_none());
+        assert!(record.signature_b64url.is_none());
+        assert_eq!(declined.settlements.len(), 1);
+        assert!(matches!(
+            answer(f.db(), &id, "decline").unwrap().value,
+            AnswerOutcome::AlreadyAnswered(_)
+        ));
+        assert_eq!(
+            answer(f.db(), &id, "approve").unwrap_err().code(),
+            "elicitation_invalid_request"
+        );
+        assert_eq!(
+            f.db().answer(&id, "decline", None, 103).unwrap_err().code(),
+            "elicitation_requester_refused"
+        );
+        assert_eq!(
+            f.db()
+                .answer_config_plan(
+                    &id,
+                    ConfigPlanAnswer {
+                        choice: "decline",
+                        device: Some("fake-phone"),
+                        statement: None,
+                        signature: None,
+                        expected_round: 0,
+                    },
+                    103
+                )
+                .unwrap()
+                .value,
+            AnswerOutcome::RoundChanged { current_round: 1 }
+        );
+        drop(f.store.take());
+        f.open();
+        let stored = f.db().get_owned("callosum-owner", &id, 103).unwrap();
+        assert_eq!(stored.answered_choice_id.as_deref(), Some("decline"));
+        assert_eq!(stored.answer_seq, Some(2));
     }
 
     #[test]
