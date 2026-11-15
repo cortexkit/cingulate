@@ -17,7 +17,7 @@ pub use access::{validate_note, AccessRequest};
 pub use config_plan::{
     config_answer_bytes, ConfigApply, ConfigChange, ConfigLaunchManifest, ConfigModuleApply,
     ConfigOperation, ConfigPlan, ConfigPolicyChange, ConfigPolicyKind, ConfigProgramChange,
-    ConfigReview, ConfigTransition,
+    ConfigReview, ConfigRollbackProgram, ConfigTransition,
 };
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};

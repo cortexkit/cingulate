@@ -1,0 +1,20 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "approve",
+    "clientFeatures": [
+      "config-plan"
+    ],
+    "elicitationId": "el_1",
+    "expectedRound": 1,
+    "signature_b64url": "AQIDBA",
+    "statement": "_wABeCBub3QtSlNPTgo"
+  },
+  "reply": {
+    "result": {
+      "code": "statement_reused",
+      "ok": false
+    }
+  },
+  "tag": "config-plan-v3"
+}

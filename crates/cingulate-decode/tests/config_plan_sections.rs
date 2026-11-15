@@ -77,6 +77,9 @@ fn typed_sections_closed_shapes_and_required_members() {
             .unwrap()
             .keys()
         {
+            if field == "origin" && pointer.ends_with("launch_manifests/0") {
+                continue;
+            }
             if ["module_id", "reason"].contains(&field.as_str())
                 && pointer.ends_with("policy_changes/0")
             {
@@ -189,7 +192,7 @@ fn typed_sections_list_caps_and_uniqueness() {
     set_invalid(
         "/config_plan/launch_manifests/0/programs",
         [json!([])],
-        "programs",
+        "at least one program",
     );
     for (pointer, field) in [
         ("/config_plan/apply/modules", "apply.modules.module_id"),

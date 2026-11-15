@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::support;
 
-pub const CORPUS: &str = "config-plan-v2";
+pub const CORPUS: &str = "config-plan-v3";
 // Deliberately not JSON and not a real signature: Cingulate is a byte carrier.
 pub const STATEMENT: &str = "_wABeCBub3QtSlNPTgo";
 pub const SIGNATURE: &str = "AQIDBA";
@@ -19,7 +19,7 @@ pub fn body() -> Value {
         "apply":{"operation":"change","rollback_to":null,"modules":[],"review":null},"changes":[{
             "module_id":"example-module","project_id":"example-project","path":"settings.enabled",
             "old":false,"new":true,"old_source":"default","new_source":"project","apply":"live"
-        }],"other_sections":{"policy_changes":{"example":true}}
+        }],"other_sections":{"policy_changes":[{"example":true}]}
     }})
 }
 
@@ -59,6 +59,48 @@ pub fn layer_file_body() -> Value {
         "kind":"layer_file","module_id":"example-module","layer":"user",
         "old":{"sha256":"a".repeat(64),"bytes":42},"new":{"absent":true}
     }]);
+    b
+}
+
+pub fn rollback_body() -> Value {
+    let mut b = all_sections_body();
+    b["config_plan"]["apply"]["operation"] = json!("rollback");
+    b["config_plan"]["apply"]["rollback_to"] = json!("41");
+    b["config_plan"]["apply"]["rollback_programs"] = json!([{
+        "module_id":"example-module","input":"bin/tool",
+        "approved_then":{"program":"bin/tool","sha256":"a".repeat(64)},
+        "on_disk_now":{"program":"bin/tool","sha256":"b".repeat(64)}
+    }]);
+    let manifest = &mut b["config_plan"]["launch_manifests"][0];
+    manifest["program_changed_since_target"] = json!(true);
+    manifest["program_changed_since_active"] = json!(true);
+    b
+}
+
+pub fn flag_only_body() -> Value {
+    let mut b = all_sections_body();
+    b["config_plan"]["changes"] = json!([]);
+    b["config_plan"]
+        .as_object_mut()
+        .unwrap()
+        .remove("policy_changes");
+    b["config_plan"]["launch_manifests"] = json!([{
+        "module_id":"example-module","programs":[],"program_changed_since_active":true
+    }]);
+    b
+}
+
+pub fn route_rebind_body() -> Value {
+    let mut b = all_sections_body();
+    let module = &mut b["config_plan"]["apply"]["modules"][0];
+    module["transition"] = json!("route_rebind");
+    module["whole_generation"] = json!(false);
+    module["explanation"] =
+        json!("This module's open connections close and reopen under the new settings.");
+    b["config_plan"]
+        .as_object_mut()
+        .unwrap()
+        .remove("launch_manifests");
     b
 }
 
@@ -107,7 +149,13 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
     let mut cases = BTreeMap::new();
     for (name, mut params) in [
         ("change-all-sections.json", all_sections_body()),
-        ("rollback.json", all_sections_body()),
+        ("rollback.json", rollback_body()),
+        ("flag-only.json", flag_only_body()),
+        ("route-rebind.json", route_rebind_body()),
+        ("false-program-flag.json", flag_only_body()),
+        ("empty-manifest.json", flag_only_body()),
+        ("missing-programs.json", flag_only_body()),
+        ("rollback-programs-on-change.json", rollback_body()),
         ("program-only.json", all_sections_body()),
         ("layer-file-only.json", layer_file_body()),
         ("unknown-transition.json", all_sections_body()),
@@ -117,9 +165,25 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
         ("malformed-layer-file-old.json", layer_file_body()),
     ] {
         match name {
-            "rollback.json" => {
-                params["config_plan"]["apply"]["operation"] = json!("rollback");
-                params["config_plan"]["apply"]["rollback_to"] = json!("41");
+            "false-program-flag.json" => {
+                params["config_plan"]["launch_manifests"][0]["program_changed_since_active"] =
+                    json!(false);
+            }
+            "empty-manifest.json" => {
+                params["config_plan"]["launch_manifests"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("program_changed_since_active");
+            }
+            "missing-programs.json" => {
+                params["config_plan"]["launch_manifests"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("programs");
+            }
+            "rollback-programs-on-change.json" => {
+                params["config_plan"]["apply"]["operation"] = json!("change");
+                params["config_plan"]["apply"]["rollback_to"] = Value::Null;
             }
             "program-only.json" => {
                 params["config_plan"]["changes"] = json!([]);

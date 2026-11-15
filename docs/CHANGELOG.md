@@ -7,6 +7,17 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.21.0 (ck-cingulate), 0.12.0 (cingulate-decode), 0.13.0 (cingulate-vectors)
+
+- Type the true-only launch-manifest `program_changed_since_target` and
+  `program_changed_since_active` flags. Origin is optional and programs may be
+  empty, but each entry needs a program or flag.
+- Add bounded, rollback-only `apply.rollback_programs` detail and the closed
+  `route_rebind` module transition. Preserve stored 0.20 cards unchanged.
+- Publish handler-generated `config-plan-v3` samples without changing v1 or v2.
+  Callosum files these typed members only after the phone reader is live;
+  until then it keeps filing them as other sections (Decline-only).
+
 ## 0.20.0 (ck-cingulate), 0.11.0 (cingulate-decode), 0.9.0 (cingulate-store), 0.12.0 (cingulate-vectors)
 
 - Add closed, bounded `config_plan` apply/restart scope, affected projects,

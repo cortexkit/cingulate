@@ -1,0 +1,45 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "affected_projects": [
+        "example-project"
+      ],
+      "apply": {
+        "modules": [],
+        "operation": "change",
+        "review": null,
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [],
+      "plan_digest": "fake-plan-digest",
+      "policy_changes": [
+        {
+          "kind": "layer_file",
+          "layer": "user",
+          "module_id": "example-module",
+          "new": {
+            "absent": true
+          },
+          "old": {
+            "bytes": 42,
+            "sha256": "NOT-A-HASH"
+          }
+        }
+      ]
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "config_plan.policy_changes.old must be {absent: true} or a closed {sha256: 64 lowercase hex, bytes: non-negative integer} object"
+    }
+  },
+  "tag": "config-plan-v3"
+}

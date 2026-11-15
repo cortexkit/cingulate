@@ -1,0 +1,94 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "approve",
+    "clientFeatures": [
+      "config-plan"
+    ],
+    "elicitationId": "el_1",
+    "expectedRound": 1,
+    "signature_b64url": "AQIDBA",
+    "statement": "ZmFrZSBzdGF0ZW1lbnQgZm9yIHJvdW5kIDE"
+  },
+  "reply": {
+    "result": {
+      "alreadyAnswered": false,
+      "elicitation": {
+        "answerSeq": 2,
+        "answeredAtMs": 10000,
+        "answeredChoiceId": "approve",
+        "answeredDevice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configPlan": {
+          "apply": {
+            "modules": [],
+            "operation": "change",
+            "review": null,
+            "rollback_to": null
+          },
+          "base_revision": "42",
+          "changes": [
+            {
+              "apply": "live",
+              "module_id": "example-module",
+              "new": true,
+              "new_source": "project",
+              "old": false,
+              "old_source": "default",
+              "path": "settings.enabled",
+              "project_id": "example-project"
+            }
+          ],
+          "other_sections": {
+            "policy_changes": [
+              {
+                "example": true
+              }
+            ]
+          },
+          "plan_digest": "fake-plan-digest"
+        },
+        "createdAtMs": 10000,
+        "default": "decline",
+        "elicitationId": "el_1",
+        "expiresAtMs": 310000,
+        "expiresInMs": 300000,
+        "facts": [],
+        "kind": "config_plan",
+        "lateExecution": "notify_only",
+        "materialDamage": false,
+        "onExpiry": "deny",
+        "options": [
+          {
+            "effect": "choose",
+            "id": "approve",
+            "label": "Approve"
+          },
+          {
+            "effect": "decline",
+            "id": "decline",
+            "label": "Decline"
+          }
+        ],
+        "prompt": "Review this computer's settings changes.",
+        "requesterLabel": "reserved:callosum",
+        "requesterName": "This computer's settings",
+        "round": 1,
+        "scope": {},
+        "signatureB64url": "AQIDBA",
+        "state": "answered",
+        "statement": "ZmFrZSBzdGF0ZW1lbnQgZm9yIHJvdW5kIDE",
+        "subject": {
+          "label": "This computer's settings"
+        },
+        "target": {
+          "kind": "config_plan",
+          "label": "This computer's settings"
+        },
+        "title": "Settings change approval",
+        "urgency": "normal"
+      },
+      "ok": true
+    }
+  },
+  "tag": "config-plan-v3"
+}

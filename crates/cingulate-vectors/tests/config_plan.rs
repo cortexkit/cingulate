@@ -603,84 +603,118 @@ async fn config_plan_reopened_projections_expose_notice_round() {
         assert!(record.get("notice_round").is_none());
     }
 
-    let f = support::Fixture::open(None).await;
-    let mut watch = watch_pending::Watch::open(
-        &f.handler,
-        &phone(),
-        json!({"clientFeatures":["config-plan"]}),
-    );
-    assert_eq!(watch.next_value().await, json!({"type":"reread"}));
-    let filing = all_sections_body();
-    let expected = filing["config_plan"].clone();
-    let id = f.request(&filer(), filing).await;
-    for round in 0..=2 {
-        let item = watch.next_value().await;
-        assert_eq!(item["type"], "changed");
-        assert_eq!(item["card"]["elicitationId"], id);
-        assert_round(&item["card"], round);
-        assert_eq!(item["card"]["configPlan"], expected);
-        let list = f
-            .ok(
-                &phone(),
-                "consent.list_pending",
-                json!({"clientFeatures":["config-plan"]}),
-            )
-            .await;
-        assert_round(&list["records"][0], round);
-        assert_eq!(list["records"][0]["configPlan"], expected);
-        for state in ["pending", "answered"] {
-            let phone_record = f.ok(&phone(), "consent.get", get(&id)).await;
-            assert_eq!(phone_record["state"], state);
-            assert_round(&phone_record, round);
-            assert_eq!(phone_record["configPlan"], expected);
-            for method in ["consent.get", "consent.await"] {
-                let requester_record = f
-                    .ok(
-                        &filer(),
-                        method,
-                        json!({"elicitation_id":id,"timeout_ms":0}),
-                    )
-                    .await;
-                assert_eq!(requester_record["state"], state);
-                assert_round(&requester_record, round);
-                assert_eq!(requester_record["config_plan"], expected);
-            }
-            let notice_round: u64 = f.sql().query_row(
+    for filing in [
+        all_sections_body(),
+        rollback_body(),
+        flag_only_body(),
+        route_rebind_body(),
+    ] {
+        let f = support::Fixture::open(None).await;
+        let mut watch = watch_pending::Watch::open(
+            &f.handler,
+            &phone(),
+            json!({"clientFeatures":["config-plan"]}),
+        );
+        assert_eq!(watch.next_value().await, json!({"type":"reread"}));
+        let expected = filing["config_plan"].clone();
+        let id = f.request(&filer(), filing).await;
+        for round in 0..=2 {
+            let item = watch.next_value().await;
+            assert_eq!(item["type"], "changed");
+            assert_eq!(item["card"]["elicitationId"], id);
+            assert_round(&item["card"], round);
+            assert_eq!(item["card"]["configPlan"], expected);
+            let list = f
+                .ok(
+                    &phone(),
+                    "consent.list_pending",
+                    json!({"clientFeatures":["config-plan"]}),
+                )
+                .await;
+            assert_round(&list["records"][0], round);
+            assert_eq!(list["records"][0]["configPlan"], expected);
+            for state in ["pending", "answered"] {
+                let phone_record = f.ok(&phone(), "consent.get", get(&id)).await;
+                assert_eq!(phone_record["state"], state);
+                assert_round(&phone_record, round);
+                assert_eq!(phone_record["configPlan"], expected);
+                for method in ["consent.get", "consent.await"] {
+                    let requester_record = f
+                        .ok(
+                            &filer(),
+                            method,
+                            json!({"elicitation_id":id,"timeout_ms":0}),
+                        )
+                        .await;
+                    assert_eq!(requester_record["state"], state);
+                    assert_round(&requester_record, round);
+                    assert_eq!(requester_record["config_plan"], expected);
+                }
+                let notice_round: u64 = f.sql().query_row(
                 "SELECT round FROM access_notices WHERE elicitation_id=?1 ORDER BY rowid DESC LIMIT 1",
                 [&id], |row| row.get(0),
             ).unwrap();
-            assert_eq!(notice_round, round);
-            if state == "pending" {
-                let answer = f
-                    .ok(
-                        &phone(),
-                        "consent.answer",
-                        answer_round(&id, "approve", round),
-                    )
-                    .await;
-                assert_round(&answer["elicitation"], round);
-                assert_eq!(answer["elicitation"]["configPlan"], expected);
-                let answered = watch.next_value().await;
-                assert_eq!(answered["type"], "changed");
-                assert_eq!(answered["card"]["state"], "answered");
-                assert_round(&answered["card"], round);
-                assert_eq!(answered["card"]["configPlan"], expected);
+                assert_eq!(notice_round, round);
+                if state == "pending" {
+                    let answer = f
+                        .ok(
+                            &phone(),
+                            "consent.answer",
+                            answer_round(&id, "approve", round),
+                        )
+                        .await;
+                    assert_round(&answer["elicitation"], round);
+                    assert_eq!(answer["elicitation"]["configPlan"], expected);
+                    let answered = watch.next_value().await;
+                    assert_eq!(answered["type"], "changed");
+                    assert_eq!(answered["card"]["state"], "answered");
+                    assert_round(&answered["card"], round);
+                    assert_eq!(answered["card"]["configPlan"], expected);
+                }
+            }
+            if round < 2 {
+                f.ok(
+                    &filer(),
+                    "consent.report_unverified",
+                    json!({"elicitation_id":id,"answer_seq":round+1,"code":"signature"}),
+                )
+                .await;
             }
         }
-        if round < 2 {
-            f.ok(
-                &filer(),
-                "consent.report_unverified",
-                json!({"elicitation_id":id,"answer_seq":round+1,"code":"signature"}),
-            )
-            .await;
-        }
+        watch.unsubscribe();
+        assert!(matches!(
+            watch.outcome().await,
+            subc_client_rs::HandlerOutcome::Streamed
+        ));
     }
-    watch.unsubscribe();
-    assert!(matches!(
-        watch.outcome().await,
-        subc_client_rs::HandlerOutcome::Streamed
-    ));
+}
+
+#[tokio::test]
+async fn config_plan_020_stored_card_keeps_exact_plan_shape() {
+    let sample: Value = serde_json::from_slice(
+        &std::fs::read(support::corpus("config-plan-v2").join("change-all-sections.json")).unwrap(),
+    )
+    .unwrap();
+    let expected = &sample["params"]["config_plan"];
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    f.sql().execute(
+        "UPDATE elicitation_records SET record_json=json_set(record_json,'$.request.config_plan',json(?1)) WHERE elicitation_id=?2",
+        [expected.to_string(), id.clone()],
+    ).unwrap();
+    assert_eq!(
+        serde_json::to_value(f.stored_record(&id).request.config_plan).unwrap(),
+        *expected
+    );
+    assert_eq!(
+        f.ok(&phone(), "consent.get", get(&id)).await["configPlan"],
+        *expected
+    );
+    assert_eq!(
+        f.ok(&filer(), "consent.get", json!({"elicitation_id":id}))
+            .await["config_plan"],
+        *expected
+    );
 }
 
 #[tokio::test]
@@ -859,7 +893,7 @@ async fn config_plan_served_vectors_and_checksums() {
             bytes
         );
     }
-    for corpus in ["config-plan-v1", CORPUS] {
+    for corpus in ["config-plan-v1", "config-plan-v2", CORPUS] {
         let sums = std::fs::read_to_string(support::corpus(corpus).join("SHA256SUMS")).unwrap();
         for line in sums.lines() {
             let (hash, name) = line.split_once("  ").unwrap();

@@ -1,0 +1,111 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "affected_projects": [
+        "example-project"
+      ],
+      "apply": {
+        "modules": [],
+        "operation": "change",
+        "review": null,
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [],
+      "plan_digest": "fake-plan-digest",
+      "policy_changes": [
+        {
+          "kind": "layer_file",
+          "layer": "user",
+          "module_id": "example-module",
+          "new": {
+            "absent": true
+          },
+          "old": {
+            "bytes": 42,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "phone": {
+    "answerSeq": 0,
+    "configPlan": {
+      "affected_projects": [
+        "example-project"
+      ],
+      "apply": {
+        "modules": [],
+        "operation": "change",
+        "review": null,
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [],
+      "plan_digest": "fake-plan-digest",
+      "policy_changes": [
+        {
+          "kind": "layer_file",
+          "layer": "user",
+          "module_id": "example-module",
+          "new": {
+            "absent": true
+          },
+          "old": {
+            "bytes": 42,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    "createdAtMs": 10000,
+    "default": "decline",
+    "elicitationId": "el_1",
+    "expiresAtMs": 310000,
+    "expiresInMs": 300000,
+    "facts": [],
+    "kind": "config_plan",
+    "lateExecution": "notify_only",
+    "materialDamage": false,
+    "onExpiry": "deny",
+    "options": [
+      {
+        "effect": "choose",
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "effect": "decline",
+        "id": "decline",
+        "label": "Decline"
+      }
+    ],
+    "prompt": "Review this computer's settings changes.",
+    "requesterLabel": "reserved:callosum",
+    "requesterName": "This computer's settings",
+    "scope": {},
+    "state": "pending",
+    "subject": {
+      "label": "This computer's settings"
+    },
+    "target": {
+      "kind": "config_plan",
+      "label": "This computer's settings"
+    },
+    "title": "Settings change approval",
+    "urgency": "normal"
+  },
+  "reply": {
+    "result": {
+      "elicitation_id": "el_1"
+    }
+  },
+  "tag": "config-plan-v3"
+}

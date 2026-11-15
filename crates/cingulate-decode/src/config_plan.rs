@@ -46,6 +46,8 @@ pub struct ConfigApply {
     pub rollback_to: Option<String>,
     pub modules: Vec<ConfigModuleApply>,
     pub review: Option<ConfigReview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_programs: Option<Vec<ConfigRollbackProgram>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,6 +62,7 @@ pub enum ConfigOperation {
 pub enum ConfigTransition {
     Live,
     ModuleRestart,
+    RouteRebind,
     NextStart,
     DaemonRestart,
 }
@@ -109,8 +112,13 @@ pub struct ConfigPolicyChange {
 #[serde(deny_unknown_fields)]
 pub struct ConfigLaunchManifest {
     pub module_id: String,
-    pub origin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub programs: Vec<ConfigProgramChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_changed_since_target: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_changed_since_active: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -119,6 +127,15 @@ pub struct ConfigProgramChange {
     pub input: String,
     pub old: Value,
     pub new: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigRollbackProgram {
+    pub module_id: String,
+    pub input: String,
+    pub approved_then: Value,
+    pub on_disk_now: Value,
 }
 
 fn list_bound(len: usize, min: usize, max: usize, field: &str) -> Result<(), Refusal> {
@@ -184,6 +201,34 @@ fn validate_sections(plan: &ConfigPlan) -> Result<(), Refusal> {
         (ConfigOperation::Change, None) => {},
         (ConfigOperation::Rollback, Some(revision)) if !revision.is_empty() && revision.bytes().all(|b| b.is_ascii_digit()) => {},
         _ => return Err(Refusal::invalid("config_plan.apply.rollback_to must be a nonempty decimal string exactly for rollback, otherwise null")),
+    }
+    if let Some(programs) = &apply.rollback_programs {
+        if apply.operation != ConfigOperation::Rollback {
+            return Err(Refusal::invalid(
+                "config_plan.apply.rollback_programs is only allowed for rollback",
+            ));
+        }
+        list_bound(programs.len(), 0, 64, "config_plan.apply.rollback_programs")?;
+        for row in programs {
+            bounded(
+                &row.module_id,
+                128,
+                "config_plan.apply.rollback_programs.module_id",
+            )?;
+            bounded(
+                &row.input,
+                1024,
+                "config_plan.apply.rollback_programs.input",
+            )?;
+            json_bound(
+                &row.approved_then,
+                "config_plan.apply.rollback_programs.approved_then",
+            )?;
+            json_bound(
+                &row.on_disk_now,
+                "config_plan.apply.rollback_programs.on_disk_now",
+            )?;
+        }
     }
     if apply
         .review
@@ -270,13 +315,21 @@ fn validate_sections(plan: &ConfigPlan) -> Result<(), Refusal> {
             "config_plan.launch_manifests.module_id",
         )?;
         for manifest in manifests {
-            bounded(&manifest.origin, 64, "config_plan.launch_manifests.origin")?;
+            if let Some(origin) = &manifest.origin {
+                bounded(origin, 64, "config_plan.launch_manifests.origin")?;
+            }
             list_bound(
                 manifest.programs.len(),
-                1,
+                0,
                 16,
                 "config_plan.launch_manifests.programs",
             )?;
+            if manifest.programs.is_empty()
+                && manifest.program_changed_since_target != Some(true)
+                && manifest.program_changed_since_active != Some(true)
+            {
+                return Err(Refusal::invalid("config_plan.launch_manifests entry needs at least one program or program-change flag"));
+            }
             for row in &manifest.programs {
                 bounded(
                     &row.input,
@@ -292,7 +345,7 @@ fn validate_sections(plan: &ConfigPlan) -> Result<(), Refusal> {
         && plan.policy_changes.as_ref().is_none_or(Vec::is_empty)
         && plan.launch_manifests.as_ref().is_none_or(Vec::is_empty)
     {
-        return Err(Refusal::invalid("config_plan must contain at least one row across changes, policy_changes and launch_manifests.programs"));
+        return Err(Refusal::invalid("config_plan must contain at least one row across changes, policy_changes and launch_manifests"));
     }
     Ok(())
 }
@@ -340,6 +393,14 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
         )?;
     }
     typed_field::<Option<ConfigReview>>(&plan["apply"]["review"], "config_plan.apply.review")?;
+    if plan["apply"]
+        .get("rollback_programs")
+        .is_some_and(|v| !v.is_array())
+    {
+        return Err(Refusal::invalid(
+            "config_plan.apply.rollback_programs must be an array",
+        ));
+    }
     for field in ["affected_projects", "policy_changes", "launch_manifests"] {
         if plan.get(field).is_some_and(|v| !v.is_array()) {
             return Err(Refusal::invalid(format!(
@@ -354,6 +415,25 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
                 if row.get(field).is_some_and(|v| !v.is_string()) {
                     return Err(Refusal::invalid(format!(
                         "config_plan.policy_changes.{field} must be a string"
+                    )));
+                }
+            }
+        }
+    }
+    if let Some(rows) = plan["launch_manifests"].as_array() {
+        for row in rows {
+            if row.get("origin").is_some_and(|v| !v.is_string()) {
+                return Err(Refusal::invalid(
+                    "config_plan.launch_manifests.origin must be a string",
+                ));
+            }
+            for flag in [
+                "program_changed_since_target",
+                "program_changed_since_active",
+            ] {
+                if row.get(flag).is_some_and(|v| v != &Value::Bool(true)) {
+                    return Err(Refusal::invalid(format!(
+                        "config_plan.launch_manifests.{flag} must be true when present"
                     )));
                 }
             }

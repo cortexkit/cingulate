@@ -1,0 +1,46 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "apply": {
+        "modules": [],
+        "operation": "change",
+        "review": null,
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [
+        {
+          "apply": "live",
+          "module_id": "example-module",
+          "new": true,
+          "new_source": "project",
+          "old": false,
+          "old_source": "default",
+          "path": "settings.enabled",
+          "project_id": "example-project"
+        }
+      ],
+      "other_sections": {
+        "policy_changes": [
+          {
+            "example": true
+          }
+        ]
+      },
+      "plan_digest": "fake-plan-digest"
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_requester_refused",
+      "message": "requester reserved:plexus is refused"
+    }
+  },
+  "tag": "config-plan-v3"
+}
