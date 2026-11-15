@@ -12,6 +12,7 @@ mod access;
 mod config_plan;
 mod flow_secrets;
 mod manifest_binding;
+mod sealed_text;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
 pub use config_plan::{
@@ -21,6 +22,9 @@ pub use config_plan::{
 };
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};
+pub use sealed_text::{
+    sealed_answer_fingerprint, HpkeKey, SealedText, SealedTextAnswer, SEALED_TEXT_SUITE,
+};
 pub use secret_use::{SecretUse, SecretUseAnswer, SecretUseItem, UseStatement};
 
 pub const MAX_EXPIRES_IN_MS: i64 = 86_400_000;
@@ -126,6 +130,12 @@ pub struct AuthorText {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_inputs"
+    )]
+    pub inputs: Option<Vec<SealedText>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_plan: Option<ConfigPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -235,6 +245,13 @@ where
                 "requester_ref must be a string of 1 to 128 printable ASCII characters",
             )
         })
+}
+
+fn deserialize_inputs<'de, D>(deserializer: D) -> Result<Option<Vec<SealedText>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Vec::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_single_use<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
@@ -368,6 +385,11 @@ impl ConsentRequest {
     /// Decode the closed serde shape first, then apply ordered semantic rules.
     /// The returned form has no answer schema, including for equality/dedup.
     pub fn decode(body: Value) -> Result<Self, Refusal> {
+        if body.get("inputs").is_some()
+            && body.get("kind").and_then(Value::as_str) != Some("consent")
+        {
+            return Err(Refusal::invalid("inputs require consent kind"));
+        }
         let body = if body.get("kind").and_then(Value::as_str) == Some("secret_use") {
             for field in ["explanation", "changes"] {
                 if body.get(field).is_some() {
@@ -397,6 +419,7 @@ impl ConsentRequest {
     /// Validate in refusal precedence order. Serde shape checks belong in
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
+        self.validate_inputs()?;
         if (self.kind == "config_plan") != self.config_plan.is_some() {
             return Err(Refusal::invalid(
                 "config_plan body requires config_plan kind",

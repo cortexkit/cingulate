@@ -141,10 +141,11 @@ Generic-consent requesters may report after ack while retained. Cingulate's
 exists and the stamped asker scope has definitely ended; requester reports always
 replace earlier reports, including the backstop, as specified in v1.
 
-`reserved:cerebellum`, `reserved:plexus`, `reserved:broca` and
-`reserved:entorhinal` may call `consent.request`,
+`reserved:cerebellum`, `reserved:plexus`, `reserved:broca`,
+`reserved:entorhinal` and `reserved:aft` may call `consent.request`,
 `consent.await`, `consent.get`, `consent.answers`, `consent.ack`,
-`consent.withdraw`, `consent.report_execution` and `consent.detach`. Get, await,
+`consent.withdraw`, `consent.report_execution`, `consent.detach` and
+`consent.release_inputs`. Get, await, release_inputs,
 report_execution, withdraw and detach require the raising owner. `consent.answers`
 returns only that owner's answers, and `consent.ack` acknowledges only that
 owner's answers. None of these requesters can call phone-only `consent.answer` or
@@ -942,3 +943,72 @@ execution report, detach, ack or answer-feed operation is admitted to Callosum.
 Payloads are pruned 24 hours after settlement, as for manifest bindings. The audit
 retains choice, sequence, answer time, statement SHA-256 and decoded length, and
 unverified code/time, never statement or signature bytes.
+
+## Sealed text input (0.23.0)
+
+An ordinary `kind: "consent"` card may carry an optional `inputs` array:
+
+```json
+{"inputs":[{"kind":"sealed_text","id":"password","label":"Sudo password","max_bytes":64,"hpke":{"suite":"X25519-HKDF-SHA256/HKDF-SHA256/ChaCha20-Poly1305","public_key":"<unpadded-base64url-32-bytes>"}}]}
+```
+
+There is at most one input. Its `id` follows the existing option-id rule
+(nonblank string); `label` is a nonblank string. `max_bytes` is a JSON integer
+from 1 through 4,096, limiting the plaintext's **UTF-8 bytes**, not characters.
+The suite string must match exactly; the public key must be canonical unpadded
+base64url decoding to exactly 32 bytes. The array and its input/HPKE objects
+have closed shapes. Present null, malformed fields, unknown fields, extra
+inputs, and inputs on any other card kind refuse `elicitation_invalid_request`
+before a card exists. In particular, `secret_use`, `manifest_binding`,
+`config_plan`, flow-install/package and `tool_permission` cards cannot carry
+inputs: tool permissions can be answered by an agent rather than the person,
+so they cannot collect a person's typed secret.
+AFT is admitted to ordinary consent so it can file the one-time public key.
+
+Get, list and watch cards carry the input definitions exactly as filed; nested
+member names stay snake_case on phone and desktop too. `round` is unchanged
+(ordinary cards remain round 0, omitted as today). Notices carry at most
+`"input": true`, or omit it; they never contain a public key, `enc`, ciphertext
+or answer fingerprint. No notice, outbox, audit row or log includes sealed bytes.
+
+The person answers through the existing phone/desktop operator operation:
+
+```json
+{"method":"consent.answer","params":{"elicitationId":"el_1","choiceId":"allow_once","expectedRound":0,"inputs":[{"id":"password","enc":"<unpadded-base64url-32-bytes>","ciphertext":"<unpadded-base64url-sealed-bytes>"}]}}
+```
+
+An approving (`effect: "grant"`) choice requires exactly the filed input; a
+decline requires none (absent or empty array). Input on a card without a filed
+input is invalid. Cingulate checks only shape: matching id, canonical unpadded
+base64url `enc` decoding to exactly 32 bytes, and ciphertext decoding to between
+17 and `max_bytes + 16` bytes inclusive. It does not decrypt, verify HPKE, or
+interpret plaintext. Malformed/missing/extra answer inputs refuse
+`elicitation_invalid_answer` and leave the card open. Existing `expectedRound`
+handling is unchanged (ordinary consent ignores it). Exact retries of the
+recorded choice and the same `enc`/ciphertext bytes return the recorded outcome
+with `alreadyAnswered: true`, without a new settlement, write or notice. A
+different settled answer conflicts as before.
+
+Only the daemon-stamped filer can read encrypted answer bytes, through
+`consent.get` / `consent.await`. The filed definitions remain in `inputs`; the
+separate `answer_inputs: [{id, enc, ciphertext}]` holds the sealed answer. Every
+other projection, including phone/desktop read-back, feeds and
+`permissions.list_all`, can show only `input_supplied: true` in place of the
+answer bytes. No requester-body identity can confer access.
+
+The filer calls `consent.release_inputs {elicitation_id}` after consumption.
+It deletes sealed bytes from the answer row and returns `{"released":true}`;
+repeat calls return the same result. A non-filer is refused by existing
+owner/operator admission (`elicitation_not_owner` or
+`elicitation_requester_refused`). Filer reads after deletion omit `answer_inputs`
+and show `input_released: true` instead; other readers retain only
+`input_supplied: true`. Release does not change the recorded decision.
+
+Withdrawal and expiry also delete the encrypted answer, even if already
+answered. A durable sweep deletes it at the latest ten minutes after settlement;
+startup runs that sweep so downtime cannot extend the window. Reads also sweep
+before projection. Only an unsalted SHA-256 fingerprint of the full recorded
+answer (choice, id, decoded enc and ciphertext bytes, length-prefixed) remains
+in the answer row, preserving exact retries after release. Neither the
+fingerprint nor the encrypted payload is copied to the card record or change
+log. See [real-handler samples](../../test-vectors/sealed-text-v1/README.md).

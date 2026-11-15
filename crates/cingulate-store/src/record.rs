@@ -47,6 +47,14 @@ pub struct Subject {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ElicitationRecord {
+    #[serde(
+        default,
+        rename = "input_supplied",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub input_supplied: bool,
+    #[serde(skip)]
+    pub sealed_inputs: Option<Vec<cingulate_decode::SealedTextAnswer>>,
     pub elicitation_id: String,
     pub request: ConsentRequest,
     pub created_at_ms: i64,
@@ -99,6 +107,21 @@ pub struct ElicitationRecord {
 }
 
 impl ElicitationRecord {
+    pub fn requester_inputs_wire(&self, block_until: Option<i64>) -> Value {
+        let mut value = self.requester_wire(block_until);
+        if self.input_supplied {
+            value
+                .as_object_mut()
+                .expect("card object")
+                .remove("input_supplied");
+            if let Some(inputs) = &self.sealed_inputs {
+                value["answer_inputs"] = json!(inputs);
+            } else {
+                value["input_released"] = json!(true);
+            }
+        }
+        value
+    }
     /// Build the flat camelCase card JSON. Hide the requester principal,
     /// `binding`, `requester_ref`, and `single_use`; these values are not card text.
     /// Nested JSON values are copied verbatim.

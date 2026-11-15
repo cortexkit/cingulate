@@ -54,7 +54,7 @@ pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, W
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
 
-pub const OPERATIONS: [(&str, ManagementOperationKind); 18] = [
+pub const OPERATIONS: [(&str, ManagementOperationKind); 19] = [
     ("presence.report", ManagementOperationKind::Mutate),
     ("presence.get", ManagementOperationKind::Query),
     ("presence.watch", ManagementOperationKind::Query),
@@ -67,6 +67,7 @@ pub const OPERATIONS: [(&str, ManagementOperationKind); 18] = [
     ("consent.report_unverified", ManagementOperationKind::Mutate),
     ("consent.withdraw", ManagementOperationKind::Mutate),
     ("consent.detach", ManagementOperationKind::Mutate),
+    ("consent.release_inputs", ManagementOperationKind::Mutate),
     ("consent.answer", ManagementOperationKind::Mutate),
     ("consent.list_pending", ManagementOperationKind::Query),
     (WATCH_PENDING, ManagementOperationKind::Query),
@@ -151,7 +152,12 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
     RequesterAdmission {
         principal: "reserved:aft",
         requester_name: Some("AFT"),
-        kinds: &["tool_permission", "macos_permission", "secret_use"],
+        kinds: &[
+            "tool_permission",
+            "macos_permission",
+            "secret_use",
+            "consent",
+        ],
         agent: SubjectAgent::Never,
     },
 ];
@@ -1227,6 +1233,15 @@ impl Handler {
         if let Some(reply) = self.presence_dispatch(stamp, method, &params) {
             return reply;
         }
+        if method == "consent.request"
+            && params.get("inputs").is_some()
+            && params.get("kind").and_then(Value::as_str) != Some("consent")
+        {
+            return Err(Refusal::new(
+                "elicitation_invalid_request",
+                "inputs require consent kind",
+            ));
+        }
         if let Some(reply) = self.permissions_dispatch(stamp, method, &params).await {
             return reply;
         }
@@ -1250,6 +1265,7 @@ impl Handler {
                         | "consent.get"
                         | "consent.await"
                         | "consent.withdraw"
+                        | "consent.release_inputs"
                         | "consent.report_unverified"
                         | "consent.answer"
                         | "consent.list_pending"
@@ -1328,6 +1344,7 @@ impl Handler {
             | "consent.await"
             | "consent.withdraw"
             | "consent.detach"
+            | "consent.release_inputs"
             | "consent.report_unverified"
             | "consent.report_execution" => Some(text(&params, "elicitation_id")?),
             _ => None,
@@ -1351,6 +1368,7 @@ impl Handler {
                 | "consent.await"
                 | "consent.withdraw"
                 | "consent.detach"
+                | "consent.release_inputs"
                 | "consent.report_unverified"
                 | "consent.report_execution"
         ) && !(method == "consent.get" && operator_surface)
@@ -1508,6 +1526,7 @@ impl Handler {
                 | "consent.answer"
                 | "consent.withdraw"
                 | "consent.detach"
+                | "consent.release_inputs"
         ) {
             store.sweep(now).map_err(store_error)?
         } else {
@@ -1524,12 +1543,16 @@ impl Handler {
                         })?;
                     surface_options(self.project(&record, true), option_group)
                 }
-                "consent.get" => self.project(
-                    &store
-                        .get_owned(&stamp.owner(), id.expect("get id"), now)
-                        .map_err(store_error)?,
-                    false,
-                ),
+                "consent.get" => store
+                    .get_owned_inputs(&stamp.owner(), id.expect("get id"), now)
+                    .map_err(store_error)?
+                    .requester_inputs_wire(self.block_until(id.expect("get id"))),
+                "consent.release_inputs" => {
+                    store
+                        .release_inputs(&stamp.owner(), id.expect("release id"))
+                        .map_err(store_error)?;
+                    json!({"released":true})
+                }
                 "consent.answers" => serde_json::to_value(
                     store
                         .answers(&stamp.owner(), cursor, now)
@@ -1726,6 +1749,12 @@ impl Handler {
                             .transpose()
                     };
                     let mutation = if config {
+                        if params.get("inputs").is_some() {
+                            return Err(Refusal::new(
+                                "elicitation_invalid_answer",
+                                "config_plan cannot carry inputs",
+                            ));
+                        }
                         if params.get("envelope_b64url").is_some() {
                             return Err(invalid("envelope_b64url is not a config_plan answer"));
                         }
@@ -1757,7 +1786,7 @@ impl Handler {
                                 "statement and signature_b64url require config_plan",
                             ));
                         }
-                        store.answer_with_provenance(
+                        store.answer_with_inputs(
                             id.expect("answer id"),
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
@@ -1774,6 +1803,7 @@ impl Handler {
                                     })
                                 })
                                 .transpose()?,
+                            params.get("inputs"),
                             now,
                         )
                     }
@@ -1842,7 +1872,7 @@ impl Handler {
                 .ok_or_else(|| Refusal::new("consent_unavailable", "consent store is not open"))?;
             let now = self.inner.options.clock.now_ms();
             let events = store.sweep(now).map_err(store_error)?;
-            let result = store.get_owned(owner, id, now).map_err(store_error);
+            let result = store.get_owned_inputs(owner, id, now).map_err(store_error);
             self.note_writes(store);
             drop(guard);
             self.settlements(&events).await;
@@ -1852,7 +1882,7 @@ impl Handler {
                 .map_or(deadline, |expiry| deadline.min(expiry));
             if record.state != State::Pending || now >= until {
                 drop(registration);
-                return Ok(self.project(&record, false));
+                return Ok(record.requester_inputs_wire(self.block_until(id)));
             }
             tokio::select! {
                 _ = receiver.changed() => {},
@@ -2215,7 +2245,12 @@ mod tests {
                 (
                     "reserved:aft",
                     Some("AFT"),
-                    vec!["tool_permission", "macos_permission", "secret_use"]
+                    vec![
+                        "tool_permission",
+                        "macos_permission",
+                        "secret_use",
+                        "consent"
+                    ]
                 ),
             ]
         );
@@ -2260,7 +2295,8 @@ mod tests {
                 "reserved:cerebellum",
                 "reserved:plexus",
                 "reserved:broca",
-                "reserved:entorhinal"
+                "reserved:entorhinal",
+                "reserved:aft"
             ]
         );
         assert_eq!(implemented, documented);
@@ -2270,6 +2306,13 @@ mod tests {
                 &["consent", "secret_use"]
             } else if name == "reserved:plexus" {
                 &["consent", "manifest_binding"]
+            } else if name == "reserved:aft" {
+                &[
+                    "tool_permission",
+                    "macos_permission",
+                    "secret_use",
+                    "consent",
+                ]
             } else {
                 &["consent"]
             };

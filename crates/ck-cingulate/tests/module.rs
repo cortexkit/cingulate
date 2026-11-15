@@ -559,6 +559,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
         ("consent.report_unverified", true),
         ("consent.withdraw", true),
         ("consent.detach", true),
+        ("consent.release_inputs", true),
         ("consent.answer", true),
         ("consent.list_pending", false),
         ("consent.watch_pending", false),

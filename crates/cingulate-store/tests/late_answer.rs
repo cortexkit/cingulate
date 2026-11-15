@@ -175,6 +175,8 @@ fn pinned_record(id: &str, state: State, choice: Option<&str>, at: i64) -> Elici
         answered_surface: None,
         secret_use_answer: None,
         manifest_binding_answer: None,
+        input_supplied: false,
+        sealed_inputs: None,
         answer_seq: None,
         statement: None,
         signature_b64url: None,
@@ -567,7 +569,7 @@ fn shared_outbox_migration_upgrades_version_four_keeping_rows_and_order() {
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        12
+        13
     );
     drop(conn);
     // After migration 5 the shared outbox also accepts a late-answer notice

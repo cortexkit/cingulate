@@ -7,6 +7,24 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.23.0 (ck-cingulate)
+
+- Add ordinary-consent `sealed_text` inputs, carrying a one-time HPKE public key
+  and shape-checked encrypted answers. Admit AFT as an ordinary-consent filer;
+  `secret_use`, `manifest_binding`, `config_plan`, flow-install/package and
+  tool-permission cards cannot carry these inputs.
+- Keep encrypted payloads only in answer rows. Only filer get/await reads them;
+  other projections show `input_supplied`. Add owner-only idempotent
+  `consent.release_inputs`, withdrawal/expiry cleanup, and a restart-safe
+  ten-minute settlement sweep. Retain only an answer fingerprint for retries.
+- Store migration 13 (`013_sealed_text.sql`) adds nullable `sealed_inputs_json`
+  and `sealed_answer_sha256` columns to `elicitation_answers`. Take a store
+  backup before deploying 0.23.0, which applies migration 13 when opening the
+  store; existing answer payloads and cursors are preserved.
+- Document phone/desktop and requester shapes and add real-HPKE,
+  handler-generated `sealed-text-v1` samples. HPKE is generator-only, never a
+  Cingulate runtime dependency.
+
 ## 0.22.0 (ck-cingulate), 0.10.0 (cingulate-store), 0.14.0 (cingulate-vectors)
 
 - Accept ordinary card answers through the daemon's verified `operator_app`

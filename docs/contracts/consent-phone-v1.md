@@ -281,3 +281,55 @@ pending events, read-triggered expiry, reopen, continuation and waiter deadlines
 Existing module and store tests also check console refusal, authorization,
 transaction rollback, bounded pages and cancellation. These are checks of the
 implemented interface, not promises of unimplemented card features.
+
+## Sealed text input (0.23.0, phone and desktop)
+
+An ordinary consent card can include the following `inputs` definition, unchanged
+on get, pending list and watch (including nested snake_case keys):
+
+```json
+{"inputs":[{"kind":"sealed_text","id":"password","label":"Sudo password","max_bytes":64,"hpke":{"suite":"X25519-HKDF-SHA256/HKDF-SHA256/ChaCha20-Poly1305","public_key":"<unpadded-base64url-32-bytes>"}}]}
+```
+
+There is at most one input, only on ordinary `consent`, never `secret_use`,
+`manifest_binding`, `config_plan`, flow-install/package or tool-permission cards.
+The id follows existing card option-id rules (nonblank), the label is nonblank,
+`max_bytes` is an integer 1–4,096, the suite must match exactly and the canonical
+unpadded base64url key must decode to 32 bytes. Invalid requests are refused
+`elicitation_invalid_request` before filing. `round` and `expectedRound` handling
+are unchanged; ordinary cards remain round 0 and ignore `expectedRound` as today.
+
+The app limits typed plaintext by **UTF-8 byte count**, seals it to the supplied
+one-time public key using that HPKE suite, and sends only the sealed value:
+
+```json
+{"method":"consent.answer","params":{"elicitationId":"el_1","choiceId":"allow_once","expectedRound":0,"inputs":[{"id":"password","enc":"<unpadded-base64url-32-bytes>","ciphertext":"<unpadded-base64url-sealed-bytes>"}]}}
+```
+
+Approval requires exactly that one input. Decline sends none (omit `inputs` or
+use `[]`). Cingulate checks only shape: exact id, canonical unpadded base64url enc
+of 32 decoded bytes, and ciphertext of 17 through `max_bytes + 16` decoded bytes.
+Missing, extra, malformed or oversized values refuse `elicitation_invalid_answer`
+and leave the card open. Cingulate never decrypts. An exact retry of choice and
+enc/ciphertext bytes returns the recorded outcome with `alreadyAnswered: true`
+and no new notice or write; a different settled answer conflicts. Keep the
+original sealed envelope for ambiguous retries, rather than sealing again with
+new randomness. Silence, timeout and read errors never approve.
+
+Phone and desktop answer replies, get and watch read-back contain only
+`input_supplied: true`, never the encrypted answer. Filed definitions remain in
+`inputs`. Only the filer receives `answer_inputs: [{id, enc, ciphertext}]` from
+requester get/await; all other readers (including permissions lists and feeds)
+remain redacted. Notices contain at most `input: true` or omit it, never the key,
+enc, ciphertext or fingerprint. Logs, audit rows and the outbox do not carry
+sealed bytes.
+
+Only the filer can call `consent.release_inputs {elicitation_id}`, which deletes
+the bytes and returns `{"released":true}`, including on repeated calls.
+Filer get/await then shows `input_released: true` instead of `answer_inputs`;
+phone/desktop still sees only `input_supplied: true`. Non-filers receive the
+existing requester/owner refusal. Withdrawal, expiry and a durable ten-minute
+post-settlement sweep also release bytes; startup and reads sweep overdue data.
+An answer-row-only SHA-256 fingerprint preserves exact retries after release.
+See the [requester contract](consent-requester-v2.md#sealed-text-input-0230) and
+[handler-generated samples](../../test-vectors/sealed-text-v1/README.md).

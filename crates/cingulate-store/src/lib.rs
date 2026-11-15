@@ -39,7 +39,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 12] = [
+pub const MIGRATIONS: [Migration; 13] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -87,6 +87,10 @@ pub const MIGRATIONS: [Migration; 12] = [
     Migration {
         version: 12,
         statements: include_str!("../migrations/012_config_plan.sql"),
+    },
+    Migration {
+        version: 13,
+        statements: include_str!("../migrations/013_sealed_text.sql"),
     },
 ];
 
@@ -531,6 +535,8 @@ impl ConsentStore {
                 answered_surface: None,
                 secret_use_answer: None,
                 manifest_binding_answer: None,
+                input_supplied: false,
+                sealed_inputs: None,
                 statement: None,
                 signature_b64url: None,
                 unverified: None,
@@ -604,6 +610,34 @@ impl ConsentStore {
 
     pub fn get_owned(&self, owner: &str, id: &str, now_ms: i64) -> Result<ElicitationRecord> {
         self.read(|conn| owned(conn, owner, id, now_ms))
+    }
+
+    /// The encrypted payload is joined only for the filer's get/await reads.
+    pub fn get_owned_inputs(
+        &self,
+        owner: &str,
+        id: &str,
+        now_ms: i64,
+    ) -> Result<ElicitationRecord> {
+        self.read(|conn| {
+            let mut record = owned(conn, owner, id, now_ms)?;
+            if record.input_supplied {
+                let raw: Option<String> = conn.query_row(
+                    "SELECT sealed_inputs_json FROM elicitation_answers WHERE elicitation_id=?1",
+                    [id],
+                    |row| row.get(0),
+                )?;
+                record.sealed_inputs = raw.map(|raw| serde_json::from_str(&raw)).transpose()?;
+            }
+            Ok(record)
+        })
+    }
+
+    pub fn release_inputs(&self, owner: &str, id: &str) -> Result<()> {
+        self.transaction(|tx| {
+            check_owner(tx, owner, id)?;
+            release_inputs(tx, id)
+        })
     }
 
     /// Return the durable polling counter that tracks pending-card changes.
@@ -691,6 +725,28 @@ impl ConsentStore {
         envelope: Option<&str>,
         now_ms: i64,
     ) -> Result<Mutation<AnswerOutcome>> {
+        self.answer_with_inputs(
+            id,
+            choice,
+            console_machine_id,
+            provenance,
+            envelope,
+            None,
+            now_ms,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn answer_with_inputs(
+        &self,
+        id: &str,
+        choice: &str,
+        console_machine_id: Option<&str>,
+        provenance: AnswerProvenance<'_>,
+        envelope: Option<&str>,
+        inputs: Option<&Value>,
+        now_ms: i64,
+    ) -> Result<Mutation<AnswerOutcome>> {
         let AnswerProvenance { device, surface } = provenance;
         if self
             .get_phone(id, now_ms)?
@@ -700,6 +756,12 @@ impl ConsentStore {
                 return Err(refuse(
                     "invalid_params",
                     "envelope_b64url is not a config_plan answer",
+                ));
+            }
+            if inputs.is_some() {
+                return Err(refuse(
+                    "elicitation_invalid_answer",
+                    "config_plan cannot carry inputs",
                 ));
             }
             return self.answer_unsigned_config_plan(id, choice, device, now_ms);
@@ -717,6 +779,8 @@ impl ConsentStore {
                     settlements: vec![],
                 });
             }
+            let sealed_inputs = record.request.answer_inputs(choice, inputs).map_err(Error::Refused)?;
+            let fingerprint = cingulate_decode::sealed_answer_fingerprint(choice, &sealed_inputs);
             if record.request.is_secret_card()
                 && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
             {
@@ -787,6 +851,10 @@ impl ConsentStore {
                     && record.answered_choice_id.as_deref() == Some(choice)
                     && record.secret_use_answer == secret_answer
                     && record.manifest_binding_answer == manifest_answer
+                    && tx.query_row(
+                        "SELECT sealed_answer_sha256 FROM elicitation_answers WHERE elicitation_id=?1",
+                        [id], |row| row.get::<_, Option<String>>(0),
+                    )?.is_none_or(|old| old == fingerprint)
                 {
                     AnswerOutcome::AlreadyAnswered(record)
                 } else {
@@ -816,6 +884,7 @@ impl ConsentStore {
                 record.answered_surface = surface.map(str::to_owned);
                 record.secret_use_answer = secret_answer;
                 record.manifest_binding_answer = manifest_answer;
+                record.input_supplied = !sealed_inputs.is_empty();
                 terminal(
                     tx,
                     &mut record,
@@ -823,6 +892,12 @@ impl ConsentStore {
                     Some(choice.to_owned()),
                     now_ms,
                 )?;
+                if record.request.inputs.as_ref().is_some_and(|inputs| !inputs.is_empty()) {
+                    tx.execute(
+                        "UPDATE elicitation_answers SET sealed_inputs_json=?2,sealed_answer_sha256=?3 WHERE elicitation_id=?1",
+                        params![id, record.input_supplied.then(|| serde_json::to_string(&sealed_inputs)).transpose()?, fingerprint],
+                    )?;
+                }
                 settlements.push(record.clone());
                 AnswerOutcome::Answered(record)
             };
@@ -838,6 +913,7 @@ impl ConsentStore {
     ) -> Result<Mutation<ElicitationRecord>> {
         self.transaction(|tx| {
             let mut record = owned(tx, owner, id, now_ms)?;
+            release_inputs(tx, id)?;
             let mut settlements = Vec::new();
             if record.state == State::Pending {
                 if record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms) {
@@ -1214,6 +1290,11 @@ fn save(conn: &Connection, record: &ElicitationRecord) -> Result<()> {
     Ok(())
 }
 
+fn release_inputs(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("UPDATE elicitation_answers SET sealed_inputs_json=NULL WHERE elicitation_id=?1 AND sealed_inputs_json IS NOT NULL", [id])?;
+    Ok(())
+}
+
 /// Called only on a pending record inside the inserting/settling transaction.
 /// A unique answer id makes an inconsistent double settlement fail and roll back.
 fn terminal(
@@ -1269,6 +1350,11 @@ fn expire(conn: &Connection, record: &mut ElicitationRecord) -> Result<()> {
 }
 
 fn prune(conn: &Connection, now_ms: i64, change_log_rows: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE elicitation_answers SET sealed_inputs_json=NULL WHERE sealed_inputs_json IS NOT NULL AND \
+         (settled_at_ms<=?1 OR elicitation_id IN (SELECT elicitation_id FROM elicitation_records WHERE expires_at_ms<=?2 OR state='withdrawn'))",
+        params![now_ms.saturating_sub(600_000), now_ms],
+    )?;
     conn.execute(
         "UPDATE elicitation_records SET record_json=NULL WHERE settled_at_ms<=?1",
         [now_ms.saturating_sub(RETENTION_MS)],
