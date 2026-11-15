@@ -7,6 +7,12 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.21.1 (ck-cingulate)
+
+- Upgrade to subc-client-rs 0.40.3 and subc-protocol 0.37.1 so supervised
+  launches can register over the daemon's child-bound registration channel.
+  Consent operations, refusals and store paths are unchanged.
+
 ## 0.9.1 (cingulate-store)
 
 - Give config-plan and person-notice tests distinct scratch stores even when

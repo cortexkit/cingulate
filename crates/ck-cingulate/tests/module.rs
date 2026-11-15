@@ -25,6 +25,12 @@ use tokio::sync::{mpsc, watch, Semaphore};
 #[path = "module/federated.rs"]
 mod federated;
 
+#[test]
+fn hello_manifest_declares_registration_channel() {
+    let manifest = serde_json::to_value(ck_cingulate::manifest()).unwrap();
+    assert_eq!(manifest["registration_channel"], json!(true));
+}
+
 struct TestClock {
     time: watch::Sender<i64>,
     sleeps: watch::Sender<Vec<i64>>,

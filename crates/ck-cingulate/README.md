@@ -88,8 +88,10 @@ prevent settlement/refresh wakes from being lost between a read and a wait.
 Pointer delivery is awaited in order, including retraction before replacement,
 and notification errors cannot reverse a committed state or fail an operation.
 
-The module uses subc-client-rs 0.33.1, subc-protocol 0.34.0 and the SDK's
-subc-transport 0.15.0 to receive the daemon's verified operator-app stamp.
+The module uses subc-client-rs 0.40.3, subc-protocol 0.37.1 and the SDK's
+subc-transport 0.18.0 to receive the daemon's operator-app recognition stamp and
+register supervised launches over the child-bound registration channel. The stamp
+identifies a recognized desktop operator-app connection; it is not approval.
 Bind identities now contain harness and session, not a project-root claim.
 The SDK refuses undecodable control requests without
 terminating the serve loop. Cingulate does not handle flows or manage agent-run

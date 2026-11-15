@@ -166,6 +166,7 @@ fn requester_name(principal: &str) -> Option<&'static str> {
 
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder(MODULE_ID, env!("CARGO_PKG_VERSION"))
+        .registration_channel(true)
         .capabilities(Some(CapabilityDeclarations {
             provides: vec![
                 "presence/v1".into(),
