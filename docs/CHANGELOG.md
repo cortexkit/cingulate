@@ -7,6 +7,11 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.23.1
+
+- Add `sealed-text-v1.1` vectors sealed with the card-bound HPKE info and
+  document the test-only recipient key; the pinned v1 vectors are unchanged.
+
 ## 0.23.0 (ck-cingulate)
 
 - Add ordinary-consent `sealed_text` inputs, carrying a one-time HPKE public key

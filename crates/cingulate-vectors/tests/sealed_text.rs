@@ -642,3 +642,42 @@ async fn sealed_text_watches_preserve_definitions_and_never_stream_sealed_answer
         subc_client_rs::HandlerOutcome::Streamed
     ));
 }
+
+#[test]
+fn sealed_text_v1_1_approve_opens_with_bound_info() {
+    use hpke::{
+        aead::ChaCha20Poly1305, kdf::HkdfSha256, kem::X25519HkdfSha256, Deserializable, OpModeR,
+    };
+
+    let private_hex = "005f1745058397e767449339f0e3910c1f945e96456260f688182a904313412c";
+    let private_bytes: Vec<u8> = (0..private_hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&private_hex[i..i + 2], 16).unwrap())
+        .collect();
+    let private = <X25519HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(&private_bytes).unwrap();
+    let approve: Value = serde_json::from_slice(
+        &std::fs::read(support::corpus(CORPUS).join("approve-request.json")).unwrap(),
+    )
+    .unwrap();
+    let input = &approve["params"]["inputs"][0];
+    let enc = URL_SAFE_NO_PAD
+        .decode(input["enc"].as_str().unwrap())
+        .unwrap();
+    let enc = <X25519HkdfSha256 as hpke::Kem>::EncappedKey::from_bytes(&enc).unwrap();
+    let ciphertext = URL_SAFE_NO_PAD
+        .decode(input["ciphertext"].as_str().unwrap())
+        .unwrap();
+    let info = br#"{"card":"el_1","field":"password","round":0,"v":"ck-sealed-text/v1"}"#;
+    let open = |info: &[u8]| {
+        hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>(
+            &OpModeR::Base,
+            &private,
+            &enc,
+            info,
+            &ciphertext,
+            b"",
+        )
+    };
+    assert_eq!(open(info).unwrap(), b"invented-sudo-password");
+    assert!(open(b"").is_err());
+}

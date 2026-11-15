@@ -28,11 +28,13 @@ async fn main() {
     // Public, invented fixture seeds: reproducible HPKE, never production keys.
     let (_, public) = X25519HkdfSha256::derive_keypair(&[41; 32]);
     let mut rng = ChaCha20Rng::from_seed([42; 32]);
+    // The sealed-text contract binds HPKE info to RFC 8785 canonical card, field, round and version JSON.
+    let info = br#"{"card":"el_1","field":"password","round":0,"v":"ck-sealed-text/v1"}"#;
     let (enc, ciphertext) =
         hpke::single_shot_seal::<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256, _>(
             &OpModeS::Base,
             &public,
-            b"",
+            info,
             b"invented-sudo-password",
             b"",
             &mut rng,

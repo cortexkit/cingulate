@@ -6,7 +6,7 @@ use subc_client_rs::HandlerOutcome;
 
 use crate::support::{app_body, stamp, Fixture};
 
-pub const CORPUS: &str = "sealed-text-v1";
+pub const CORPUS: &str = "sealed-text-v1.1";
 
 pub fn filer() -> Stamp {
     stamp("reserved:aft")
@@ -224,6 +224,8 @@ pub async fn generate(public_key: &str, input: Value) -> BTreeMap<String, Vec<u8
     }
     let mut enc = input.clone();
     enc["enc"] = json!("AQ");
+    // Keep the malformed-envelope fixture stable when the valid ciphertext changes.
+    enc["ciphertext"] = json!("z2JJ6vGzd582r_Y5Nk1ujSSyNjGPHax8wemNJT19zgUPqY2JBvA");
     let mut long = input;
     long["ciphertext"] = json!(base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
