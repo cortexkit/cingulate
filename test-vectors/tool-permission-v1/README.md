@@ -18,6 +18,11 @@ unchanged. `withdraw-bind-stamps.json` supplies the new scenarios' callers witho
 changing the original identity fixture. The six
 `notice-*.json` files are actual durable outbox bodies, not hand-written proxies.
 
+`operator-app-*` adds a desktop user-leg answer. `operator-app-peer.json` supplies
+the trusted bind peer stamp; `operator-app-audit.json` is the persisted audit row.
+The attempt records `via: "operator_app"` while keeping `surface: "user"` and
+final `answered_by: "user"`; it has no phone device fingerprint.
+
 Regenerate locally (this command writes source-controlled vectors):
 
 ```

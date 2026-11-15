@@ -100,7 +100,12 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
         None,
     );
     let desktop = stamp(Principal::Direct, "desktop", Some("alfonso-desktop"));
-    let tui = stamp(Principal::Direct, "terminal", None);
+    // The terminal sample models an explicitly enabled development build.
+    let tui = Stamp {
+        local_operator: true,
+        operator_surface: true,
+        ..stamp(Principal::Direct, "terminal", None)
+    };
     let mut files = BTreeMap::new();
     let get = json!({"method":"presence.get", "params":{}});
     let unknown = call(&h, &core, &get).await;

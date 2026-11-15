@@ -8,9 +8,8 @@ use std::{
 
 use async_trait::async_trait;
 use cingulate_store::{ConsentStore, Isolation, StorageBackend, StorageDescriptor, RETENTION_MS};
-use ck_cingulate::{
-    AwaitHook, Clock, Handler, Notifier, Options, ResolvedAgent, Resolver, Stamp, WatchSink,
-};
+use ck_cingulate::WatchSink;
+use ck_cingulate::{AwaitHook, Clock, Handler, Notifier, Options, ResolvedAgent, Resolver, Stamp};
 use rusqlite::{types::Value as SqlValue, Connection};
 use serde_json::{json, Value};
 use subc_client_rs::{HandlerOutcome, RouteBindRequest, RouteHandle};
@@ -20,7 +19,8 @@ use subc_protocol::{
     BindIdentity, ModuleHelloAckBody, Principal, RouteTarget,
 };
 use tempfile::TempDir;
-use tokio::sync::{mpsc, watch, Semaphore};
+use tokio::sync::mpsc;
+use tokio::sync::{watch, Semaphore};
 
 #[path = "module/federated.rs"]
 mod federated;
@@ -942,6 +942,7 @@ async fn owner_principal_and_operator_refusals_write_nothing() {
 }
 
 #[tokio::test]
+#[cfg(feature = "dev-local-operator")]
 async fn development_local_operator_direct_lists_gets_and_answers_ordinary_card() {
     let f = Fixture::open(None).await;
     let id = f.request(&carrier(), body()).await;
@@ -991,6 +992,7 @@ async fn development_local_operator_direct_lists_gets_and_answers_ordinary_card(
 }
 
 #[tokio::test]
+#[cfg(feature = "dev-local-operator")]
 async fn development_local_operator_keeps_direct_requester_operations() {
     let f = Fixture::open(None).await;
     let local = bound_surface(Principal::Direct, "alfonso-desktop");
@@ -1069,6 +1071,7 @@ async fn development_local_operator_keeps_direct_requester_operations() {
 }
 
 #[tokio::test]
+#[cfg(feature = "dev-local-operator")]
 async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_watch() {
     let secret: Value = serde_json::from_str(include_str!(
         "../../../test-vectors/secret-use-approval-v1/filer-request.json"

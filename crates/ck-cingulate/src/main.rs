@@ -11,6 +11,14 @@ fn production_options(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!(
+            "ck-cingulate {} ({})",
+            env!("CARGO_PKG_VERSION"),
+            ck_cingulate::BUILD_PROVENANCE
+        );
+        return Ok(());
+    }
     // Consume the supervisor nonce before any application background tasks.
     let _nonce = subc_client_rs::launch_nonce()?;
     // The daemon captures stderr as this module's log. Without a subscriber every

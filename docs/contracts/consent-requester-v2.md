@@ -191,6 +191,14 @@ non-consent request. Their `SHA256SUMS` is
 generated from actual handler replies. Existing v1 contracts and corpora remain
 byte-for-byte unchanged.
 
+Ordinary card outcomes optionally include `answered_surface: "operator_app"`
+when answered through a daemon-recognized desktop operator app. The member is
+omitted for phone answers, development-local answers, and historical records.
+`answered_device` retains its phone-fingerprint meaning. Phone-style projections
+spell the new member `answeredSurface`; neither field takes identity from the
+request body. The [outcomes samples](../../test-vectors/consent-outcomes-refs-v1/README.md)
+include a desktop answer.
+
 ## Admission and stamped identity
 
 Only `reserved:aft` may request `tool_permission` or `macos_permission`.
@@ -309,8 +317,10 @@ the audit. It wakes awaiters and removes the phone card. The first user answer o
 head deny to settle wins in the same store transaction; the loser gets `conflict`.
 Generic consent and macOS cards do not gain a head-answer path.
 
-The user answers only through the v1 Callosum + `fed-phone:` phone bind rule,
-only in `pending:user`. No body field can enable that rule. The immediate store
+The user answers through a daemon-recognized `operator_app` route or the
+Callosum + `fed-phone:` phone bind rule, only in `pending:user`. The default-off
+`dev-local-operator` build feature also permits development-local callers.
+No body field can enable these rules. The immediate store
 transaction reads the leg, validates authority/options, records the attempt and
 compares/sets the new state. The first settlement wins. A later answer, including
 the same answer, returns `{ok:false, code:"conflict", elicitation:Record}` with
@@ -397,6 +407,14 @@ attempts (surface, principal, time, answer, note, relayed identity, result),
 escalation note, final state and settlement time. Outbox rows retain delivery
 status, attempt count and last refusal. A late answer never overwrites an earlier
 outcome or its note. Standing grants remain entirely AFT's responsibility.
+
+A desktop attempt adds optional `via: "operator_app"` provenance to that audit,
+including malformed or losing attempts. Its authorization leg remains
+`surface: "user"`, and an accepted desktop answer still settles with
+`answered_by: "user"`. Phone, head and development-local attempts omit `via`;
+older persisted attempts also omit it. The
+[permission samples](../../test-vectors/tool-permission-v1/README.md) include a
+desktop attempt read from the durable audit.
 
 ## Late answers on generic consent cards
 

@@ -13,13 +13,15 @@ add delivery fields to consent streams. Summaries and routing decisions come
 from the published `cortexkit-presence` crate, which core uses too. Generated samples
 and their checksum manifest live in `crates/cingulate-vectors/presence-v1`.
 
-During development, no caller check may block an app or module being built, so
-version 0.13.2 opens the operator surface to daemon-stamped plain local programs
-(`Principal::Direct`) through the single code switch `DEVELOPMENT_LOCAL_OPERATOR`.
-Local answers have no device fingerprint; permission answer audits retain `direct`.
-Secret-use cards and flow installs carrying secrets remain hidden and
-unanswerable locally. Set the switch to false before public release; it is not a
-configuration setting.
+The default operator surfaces are phone routes and daemon-recognized
+`operator_app` desktop routes. Development installations may also admit plain
+local programs (`Principal::Direct`) with the default-off `dev-local-operator`
+Cargo feature. Local answers have no device fingerprint; permission answer audits
+retain `direct`. Signed-statement cards keep their phone-only rules, including
+secret-use cards and flow installs carrying secrets. Public release builds must
+omit the feature. Version output and health detail expose its build-time state;
+the `DEVELOPMENT_LOCAL_OPERATOR` environment variable has no effect. See the
+[development build command](../crates/ck-cingulate/README.md#development-local-operator).
 
 Version 0.13.1 accepts [forwarded v2 vault statements](contracts/consent-requester-v2.md#forwarded-secret-statements-v2-0131)
 on `secret_use` and flow-install cards: the v1 statement plus `asking_member_id`,
@@ -173,21 +175,22 @@ system temp directory.
 | Plexus | Requester of `consent` cards as a carrier, then owner ops | `allowed_kind` (`lib.rs:106`), carrier check (`lib.rs:498-504`); `test-vectors/elicitation-requester-v1/README.md` names `reserved:plexus` as the requester |
 | Basal | Requester of `flow_decision` cards, then owner ops | `allowed_kind` (`lib.rs:110`) |
 | Cerebellum, Entorhinal | Requesters of `consent` cards as carriers | `allowed_kind` (`lib.rs:106`) |
-| Local `direct` callers | Requester of `consent` cards, labelled "an unverified local process"; ordinary operator cards during development | `allowed_kind`, label, and `DEVELOPMENT_LOCAL_OPERATOR` in `Stamp::from_bind` |
+| Verified desktop apps | Ordinary operator cards | Daemon `operator_app` bind stamp in `Stamp::from_bind` |
+| Local `direct` callers | Requester of `consent` cards, labelled "an unverified local process"; ordinary operator cards only with the development feature | `allowed_kind`, label, and `dev-local-operator` in `Stamp::from_bind` |
 
 ## Known gaps
 
 An operation admitted on a `direct` route proves only that the caller runs as the
-operator's user. Any local program, including an agent's shell, can approve
+operator's user. With `dev-local-operator`, any local program, including an agent's shell, can approve
 ordinary consent cards without the phone, including a card it filed itself.
 Separate runtime user accounts or a caller program check would close that
 self-approval gap. The development opening is not a guarantee of human approval.
 
-- **Card answers.** `DEVELOPMENT_LOCAL_OPERATOR` currently admits daemon-stamped
+- **Card answers.** The default-off `dev-local-operator` Cargo feature admits daemon-stamped
   `direct` binds to ordinary operator cards. This deliberately accepts the
   self-approval gap because, during development, no caller check may block an app
-  or module being built. It is not a release guarantee: set the switch to false
-  before public release. The switch-disabled bind test proves local operator
+  or module being built. It is not a release guarantee: omit the feature
+  from public release builds. The feature-off answer tests prove local operator
   authority is removed, while
   phone-only secret and device gates remain enforced with the switch enabled.
 - **`permissions.revoke`.** The [permissions/v1](contracts/permissions-v1.md)

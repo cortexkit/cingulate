@@ -6,10 +6,11 @@ use ck_cingulate::{
 };
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
-use subc_client_rs::HandlerOutcome;
+use subc_client_rs::{HandlerOutcome, RouteBindRequest, RouteHandle};
 use subc_protocol::{
+    peer::{OperatorApp, RouteBindPeer},
     scope::{ScopeAttributes, ScopeKind, ScopeParent, ScopeStamp},
-    ModuleHelloAckBody, Principal,
+    BindIdentity, ModuleHelloAckBody, Principal, RouteTarget,
 };
 
 pub const CORPUS: &str = "tool-permission-v1";
@@ -561,5 +562,57 @@ pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<Str
         json!({"elicitationId": id}),
     )
     .await;
+    let bind = RouteBindRequest::new(
+        RouteHandle::detached(1, 1),
+        RouteTarget::ManagementSurface {
+            module_id: "cingulate".into(),
+        },
+        BindIdentity::new("local-desktop", "desktop-session"),
+    )
+    .with_principal(Principal::Direct)
+    .with_peer(
+        RouteBindPeer::new().with_operator_app(Some(OperatorApp::new("alfonso-desktop", 5))),
+    );
+    files.insert(
+        "operator-app-peer.json".into(),
+        serde_json::to_vec(&bind.peer).unwrap(),
+    );
+    let id = capture(
+        &mut files,
+        &handler,
+        &own,
+        "operator-app-open",
+        "consent.request",
+        json!({"kind":"tool_permission","call_key":"call-operator-app","tool":"bash",
+            "operation":"exec","paths":[],"command":"pwd","reason":"Inspect directory",
+            "args_hash":"hash-operator-app","pattern":"pwd"}),
+    )
+    .await["elicitation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let answer = capture(
+        &mut files,
+        &handler,
+        &Stamp::from_bind(&bind),
+        "operator-app-answer",
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+    )
+    .await;
+    assert_eq!(answer["ok"], true);
+    let audit: String = db
+        .query_row(
+            "SELECT record_json FROM access_asks WHERE elicitation_id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let value: Value = serde_json::from_str(&audit).unwrap();
+    assert_eq!(value["answered_by"], "user");
+    assert_eq!(value["attempts"][0]["surface"], "user");
+    assert_eq!(value["attempts"][0]["via"], "operator_app");
+    assert!(value["attempts"][0].get("device").is_none());
+    files.insert("operator-app-audit.json".into(), audit.into_bytes());
     files
 }

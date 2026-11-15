@@ -732,6 +732,7 @@ async fn phone_cannot_answer_or_fetch_head_leg() {
 }
 
 #[tokio::test]
+#[cfg(feature = "dev-local-operator")]
 async fn development_local_operator_permission_answers_keep_identity_and_head_boundary() {
     let f = Fixture::new(true).await;
     let local = local_operator();

@@ -28,6 +28,13 @@ use person_notice::enqueue_person_notice;
 pub use record::{ElicitationRecord, State, Subject, LATE_ANSWER_PURPOSE};
 
 pub const RETENTION_MS: i64 = 86_400_000;
+
+/// Answer provenance supplied by the caller's trusted route stamp, not the body.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AnswerProvenance<'a> {
+    pub device: Option<&'a str>,
+    pub surface: Option<&'a str>,
+}
 pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
@@ -521,6 +528,7 @@ impl ConsentStore {
                 state: State::Pending,
                 answered_at_ms: None,
                 answered_device: None,
+                answered_surface: None,
                 secret_use_answer: None,
                 manifest_binding_answer: None,
                 statement: None,
@@ -661,6 +669,29 @@ impl ConsentStore {
         envelope: Option<&str>,
         now_ms: i64,
     ) -> Result<Mutation<AnswerOutcome>> {
+        self.answer_with_provenance(
+            id,
+            choice,
+            console_machine_id,
+            AnswerProvenance {
+                device,
+                surface: None,
+            },
+            envelope,
+            now_ms,
+        )
+    }
+
+    pub fn answer_with_provenance(
+        &self,
+        id: &str,
+        choice: &str,
+        console_machine_id: Option<&str>,
+        provenance: AnswerProvenance<'_>,
+        envelope: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Mutation<AnswerOutcome>> {
+        let AnswerProvenance { device, surface } = provenance;
         if self
             .get_phone(id, now_ms)?
             .is_some_and(|r| r.request.kind == "config_plan")
@@ -782,6 +813,7 @@ impl ConsentStore {
                     }
                 }
                 record.answered_device = device.map(str::to_owned);
+                record.answered_surface = surface.map(str::to_owned);
                 record.secret_use_answer = secret_answer;
                 record.manifest_binding_answer = manifest_answer;
                 terminal(

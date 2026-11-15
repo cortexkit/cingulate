@@ -34,8 +34,9 @@ and route-independent lifecycle are in
 For a federated Callosum operator route, the stamped peer class must be `phone`;
 an unstamped route continues to use the harness rule below.
 
-The release operator rule is `reserved:callosum` on a daemon-stamped harness
-starting `fed-phone:`. No body field establishes authority. Permission
+The default operator rule accepts either a daemon-stamped `operator_app` desktop
+route or `reserved:callosum` on a daemon-stamped harness starting `fed-phone:`.
+No body field establishes authority. Permission
 asks appear in `consent.list_pending` **only** while in `pending:user`, projected
 as `state: "pending"`. Phone `consent.get` continues to serve a permission ask
 after settlement if its durable surface history includes the user leg. A worker's
@@ -45,13 +46,16 @@ phone get projection. Existing generic consent kinds follow the v1 rule: phone g
 continues to return a settled card after requester acknowledgment until the
 24-hour retention prune removes its payload.
 
-During development, no caller check may block an app or module being built, so the
-code-only `DEVELOPMENT_LOCAL_OPERATOR` switch also admits daemon-stamped
+For development installations, the default-off `dev-local-operator` Cargo
+feature also admits daemon-stamped
 `Principal::Direct` programs as operator surfaces for listing, fetching, answering
 and watching ordinary cards. Local answers have no device fingerprint; permission
-answer audits retain the real principal `direct`. Secret-use cards, flow installs
-carrying secrets remain hidden and unanswerable from local programs. Set the
-switch to false before public release; no configuration setting enables it.
+answer audits retain the real principal `direct`. Secret-use, manifest-binding,
+config-plan, and flow-install cards carrying secrets remain hidden and
+unanswerable from desktop apps and local programs, including declines under the
+existing phone-only visibility rules. Public release builds must omit the
+feature; the `DEVELOPMENT_LOCAL_OPERATOR` environment variable has no effect.
+Version output and health detail expose the feature's build-time state.
 
 Local programs also retain their requester operations. A local `consent.get` uses
 the operator projection only when `elicitationId` is present; `elicitation_id`
@@ -171,6 +175,14 @@ fingerprint as `answeredDevice`, and a permission ask records it on its stored
 answer attempt. The fingerprint is never taken from answer params, and it is an
 audit record only: whether the caller may answer is decided separately, by the
 operator route rules above.
+
+An accepted ordinary desktop answer adds `answeredSurface: "operator_app"` to
+the card (`answered_surface` in requester and outcome records). It is optional
+and omitted for phone and development-local answers, including historical
+records. `answeredDevice` remains the phone fingerprint and is not repurposed.
+Permission answer attempts retain `surface: "user"` and final
+`answered_by: "user"`, with optional audit provenance `via: "operator_app"`.
+These fields come only from the daemon's bind stamp, never from answer params.
 
 ## consent.watch_pending
 

@@ -7,6 +7,18 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
+## 0.22.0 (ck-cingulate), 0.10.0 (cingulate-store), 0.14.0 (cingulate-vectors)
+
+- Accept ordinary card answers through the daemon's verified `operator_app`
+  desktop bind stamp. Preserve phone-only rules and refusal codes for secret-use,
+  manifest-binding, config-plan, and secret-bearing flow-install cards.
+- Replace the always-on development local-operator constant with the default-off
+  `dev-local-operator` Cargo feature. Version output and health detail report its
+  state; public release artifacts must omit it. Environment settings cannot enable it.
+- Persist optional `answered_surface: "operator_app"` in ordinary outcomes and
+  `via: "operator_app"` in permission audit attempts, without changing device
+  fingerprints or user/head authorization. Add served desktop provenance samples.
+
 ## 0.21.1 (ck-cingulate)
 
 - Upgrade to subc-client-rs 0.40.3 and subc-protocol 0.37.1 so supervised

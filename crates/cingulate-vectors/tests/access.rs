@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs};
 #[tokio::test]
 async fn permission_served_vectors_regenerate_byte_for_byte() {
     let generated = access::generate().await;
-    assert_eq!(generated.len(), 93);
+    assert_eq!(generated.len(), 99);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(access::root().join(&name)).unwrap(),
@@ -21,7 +21,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
     let sums = fs::read(root.join("SHA256SUMS")).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&sums)),
-        "ffccf81a7dbba87eab9656af4969b68d478437565dc40c119e17b1a303698a3e"
+        "02f49c9331c26c83d2794d7322b32fc055626819542c13285a3ecf76442afe5e"
     );
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
@@ -39,7 +39,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
         .filter(|name| name != "SHA256SUMS")
         .collect();
     assert_eq!(actual, listed);
-    assert_eq!(listed.len(), 94);
+    assert_eq!(listed.len(), 100);
 }
 
 #[tokio::test]

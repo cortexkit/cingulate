@@ -114,9 +114,9 @@ fn danger_option_group_manifest_covers_exact_bytes() {
 fn consent_outcomes_refs_manifest_covers_exact_bytes() {
     pin(
         "consent-outcomes-refs-v1",
-        "a9464870dee5e98bf66ea6802b2a5a139031799b42e0880e21f125122ef927d3",
+        "ca09772e1a0bce7380699f2cb917138f0cb7ee78e1873d6412d9db07f96a8e92",
     );
-    coverage("consent-outcomes-refs-v1", 34);
+    coverage("consent-outcomes-refs-v1", 41);
 }
 
 #[test]

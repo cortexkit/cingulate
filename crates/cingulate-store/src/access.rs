@@ -34,6 +34,8 @@ pub struct AccessIdentity {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AnswerAttempt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub malformed_params: Option<Value>,
@@ -329,6 +331,7 @@ impl AccessRecord {
 
 #[derive(Debug, Clone)]
 pub struct AccessAnswer {
+    pub via: Option<String>,
     pub surface: String,
     pub principal: String,
     pub answer: String,
@@ -494,7 +497,7 @@ impl ConsentStore {
                     else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None }
                 } else if answer.surface != "user" || (answer.principal != "reserved:callosum" && !operator_authorized) || record.state != "pending:user" { Some("access_wrong_leg") }
                 else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None };
-            record.attempts.push(AnswerAttempt { device: device.map(str::to_owned), malformed_params: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
+            record.attempts.push(AnswerAttempt { via: answer.via, device: device.map(str::to_owned), malformed_params: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
             if code.is_none() {
                 if answer.answer == "escalate" {
                     record.state = "pending:user".into();

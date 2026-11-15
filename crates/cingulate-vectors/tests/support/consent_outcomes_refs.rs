@@ -4,6 +4,7 @@ use ck_cingulate::Stamp;
 use serde_json::{json, Value};
 use subc_client_rs::{HandlerOutcome, RouteBindRequest, RouteHandle};
 use subc_protocol::{
+    peer::{OperatorApp, RouteBindPeer},
     scope::{ScopeAttributes, ScopeKind, ScopeStamp},
     BindIdentity, Principal, RouteTarget,
 };
@@ -112,6 +113,57 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
         carried_agent_id: "agent-alf".into(),
         ..stamp("reserved:cerebellum")
     };
+
+    let fixture = Fixture::open(None).await;
+    let bind = RouteBindRequest::new(
+        RouteHandle::detached(1, 1),
+        RouteTarget::ManagementSurface {
+            module_id: "cingulate".into(),
+        },
+        BindIdentity::new("local-desktop", "desktop-session"),
+    )
+    .with_principal(Principal::Direct)
+    .with_peer(
+        RouteBindPeer::new().with_operator_app(Some(OperatorApp::new("alfonso-desktop", 5))),
+    );
+    files.insert(
+        "operator-app-peer.json".into(),
+        serde_json::to_vec(&bind.peer).unwrap(),
+    );
+    let desktop = Stamp::from_bind(&bind);
+    let created = record(
+        &mut files,
+        &fixture,
+        &requester,
+        "operator-app",
+        "consent.request",
+        app_body(),
+    )
+    .await;
+    let id = created["elicitation_id"].as_str().unwrap();
+    fixture.clock.set(ANSWERED);
+    let answer = record(
+        &mut files,
+        &fixture,
+        &desktop,
+        "operator-app-answer",
+        "consent.answer",
+        json!({"elicitationId":id,"choiceId":"allow_once"}),
+    )
+    .await;
+    assert_eq!(answer["ok"], true);
+    assert_eq!(answer["elicitation"]["answeredSurface"], "operator_app");
+    let outcomes = record(
+        &mut files,
+        &fixture,
+        &stamp("reserved:prefrontal-core"),
+        "operator-app-outcomes",
+        "consent.outcomes",
+        json!({"since":0}),
+    )
+    .await;
+    assert_eq!(outcomes["records"][0]["answered_surface"], "operator_app");
+    assert!(outcomes["records"][0].get("answered_device").is_none());
 
     let fixture = Fixture::open(None).await;
     let mut body = app_body();

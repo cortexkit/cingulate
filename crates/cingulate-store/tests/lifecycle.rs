@@ -1329,6 +1329,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
         state: State::Pending,
         answered_at_ms: None,
         answered_device: None,
+        answered_surface: None,
         secret_use_answer: None,
         manifest_binding_answer: None,
         answer_seq: None,
@@ -1432,6 +1433,7 @@ fn development_local_operator_permission_answer_requires_explicit_authority() {
         .record
         .elicitation_id;
     let answer = || cingulate_store::AccessAnswer {
+        via: None,
         surface: "user".into(),
         principal: "direct".into(),
         answer: "allow_once".into(),

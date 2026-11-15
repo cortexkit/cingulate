@@ -1,7 +1,11 @@
 [package]
 name = "ck-cingulate"
-version = "0.21.1"
+version = "0.22.0"
 edition = "2021"
+
+[features]
+default = []
+dev-local-operator = []
 
 [dependencies]
 async-trait = "0.1"

@@ -31,7 +31,7 @@ The daemon route decides who may report and the device kind. Only a local
 | --- | --- | --- |
 | `reserved:callosum`, `fed-phone:<fingerprint>` (32 lowercase hex digits) | `phone:<fingerprint>` | `phone` |
 | Verified local operator app (`operator_app.app` stamp) | `computer:<stamped app>` | `computer` |
-| Local `direct` while `DEVELOPMENT_LOCAL_OPERATOR` is true | `computer:<body app>` | `computer` |
+| Local `direct` with the `dev-local-operator` Cargo feature | `computer:<body app>` | `computer` |
 
 `device_kind` is accepted and ignored for every reporter; the kind comes from
 the route. Phone routes also ignore body `app`. Verified operator stamps win

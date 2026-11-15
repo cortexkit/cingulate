@@ -29,15 +29,37 @@ daemon adapter. The production adapter uses the principal from `on_bind` and the
 SDK's daemon-attested `scope`: bind session is the JSON tuple
 `[owner, ref, epoch]`, and carried agent is `attributes.agent_id`. Unscoped binds
 keep both fields empty; carrier requests without an attested agent fail closed.
-Answering and listing pending cards require an operator surface: both the
-`reserved:callosum` principal and a bind identity `harness` beginning with the
-literal `fed-phone:` prefix. When Callosum opens a route for a paired device's
+Answering and listing pending ordinary cards require an operator surface: a
+daemon-verified `operator_app` bind stamp, or both the `reserved:callosum` principal
+and a bind identity `harness` beginning with the literal `fed-phone:` prefix.
+When Callosum opens a route for a paired device's
 call, it sets that harness to `fed-<class>:<device fingerprint>`, where the class
 (`phone`, `sim`, `mac` or `unknown`) is fixed by the operator at pairing and the
-device cannot choose it. Only the phone may approve cards. The harness only
+device cannot choose it. `secret_use`, `manifest_binding`, `config_plan`, and
+`flow_install` cards carrying secrets retain their phone-only rules; desktop
+recognition is not a signed approval.
+The harness only
 narrows Callosum's answer authority; on any other principal it grants nothing. Body identity
 and the bind identity's session are never trusted. Console machine stays empty:
 no attested console source exists, so `at_console` answers still fail closed.
+
+## Development local operator
+
+The `dev-local-operator` Cargo feature is off by default. For a development
+installation that needs plain local (`Principal::Direct`) programs to answer
+ordinary cards, build with:
+
+```sh
+cargo build -p ck-cingulate --release --features dev-local-operator
+```
+
+The feature does not relax the phone-only rules for signed-statement cards.
+Setting the `DEVELOPMENT_LOCAL_OPERATOR` environment variable has no effect.
+Public release builds must omit `dev-local-operator`; build them with
+`cargo build -p ck-cingulate --release --no-default-features`.
+`ck-cingulate --version` and `health.check` detail report
+`dev-local-operator: on` or `dev-local-operator: off` so placement checks can
+reject artifacts with development authority.
 
 ## Package cards and paging
 

@@ -172,6 +172,7 @@ fn pinned_record(id: &str, state: State, choice: Option<&str>, at: i64) -> Elici
         answered_choice_id: choice.map(str::to_owned),
         answered_at_ms: Some(at),
         answered_device: None,
+        answered_surface: None,
         secret_use_answer: None,
         manifest_binding_answer: None,
         answer_seq: None,

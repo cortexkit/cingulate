@@ -12,6 +12,10 @@ non-boolean value.
 `single-use-phone-get-reply.json` confirms phone projections omit it. Existing
 phone vector sets remain byte-for-byte unchanged.
 
+`operator-app-*` captures an ordinary answer and outcome through a daemon-stamped
+desktop route. `operator-app-peer.json` supplies the trusted peer stamp. The
+outcome adds `answered_surface: "operator_app"` and has no phone device fingerprint.
+
 Regenerate with:
 
 ```sh

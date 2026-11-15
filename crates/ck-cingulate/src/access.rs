@@ -466,6 +466,7 @@ impl Handler {
                                 None
                             };
                             Ok(AccessAnswer {
+                                via: stamp.operator_app.as_ref().map(|_| "operator_app".into()),
                                 surface: surface.into(),
                                 principal: stamp.label().into(),
                                 answer,
@@ -480,6 +481,10 @@ impl Handler {
                                     store.access_rejected_attempt(
                                         id,
                                         AnswerAttempt {
+                                            via: stamp
+                                                .operator_app
+                                                .as_ref()
+                                                .map(|_| "operator_app".into()),
                                             device: stamp.answering_device().map(str::to_owned),
                                             malformed_params: Some(params.clone()),
                                             surface: surface.into(),

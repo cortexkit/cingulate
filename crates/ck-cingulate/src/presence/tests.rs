@@ -39,7 +39,7 @@ fn bind(principal: Principal, harness: &str) -> RouteBindRequest {
 }
 
 fn local() -> Stamp {
-    Stamp::from_bind(&bind(Principal::Direct, "local"))
+    Stamp::from_bind_with_local_operator(&bind(Principal::Direct, "local"), true)
 }
 fn core() -> Stamp {
     Stamp::from_principal(Some(&Principal::Reserved {

@@ -44,6 +44,8 @@ mod identity;
 pub use identity::EntorhinalResolver;
 mod permissions;
 pub use permissions::{PermissionsCallError, PermissionsRuntime};
+#[cfg(test)]
+mod operator_app_tests;
 mod pending_watch;
 mod presence;
 pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, WATCH_PENDING};
@@ -214,10 +216,17 @@ pub fn manifest() -> ModuleManifest {
         .build()
 }
 
-/// During development, no caller check may block an app or module being built,
-/// so plain local programs (`Principal::Direct`) may act as the operator surface.
-/// Set to false before public release.
-pub const DEVELOPMENT_LOCAL_OPERATOR: bool = true;
+/// Development builds may explicitly allow plain local programs to answer
+/// ordinary cards. Public release artifacts must leave this feature disabled.
+pub const DEVELOPMENT_LOCAL_OPERATOR: bool = cfg!(feature = "dev-local-operator");
+
+/// Reports development-only authority so placement checks can reject artifacts
+/// that allow plain local programs to answer cards.
+pub const BUILD_PROVENANCE: &str = if DEVELOPMENT_LOCAL_OPERATOR {
+    "dev-local-operator: on"
+} else {
+    "dev-local-operator: off"
+};
 
 /// Requester, session and subject identity taken from the daemon's route bind,
 /// never from a consent request body.
@@ -268,11 +277,12 @@ impl Stamp {
                     .expect("scope identity serialization");
             stamp.carried_agent_id = scope.attributes.agent_id.clone().unwrap_or_default();
         }
-        // Callosum's phone routes retain operator authority independently of the
-        // development opening for daemon-stamped plain local programs.
+        // Phone routes and verified desktop apps retain operator authority
+        // without enabling the development-only feature for plain local programs.
         stamp.local_operator = local_operator && matches!(req.principal, Some(Principal::Direct));
         stamp.operator_surface = (stamp.label() == "reserved:callosum"
             && req.identity.harness.starts_with("fed-phone:"))
+            || stamp.operator_app.is_some()
             || stamp.local_operator;
         // Simulators can read the permissions inventory, but cannot narrow grants
         // or answer cards. Keep this separate from consent's phone authority.
@@ -705,7 +715,7 @@ impl Handler {
                 1 => HealthStatus::Degraded,
                 _ => HealthStatus::Failing,
             },
-            detail: None,
+            detail: Some(BUILD_PROVENANCE.into()),
             metrics: None,
         }
     }
@@ -1747,11 +1757,14 @@ impl Handler {
                                 "statement and signature_b64url require config_plan",
                             ));
                         }
-                        store.answer_with_envelope(
+                        store.answer_with_provenance(
                             id.expect("answer id"),
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
-                            stamp.answering_device(),
+                            cingulate_store::AnswerProvenance {
+                                device: stamp.answering_device(),
+                                surface: stamp.operator_app.as_ref().map(|_| "operator_app"),
+                            },
                             params
                                 .get("envelope_b64url")
                                 .map(|v| {
@@ -2574,9 +2587,12 @@ mod tests {
         )
         .await
         .expect("lock-free health");
+        let HandlerOutcome::Response(bytes) = outcome else {
+            panic!("health response required")
+        };
         assert_eq!(
-            outcome,
-            HandlerOutcome::Response(br#"{"result":{"status":"ok"}}"#.to_vec())
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"result":{"status":"ok","detail":BUILD_PROVENANCE}})
         );
         blocker
             .execute_batch("COMMIT")
