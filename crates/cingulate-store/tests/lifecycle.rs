@@ -74,6 +74,202 @@ fn request() -> ConsentRequest {
     .unwrap()
 }
 
+#[test]
+fn card_settled_outbox_exact_readers_sequences_and_idempotence() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    for (index, reader) in ["aft", "plexus", "basal", "broca", "cerebellum"]
+        .iter()
+        .enumerate()
+    {
+        let owner = identity(&format!("reserved:{reader}"), "stamped-session");
+        let mut req = request();
+        req.requester_ref = Some("reserved:broca private text".into());
+        let id = store
+            .create(&owner, req, 100)
+            .unwrap()
+            .record
+            .elicitation_id;
+        store.answer(&id, "allow_once", None, 101).unwrap();
+        store.answer(&id, "allow_once", None, 102).unwrap();
+        store.withdraw(&owner.owner, &id, 103).unwrap();
+        let rows: Vec<_> = store
+            .card_settled_pending(64)
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.elicitation_id == id)
+            .collect();
+        assert_eq!(rows.len(), if *reader == "cerebellum" { 1 } else { 2 });
+        for row in rows {
+            assert_eq!(
+                row.seq,
+                index as i64 + 1,
+                "global answer cursor, not a reader-local count"
+            );
+            assert_eq!(row.msg_id(), format!("{id}:{}:{}", row.reader, row.seq));
+            let body: Value = serde_json::from_slice(&row.body()).unwrap();
+            assert_eq!(
+                body,
+                json!({"elicitation_id": id, "feed": if row.reader == "prefrontal-core" { "outcomes" } else { "answers" }, "seq": index + 1})
+            );
+            assert!(row.reader == "prefrontal-core" || row.reader == *reader);
+        }
+        assert_eq!(
+            store.answers(&owner.owner, 0, 104).unwrap().cursor,
+            index as i64 + 1
+        );
+    }
+    drop(store);
+    let (store, _) = scratch.open(104);
+    assert_eq!(
+        store.card_settled_pending(64).unwrap().len(),
+        9,
+        "pending survives reopen"
+    );
+}
+
+#[test]
+fn card_settled_outbox_rolls_back_with_failed_settlement() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let id = store
+        .create(&identity("reserved:aft", "s"), request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    scratch.sql().execute_batch("CREATE TRIGGER fail_after_settle BEFORE INSERT ON card_settled_outbox WHEN NEW.reader='prefrontal-core' BEGIN SELECT RAISE(ABORT,'injected rollback'); END;").unwrap();
+    assert!(store.answer(&id, "allow_once", None, 101).is_err());
+    assert_eq!(store.get(&id, 102).unwrap().unwrap().state, State::Pending);
+    assert!(
+        store.card_settled_pending(64).unwrap().is_empty(),
+        "including the first reader's inserted row"
+    );
+    assert!(store.outcomes(0, 102).unwrap().records.is_empty());
+    scratch
+        .sql()
+        .execute_batch("DROP TRIGGER fail_after_settle")
+        .unwrap();
+    store.answer(&id, "allow_once", None, 103).unwrap();
+    assert_eq!(store.card_settled_pending(64).unwrap().len(), 2);
+}
+
+#[test]
+fn card_settled_outbox_expiry_and_withdrawal_match_feed_visibility() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let owner = identity("reserved:broca", "s");
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.withdraw(&owner.owner, &id, 101).unwrap();
+    let rows = store.card_settled_pending(64).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].reader, "prefrontal-core");
+    let mut req = request();
+    req.expires_in_ms = Some(10);
+    let expired = store
+        .create(&owner, req, 102)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.sweep(112).unwrap();
+    let rows = store.card_settled_pending(64).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.elicitation_id == expired && row.seq == 2)
+            .count(),
+        2
+    );
+    assert_eq!(
+        store.answers(&owner.owner, 0, 113).unwrap().records.len(),
+        1
+    );
+    assert_eq!(store.outcomes(0, 113).unwrap().records.len(), 2);
+}
+
+#[test]
+fn card_settled_outbox_ack_deletes_once_and_counters_survive_reopen() {
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    let id = store
+        .create(&identity("reserved:aft", "s"), request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    store.answer(&id, "allow_once", None, 101).unwrap();
+    let row = store.card_settled_pending(64).unwrap().remove(0);
+    assert_eq!(row.reader, "aft");
+    store.card_settled_published(&row).unwrap();
+    store.card_settled_published(&row).unwrap();
+    store.answer(&id, "allow_once", None, 102).unwrap();
+    drop(store);
+    let (store, _) = scratch.open(103);
+    let counts = store.card_settled_counts().unwrap();
+    assert_eq!(counts[0].pending, 0);
+    assert_eq!(counts[0].published, 1);
+    assert_eq!(counts[4].pending, 1);
+    assert_eq!(counts[4].published, 0);
+}
+
+#[test]
+fn card_settled_outbox_cap_is_per_reader_and_preserves_newest() {
+    use cingulate_store::CARD_SETTLED_PENDING_CAP;
+    let scratch = Scratch::new();
+    let (store, _) = scratch.open(100);
+    scratch
+        .sql()
+        .execute(
+            "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?1) \
+         INSERT INTO card_settled_outbox SELECT 'old-'||x,'prefrontal-core','outcomes',x FROM n",
+            [CARD_SETTLED_PENDING_CAP],
+        )
+        .unwrap();
+    scratch
+        .sql()
+        .execute(
+            "INSERT INTO card_settled_outbox VALUES ('other-reader','broca','answers',1)",
+            [],
+        )
+        .unwrap();
+    // The next real feed position follows the synthetic backlog.
+    let owner = identity("reserved:aft", "s");
+    let id = store
+        .create(&owner, request(), 100)
+        .unwrap()
+        .record
+        .elicitation_id;
+    scratch
+        .sql()
+        .execute(
+            "UPDATE sqlite_sequence SET seq=?1 WHERE name='elicitation_answers'",
+            [CARD_SETTLED_PENDING_CAP],
+        )
+        .unwrap();
+    store.answer(&id, "allow_once", None, 101).unwrap();
+    let conn = scratch.sql();
+    let counts = store.card_settled_counts().unwrap();
+    assert_eq!(counts[4].pending, CARD_SETTLED_PENDING_CAP as u64);
+    assert_eq!(counts[4].dropped, 1);
+    assert_eq!(counts[3].pending, 1, "busy core cannot evict broca");
+    assert_eq!(counts[0].pending, 1);
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM card_settled_outbox WHERE elicitation_id='old-1'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(conn.query_row("SELECT seq FROM card_settled_outbox WHERE elicitation_id=?1 AND reader='prefrontal-core'", [&id], |r| r.get::<_, i64>(0)).unwrap(), CARD_SETTLED_PENDING_CAP + 1);
+    drop(store);
+    let (store, _) = scratch.open(102);
+    assert_eq!(store.card_settled_counts().unwrap()[4].dropped, 1);
+}
+
 fn identity(principal: &str, session: &str) -> RequestIdentity {
     RequestIdentity {
         owner: json!([principal, session]).to_string(),
@@ -199,7 +395,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7,8,9,10,11,12,13,14"
+        "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
     );
     let answer_schema: String = conn
         .query_row(
@@ -287,14 +483,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,15,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,16,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 15"));
-    assert!(error.to_string().contains("migration 14"));
+    assert!(error.to_string().contains("version 16"));
+    assert!(error.to_string().contains("migration 15"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1261,7 +1457,9 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
     scratch
         .sql()
         .execute_batch(
-            "ALTER TABLE elicitation_answers DROP COLUMN sealed_inputs_json;
+            "DROP TABLE card_settled_outbox;
+        DROP TABLE card_settled_counters;
+        ALTER TABLE elicitation_answers DROP COLUMN sealed_inputs_json;
         ALTER TABLE elicitation_answers DROP COLUMN sealed_answer_sha256;
         DROP TRIGGER cingulate_change_card_insert;
         DROP TRIGGER cingulate_change_card_update;

@@ -123,6 +123,7 @@ impl Handler {
     pub(crate) fn note_writes(&self, store: &cingulate_store::ConsentStore) {
         let count = store.write_count();
         if self.inner.writes.swap(count, Ordering::AcqRel) != count {
+            self.inner.bus_metrics.refresh(store);
             self.inner.changes.send_replace(());
         }
     }

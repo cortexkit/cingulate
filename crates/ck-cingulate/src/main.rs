@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         subc_client_rs::serve_from_env_with_handle(ck_cingulate::manifest(), handler.clone())
             .await?;
     let runtime = std::sync::Arc::new(ck_cingulate::DaemonAccessRuntime::new(module));
+    handler.start_bus_publisher(runtime.clone());
     handler.set_access_runtime(runtime.clone());
     resolver.set_runtime(runtime.clone());
     handler.set_permissions_runtime(runtime);

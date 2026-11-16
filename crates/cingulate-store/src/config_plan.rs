@@ -412,6 +412,48 @@ mod tests {
     }
 
     #[test]
+    fn card_settled_reopened_card_has_distinct_ids_and_ack_is_per_settlement() {
+        let mut f = Scratch::new();
+        f.open();
+        let id = f.file();
+        f.db()
+            .answer_from_device(&id, "decline", None, Some("fake-phone"), 101)
+            .unwrap();
+        let first = f.db().card_settled_pending(64).unwrap().remove(0);
+        f.db()
+            .report_unverified("callosum-owner", &id, 1, "signature", 102)
+            .unwrap();
+        f.db()
+            .answer_from_device(&id, "decline", None, Some("fake-phone"), 103)
+            .unwrap();
+        let rows = f.db().card_settled_pending(64).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].seq, 1);
+        assert_eq!(rows[1].seq, 2);
+        assert_eq!(rows[0].msg_id(), format!("{id}:prefrontal-core:1"));
+        assert_eq!(rows[1].msg_id(), format!("{id}:prefrontal-core:2"));
+        f.db().card_settled_published(&first).unwrap();
+        assert_eq!(
+            f.db().card_settled_pending(64).unwrap(),
+            vec![rows[1].clone()]
+        );
+        f.db().card_settled_published(&first).unwrap();
+        assert_eq!(f.db().card_settled_counts().unwrap()[4].published, 1);
+        // Publishing prior settlements must not suppress a later reopened settlement.
+        f.db().card_settled_published(&rows[1]).unwrap();
+        f.db()
+            .report_unverified("callosum-owner", &id, 2, "signature", 104)
+            .unwrap();
+        f.db()
+            .answer_from_device(&id, "decline", None, Some("fake-phone"), 105)
+            .unwrap();
+        let third = f.db().card_settled_pending(64).unwrap();
+        assert_eq!(third.len(), 1);
+        assert_eq!(third[0].seq, 3);
+        assert_eq!(third[0].msg_id(), format!("{id}:prefrontal-core:3"));
+    }
+
+    #[test]
     fn config_plan_reopened_unsigned_decline_with_envelope() {
         assert_reopened_unsigned_decline(|store, id, choice| {
             store.answer_with_envelope(id, choice, None, Some("fake-phone"), None, 103)

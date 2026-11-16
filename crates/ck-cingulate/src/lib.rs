@@ -36,6 +36,7 @@ use subc_protocol::{
 use tokio::sync::{watch, Mutex};
 
 mod access;
+pub mod card_settled;
 pub use access::{AccessRuntime, DaemonAccessRuntime, NoticeResult, ScopeLife};
 pub mod engram;
 mod execution;
@@ -532,6 +533,8 @@ struct Inner {
     routes: StdMutex<HashMap<RouteHandle, Stamp>>,
     timer: StdMutex<Option<tokio::task::AbortHandle>>,
     retry: StdMutex<Option<tokio::task::AbortHandle>>,
+    bus_task: StdMutex<Option<tokio::task::AbortHandle>>,
+    bus_metrics: card_settled::Metrics,
     /// The store connection's write count at the last check; see `note_writes`.
     writes: AtomicU64,
     /// Ticks after any store write, waking open watches to read the change log.
@@ -544,7 +547,7 @@ struct Inner {
 }
 impl Drop for Inner {
     fn drop(&mut self) {
-        for task in [&self.timer, &self.retry] {
+        for task in [&self.timer, &self.retry, &self.bus_task] {
             if let Some(task) = task.lock().expect("task lock").take() {
                 task.abort();
             }
@@ -727,6 +730,8 @@ impl Handler {
                 routes: StdMutex::new(HashMap::new()),
                 timer: StdMutex::new(None),
                 retry: StdMutex::new(None),
+                bus_task: StdMutex::new(None),
+                bus_metrics: card_settled::Metrics::default(),
                 writes: AtomicU64::new(0),
                 changes: watch::channel(()).0,
                 stopping: watch::channel(false).0,
@@ -746,7 +751,7 @@ impl Handler {
                 _ => HealthStatus::Failing,
             },
             detail: Some(BUILD_PROVENANCE.into()),
-            metrics: None,
+            metrics: Some(self.inner.bus_metrics.json()),
         }
     }
 
@@ -815,6 +820,7 @@ impl Handler {
         store.set_change_log_rows(self.inner.options.change_log_rows);
         self.settlements(&settlements).await;
         self.note_writes(&store);
+        self.inner.bus_metrics.refresh(&store);
         *self.inner.store.lock().await = Some(store);
         self.inner.health.store(2, Ordering::Release);
         self.spawn_pending_notices().await;
@@ -2692,10 +2698,16 @@ mod tests {
         let HandlerOutcome::Response(bytes) = outcome else {
             panic!("health response required")
         };
+        let reply: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(reply["result"]["status"], "ok");
+        assert_eq!(reply["result"]["detail"], BUILD_PROVENANCE);
+        let metrics = reply["result"]["metrics"].as_object().unwrap();
         assert_eq!(
-            serde_json::from_slice::<Value>(&bytes).unwrap(),
-            json!({"result":{"status":"ok","detail":BUILD_PROVENANCE}})
+            metrics.len(),
+            16,
+            "connection plus three counters for five readers"
         );
+        assert!(metrics.values().all(|value| value.as_u64() == Some(0)));
         blocker
             .execute_batch("COMMIT")
             .expect("release writer lock");

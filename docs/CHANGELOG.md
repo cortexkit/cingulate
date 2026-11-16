@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.24.0 (ck-cingulate)
+
+- Publish a `card_settled.v1` bus pointer when a card settles: one message per
+  reader per settlement (`{elicitation_id, feed, seq}`, message id
+  `{elicitation_id}:{reader}:{seq}`), to the filing module on the answers feed
+  and to prefrontal-core on the outcomes feed. Pointers are queued in the same
+  store transaction as the settlement (schema 15 outbox) and retried until the
+  server acknowledges them; readers reread through `consent.answers` and
+  `consent.outcomes`, which stay the source of truth. At most 16,384 pending
+  pointers per reader; overflow drops that reader's oldest, which a newer pointer
+  covers. The publisher wakes on store writes, with a 30-second backstop. Health
+  reports bus connection and per-reader pending, published and dropped counts.
+  Production-generated `card-settled-v1` samples.
 - `permissions/v1`: state that `scope` is opaque to readers. A reader keeps a row
   whose `scope` token it doesn't know, shows its `scope_label` and offers revoke.
   Add the checksum-pinned `provider-list-unknown-scope` sample with the vault's

@@ -20,7 +20,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 mod access;
+mod card_settled;
 mod config_plan;
+pub use card_settled::{
+    CardSettled, CardSettledCounts, CARD_SETTLED_PENDING_CAP, CARD_SETTLED_READERS,
+};
 mod person_notice;
 mod record;
 #[cfg(test)]
@@ -45,7 +49,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 14] = [
+pub const MIGRATIONS: [Migration; 15] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -101,6 +105,10 @@ pub const MIGRATIONS: [Migration; 14] = [
     Migration {
         version: 14,
         statements: include_str!("../migrations/014_config_plan_visibility.sql"),
+    },
+    Migration {
+        version: 15,
+        statements: include_str!("../migrations/015_card_settled_outbox.sql"),
     },
 ];
 
@@ -1364,6 +1372,7 @@ fn terminal(
          SELECT elicitation_id,owner,settled_at_ms FROM elicitation_records WHERE elicitation_id=?1",
         [&record.elicitation_id],
     )?;
+    card_settled::enqueue(conn, record)?;
     if record.detached {
         // A card settled after its requester stopped holding the call: queue the
         // late answer for the agent's session in this same transaction. The

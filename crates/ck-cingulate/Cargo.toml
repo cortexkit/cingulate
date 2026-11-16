@@ -1,6 +1,6 @@
 [package]
 name = "ck-cingulate"
-version = "0.23.1"
+version = "0.24.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cortexkit/cingulate"
@@ -11,6 +11,9 @@ dev-local-operator = []
 
 [dependencies]
 async-trait = "0.1"
+cortexkit-bus-client = "=0.1.1"
+cortexkit-bus-naming = "=0.4.2"
+async-nats = { version = "0.50", default-features = false, features = ["jetstream", "kv", "nkeys", "nuid", "ring", "server_2_10"] }
 cingulate-decode = { path = "../cingulate-decode" }
 cortexkit-presence = "0.1.0"
 cingulate-store = { path = "../cingulate-store" }
