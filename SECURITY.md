@@ -27,7 +27,8 @@ user's answering surfaces, and records the first answer. Its guarantees:
   subject or device named in a request body is never trusted. Each card kind has a fixed list
   of principals allowed to file it.
 - **Only operator surfaces answer.** An ordinary card is answered from the paired phone (a
-  `reserved:callosum` route whose daemon-attested harness starts with `fed-phone:`) or from a
+  `reserved:callosum` route whose harness, the device-class string Callosum sets on the
+  route and the daemon attests, starts with `fed-phone:`) or from a
   desktop app the daemon recognises as the operator app (its `operator_app` stamp). A
   requester can never answer its own card through its requester route, and a simulator or
   other paired device class cannot answer.
@@ -50,8 +51,8 @@ user's answering surfaces, and records the first answer. Its guarantees:
 
 - **It never decrypts sealed inputs.** A `sealed_text` card carries a one-time public key; the
   answering surface encrypts the typed text to that key, and Cingulate stores the ciphertext
-  and hands it only to the card's filer. Cingulate has no decryption key and no runtime HPKE
-  dependency.
+  and hands it only to the card's filer. Cingulate has no decryption key and no runtime dependency on
+  HPKE (the hybrid public-key encryption scheme the inputs are sealed with).
 - **It never holds or releases secrets.** Secret-use and secret-bearing cards carry the
   vault's signed statements and approvals; Cingulate does not verify the vault's signatures,
   call the vault, or see the secret. The vault checks the approval itself.
@@ -79,7 +80,8 @@ Stated plainly, so nobody relies on a property Cingulate does not have.
 - **A compromised daemon, phone or desktop app.** Cingulate trusts the daemon's stamps and the
   answers that arrive on operator routes. Someone who controls the daemon, the paired phone or
   the recognised desktop app can answer cards.
-- **Console-bound cards.** No attested console source exists yet, so `at_console` answers are
-  refused rather than trusted.
+- **Console-bound cards.** A card marked `at_console` may only be answered by someone at that
+  machine. Nothing yet attests to Cingulate that an answer came from the machine's own
+  console, so such answers are refused rather than trusted.
 - **What a requester does with an answer.** A grant answer is a record; the requester decides
   whether and how to act on it, and reports execution itself.

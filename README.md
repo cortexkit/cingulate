@@ -42,8 +42,9 @@ requesters (agents' tools, modules, the orchestrator)
 - **Outcomes.** Requesters wait for a bounded time or read a cursor feed of settled cards. An
   orchestrator that filed a card for one of its agents turns the outcome into a notice for that
   agent itself; Cingulate never writes into agent sessions.
-- **Tool-permission asks.** When a tool call needs permission, the ask goes to the asking
-  worker's head first and to the user only if the head escalates.
+- **Tool-permission asks.** When a worker agent's tool call needs permission, the ask goes
+  first to its head (the agent that started the worker and directs it) and reaches the user
+  only if the head escalates it.
 - **Permissions.** Standing grants ("always allow") stay with the provider that enforces them.
   Cingulate lists and revokes them across providers through `permissions/v1`.
 

@@ -18,6 +18,6 @@ jobs:
       issues: read # read the linked issue's labels
       pull-requests: write # gate comment, draft conversion, ready for review
       checks: write # publish the design-gate check run
-    # The shared gate writes with this job's GITHUB_TOKEN. No App key is passed, so
-    # no organisation key ever reaches a public repository's workflow.
+    # The shared gate writes with this job's GITHUB_TOKEN. No GitHub App private key
+    # is passed, so no organisation credential reaches a public repository's workflow.
     uses: cortexkit/subconscious/.github/workflows/design-gate.yml@master
