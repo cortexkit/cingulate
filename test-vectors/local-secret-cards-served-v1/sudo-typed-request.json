@@ -1,0 +1,74 @@
+{
+  "kind": "consent",
+  "title": "Type the password for sudo on fake-computer?",
+  "prompt": "Runs as root, outside AFT's sandbox.",
+  "facts": [
+    {
+      "label": "Command",
+      "value": "/usr/bin/sudo -A -k id"
+    },
+    {
+      "label": "Folder",
+      "value": "/work/project"
+    },
+    {
+      "label": "Agent",
+      "value": "Fake agent"
+    },
+    {
+      "label": "The agent says",
+      "value": "Inspect the fake deployment"
+    },
+    {
+      "label": "The agent expects",
+      "value": "The fake change succeeds"
+    },
+    {
+      "label": "The agent says it can be undone",
+      "value": "unknown"
+    }
+  ],
+  "options": [
+    {
+      "id": "send",
+      "label": "Send",
+      "effect": "grant"
+    },
+    {
+      "id": "decline",
+      "label": "Decline",
+      "effect": "decline"
+    }
+  ],
+  "default": "decline",
+  "urgency": "normal",
+  "on_expiry": "deny",
+  "material_damage": true,
+  "late_execution": "notify_only",
+  "target": {
+    "kind": "computer",
+    "label": "fake-computer"
+  },
+  "expires_in_ms": 600000,
+  "scope": {
+    "owner": {
+      "kind": "reserved",
+      "module_id": "prefrontal-core"
+    },
+    "kind": "worker",
+    "scope_ref": "fake-agent",
+    "scope_epoch": 7
+  },
+  "inputs": [
+    {
+      "kind": "sealed_text",
+      "id": "password",
+      "label": "Password for alice on fake-computer",
+      "max_bytes": 4096,
+      "hpke": {
+        "suite": "X25519-HKDF-SHA256/HKDF-SHA256/ChaCha20-Poly1305",
+        "public_key": "0_vt24sUrJtHzJMRhKkuA7CAd628uXGRAeAQWvTGSlw"
+      }
+    }
+  ]
+}

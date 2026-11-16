@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.16.1 (cingulate-vectors)
+
+- Add byte-pinned local-secret request cards and their served list, get and watch records.
+
 ## 0.25.1 (ck-cingulate), 0.13.1 (cingulate-decode), 0.11.1 (cingulate-store)
 
 - Retry settlement pointers separately for each reader. A reader that rejects
