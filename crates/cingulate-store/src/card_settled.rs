@@ -91,6 +91,29 @@ fn cap_reader(conn: &Connection, reader: &str, cap: i64) -> Result<()> {
 }
 
 impl ConsentStore {
+    /// A reader's oldest pointers, independent of other readers' backlogs.
+    pub fn card_settled_pending_for_reader(
+        &self,
+        reader: &str,
+        limit: usize,
+    ) -> Result<Vec<CardSettled>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT elicitation_id,reader,feed,seq FROM card_settled_outbox \
+                 WHERE reader=?1 ORDER BY seq LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![reader, limit.min(256) as i64], |row| {
+                Ok(CardSettled {
+                    elicitation_id: row.get(0)?,
+                    reader: row.get(1)?,
+                    feed: row.get(2)?,
+                    seq: row.get(3)?,
+                })
+            })?;
+            Ok(rows.collect::<std::result::Result<_, _>>()?)
+        })
+    }
+
     pub fn card_settled_pending(&self, limit: usize) -> Result<Vec<CardSettled>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(

@@ -2706,11 +2706,10 @@ mod tests {
         assert_eq!(reply["result"]["status"], "ok");
         assert_eq!(reply["result"]["detail"], BUILD_PROVENANCE);
         let metrics = reply["result"]["metrics"].as_object().unwrap();
-        assert_eq!(
-            metrics.len(),
-            16,
-            "connection plus three counters for five readers"
-        );
+        assert_eq!(metrics.len(), 4, "connection plus three aggregate counters");
+        for reader in cingulate_store::CARD_SETTLED_READERS {
+            assert!(metrics.keys().all(|key| !key.contains(reader)));
+        }
         assert!(metrics.values().all(|value| value.as_u64() == Some(0)));
         blocker
             .execute_batch("COMMIT")

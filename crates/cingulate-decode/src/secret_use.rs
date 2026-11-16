@@ -139,25 +139,62 @@ pub struct UseStatement {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "String")]
 pub enum LocalProgram {
     Sudo,
     Ssh,
 }
 
+impl TryFrom<String> for LocalProgram {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "sudo" => Ok(Self::Sudo),
+            "ssh" => Ok(Self::Ssh),
+            _ => Err("invalid local program"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "String")]
 pub enum LocalUse {
     SudoPassword,
     SshSign,
 }
 
+impl TryFrom<String> for LocalUse {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "sudo_password" => Ok(Self::SudoPassword),
+            "ssh_sign" => Ok(Self::SshSign),
+            _ => Err("invalid local use"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "String")]
 pub enum Undoable {
     Yes,
     No,
     Unknown,
+}
+
+impl TryFrom<String> for Undoable {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "yes" => Ok(Self::Yes),
+            "no" => Ok(Self::No),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid undoable value"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

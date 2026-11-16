@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.25.1 (ck-cingulate), 0.13.1 (cingulate-decode), 0.11.1 (cingulate-store)
+
+- Retry settlement pointers separately for each reader. A reader that rejects
+  or times out on a pointer no longer holds up other readers, even with a large
+  backlog. Pointers stay in order for each reader; a lost bus connection still
+  reconnects with backoff.
+- Require JSON strings for local-use programs, uses and undoability values.
+  Object forms such as `{"sudo":null}` are refused rather than treated as the
+  string `"sudo"`.
+- Keep reader activity out of public health responses. Bus health now reports
+  only the connection state and total pending, published and dropped counts.
+  Reader-specific counts are logged when publishing starts failing or recovers.
+
 ## 0.25.0 (ck-cingulate)
 
 - Accept the vault's local-use statements (`ck-secret-local-use-statement/v1`)

@@ -3,7 +3,7 @@ mod secret_use;
 mod support;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use cingulate_decode::ConsentRequest;
+use cingulate_decode::{ConsentRequest, SecretUse};
 use secret_use::{decoded, encoded, filer, filer_with_scope, fixture, phone, DEVICE};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -386,6 +386,36 @@ fn local_use_program_use_and_target_must_agree() {
     let mut statement = case("sudo_password-local")["statement"]["json"].clone();
     statement["undoable"] = json!("maybe");
     refuses(&statement);
+}
+
+#[test]
+fn local_use_unit_enums_require_json_strings() {
+    let mut accepted_objects = Vec::new();
+    for (name, field, value) in [
+        ("sudo_password-local", "program", "sudo"),
+        ("ssh_sign-local", "program", "ssh"),
+        ("sudo_password-local", "use", "sudo_password"),
+        ("ssh_sign-local", "use", "ssh_sign"),
+        ("sudo_password-local", "undoable", "yes"),
+        ("sudo_password-local", "undoable", "no"),
+        ("sudo_password-local", "undoable", "unknown"),
+    ] {
+        let mut statement = case(name)["statement"]["json"].clone();
+        statement[field] = json!(value);
+        let secret_use: SecretUse =
+            serde_json::from_value(body(&statement)["secret_use"].clone()).unwrap();
+        secret_use.statements().expect("the string form is valid");
+        statement[field] = json!({value: null});
+        let secret_use: SecretUse =
+            serde_json::from_value(body(&statement)["secret_use"].clone()).unwrap();
+        if secret_use.statements().is_ok() {
+            accepted_objects.push(format!("{field}={}", statement[field]));
+        }
+    }
+    assert!(
+        accepted_objects.is_empty(),
+        "accepted object forms: {accepted_objects:?}"
+    );
 }
 
 #[test]

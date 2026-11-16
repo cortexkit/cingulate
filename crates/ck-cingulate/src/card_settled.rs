@@ -13,6 +13,7 @@ use cingulate_store::{CardSettled, ConsentStore, CARD_SETTLED_READERS};
 use cortexkit_bus_client::{BusClient, BusClientOptions};
 use cortexkit_bus_naming::AccountNames;
 use serde_json::{json, Value};
+use tokio::time::Instant;
 
 use crate::{DaemonAccessRuntime, Handler};
 
@@ -34,6 +35,12 @@ impl Retry {
         self.attempts = self.attempts.saturating_add(1);
         (Duration::from_millis(delay as u64), log)
     }
+}
+
+#[derive(Default)]
+struct ReaderRetry {
+    retry: Retry,
+    next_attempt: Option<Instant>,
 }
 
 /// The same naming constructor and arguments used by BusClient::publish_event.
@@ -70,24 +77,45 @@ impl Metrics {
     }
 
     pub(crate) fn json(&self) -> Value {
-        let mut metrics = serde_json::Map::new();
-        metrics.insert(
-            "bus_connected".into(),
-            json!(u8::from(self.connected.load(Ordering::Relaxed))),
-        );
-        for (reader, count) in CARD_SETTLED_READERS.iter().zip(&self.readers) {
-            for (kind, value) in [
-                ("pending", &count.pending),
-                ("published", &count.published),
-                ("dropped", &count.dropped),
-            ] {
-                metrics.insert(
-                    format!("bus_{reader}_{kind}"),
-                    json!(value.load(Ordering::Relaxed)),
-                );
-            }
+        let mut pending = 0;
+        let mut published = 0;
+        let mut dropped = 0;
+        for count in &self.readers {
+            pending += count.pending.load(Ordering::Relaxed);
+            published += count.published.load(Ordering::Relaxed);
+            dropped += count.dropped.load(Ordering::Relaxed);
         }
-        Value::Object(metrics)
+        json!({
+            "bus_connected": u8::from(self.connected.load(Ordering::Relaxed)),
+            "bus_pending": pending,
+            "bus_published": published,
+            "bus_dropped": dropped,
+        })
+    }
+
+    fn log_reader(&self, index: usize, recovered: bool) {
+        let reader = CARD_SETTLED_READERS[index];
+        let count = &self.readers[index];
+        let pending = count.pending.load(Ordering::Relaxed);
+        let published = count.published.load(Ordering::Relaxed);
+        let dropped = count.dropped.load(Ordering::Relaxed);
+        if recovered {
+            tracing::info!(
+                reader,
+                pending,
+                published,
+                dropped,
+                "card-settled reader publishing recovered"
+            );
+        } else {
+            tracing::warn!(
+                reader,
+                pending,
+                published,
+                dropped,
+                "card-settled reader publishing failed; durable pointers will retry"
+            );
+        }
     }
 }
 
@@ -157,6 +185,7 @@ impl Handler {
         let handle = tokio::spawn(async move {
             let mut publisher: Option<Box<dyn Publisher>> = None;
             let mut retry = Retry::default();
+            let mut readers: [ReaderRetry; 5] = std::array::from_fn(|_| ReaderRetry::default());
             loop {
                 // Consume only writes preceding this pass. A settlement made
                 // during the pass must still wake the next read of the outbox.
@@ -184,7 +213,7 @@ impl Handler {
                         .bus_metrics
                         .connected
                         .store(true, Ordering::Relaxed);
-                    handler.publish_pending(bus.as_ref()).await
+                    handler.publish_pending(bus.as_ref(), &mut readers).await
                 };
                 let result = tokio::select! {
                     _ = stopping.changed() => return,
@@ -198,7 +227,12 @@ impl Handler {
                         }
                         // Store writes normally wake an idle publisher. The
                         // backstop also covers a write path missing its tick.
-                        (Duration::from_secs(30), true)
+                        let delay = readers
+                            .iter()
+                            .filter_map(|reader| reader.next_attempt)
+                            .map(|next| next.saturating_duration_since(Instant::now()))
+                            .fold(Duration::from_secs(30), Duration::min);
+                        (delay, true)
                     }
                     Err(()) => {
                         if let Some(inner) = weak.upgrade() {
@@ -235,24 +269,60 @@ impl Handler {
         }
     }
 
-    async fn publish_pending(&self, publisher: &dyn Publisher) -> Result<bool, ()> {
-        let rows = {
-            let guard = self.inner.store.lock().await;
-            let Some(store) = guard.as_ref() else {
-                return Ok(false);
+    async fn publish_pending(
+        &self,
+        publisher: &dyn Publisher,
+        readers: &mut [ReaderRetry; 5],
+    ) -> Result<bool, ()> {
+        let mut full_page = false;
+        for (index, state) in readers.iter_mut().enumerate() {
+            if state.next_attempt.is_some_and(|next| next > Instant::now()) {
+                continue;
+            }
+            let rows = {
+                let guard = self.inner.store.lock().await;
+                let Some(store) = guard.as_ref() else {
+                    return Ok(false);
+                };
+                // A failed reader must not fill the page used by another reader.
+                store
+                    .card_settled_pending_for_reader(CARD_SETTLED_READERS[index], 64)
+                    .map_err(|_| ())?
             };
-            store.card_settled_pending(64).map_err(|_| ())?
-        };
-        let full_page = rows.len() == 64;
-        for row in rows {
-            tokio::time::timeout(TIMEOUT, publisher.publish(&row))
-                .await
-                .map_err(|_| ())??;
-            // The store lock is never held across bus I/O. A failed publish or
-            // timeout leaves the row intact; ack loss retries with the same id.
-            self.with_store(|store| store.card_settled_published(&row))
-                .await
-                .map_err(|_| ())?;
+            let reader_full_page = rows.len() == 64;
+            let mut failed = false;
+            for row in rows {
+                if !matches!(
+                    tokio::time::timeout(TIMEOUT, publisher.publish(&row)).await,
+                    Ok(Ok(()))
+                ) {
+                    let (delay, log) = state.retry.failed();
+                    state.next_attempt = Some(Instant::now() + delay);
+                    self.refresh_bus_metrics().await;
+                    if log {
+                        self.inner.bus_metrics.log_reader(index, false);
+                    }
+                    if !publisher.connected() {
+                        return Err(());
+                    }
+                    // Later pointers for this reader remain behind its failed head.
+                    failed = true;
+                    break;
+                }
+                // The store lock is never held across bus I/O. A failed publish or
+                // timeout leaves the row intact; ack loss retries with the same id.
+                self.with_store(|store| store.card_settled_published(&row))
+                    .await
+                    .map_err(|_| ())?;
+            }
+            if !failed {
+                full_page |= reader_full_page;
+                if state.retry.outage {
+                    self.refresh_bus_metrics().await;
+                    self.inner.bus_metrics.log_reader(index, true);
+                }
+                *state = ReaderRetry::default();
+            }
         }
         self.refresh_bus_metrics().await;
         Ok(full_page)
@@ -283,6 +353,13 @@ mod tests {
     }
 
     fn settle_store(store: &ConsentStore) -> Result<String, cingulate_store::Error> {
+        settle_store_for(store, "aft")
+    }
+
+    fn settle_store_for(
+        store: &ConsentStore,
+        reader: &str,
+    ) -> Result<String, cingulate_store::Error> {
         let request = cingulate_decode::ConsentRequest::decode(
             serde_json::from_str(include_str!(
                 "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
@@ -293,8 +370,8 @@ mod tests {
         let id = store
             .create(
                 &RequestIdentity {
-                    owner: r#"["reserved:aft","stamped"]"#.into(),
-                    requester: "reserved:aft".into(),
+                    owner: format!(r#"["reserved:{reader}","stamped"]"#),
+                    requester: format!("reserved:{reader}"),
                     subject: Subject {
                         agent_id: None,
                         head_agent_id: String::new(),
@@ -318,6 +395,9 @@ mod tests {
     struct FakePublisher {
         calls: std::sync::Mutex<Vec<CardSettled>>,
         fail: AtomicBool,
+        connected: AtomicBool,
+        disconnect_on_failure: AtomicBool,
+        connections: AtomicU64,
         entered: Notify,
         ack: Semaphore,
     }
@@ -328,13 +408,16 @@ mod tests {
             self.calls.lock().unwrap().push(row.clone());
             self.entered.notify_one();
             if self.fail.load(Ordering::Relaxed) {
+                if self.disconnect_on_failure.load(Ordering::Relaxed) {
+                    self.connected.store(false, Ordering::Relaxed);
+                }
                 return Err(());
             }
             self.ack.acquire().await.unwrap().forget();
             Ok(())
         }
         fn connected(&self) -> bool {
-            true
+            self.connected.load(Ordering::Relaxed)
         }
     }
 
@@ -342,22 +425,59 @@ mod tests {
         Arc::new(FakePublisher {
             calls: Default::default(),
             fail: AtomicBool::new(fail),
+            connected: AtomicBool::new(true),
+            disconnect_on_failure: AtomicBool::new(false),
+            connections: AtomicU64::new(0),
             entered: Notify::new(),
             ack: Semaphore::new(0),
         })
     }
 
     #[tokio::test]
+    async fn card_settled_health_reports_only_totals() {
+        let (_dir, handler) = setup().await;
+        for (index, counts) in handler.inner.bus_metrics.readers.iter().enumerate() {
+            let n = index as u64 + 1;
+            counts.pending.store(n, Ordering::Relaxed);
+            counts.published.store(2 * n, Ordering::Relaxed);
+            counts.dropped.store(3 * n, Ordering::Relaxed);
+        }
+        handler
+            .inner
+            .bus_metrics
+            .connected
+            .store(true, Ordering::Relaxed);
+        let metrics = handler.health_report().metrics.unwrap();
+        let encoded = metrics.to_string();
+        for reader in CARD_SETTLED_READERS {
+            assert!(
+                !encoded.contains(reader),
+                "health must not identify a reader"
+            );
+        }
+        assert_eq!(
+            metrics,
+            json!({
+                "bus_connected": 1,
+                "bus_pending": 15,
+                "bus_published": 30,
+                "bus_dropped": 45,
+            })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn card_settled_publish_marks_only_after_ack_and_retries_same_id() {
         let (_dir, handler) = setup().await;
         settle(&handler).await;
         let bus = fake(true);
-        assert!(handler.publish_pending(bus.as_ref()).await.is_err());
+        let mut readers = std::array::from_fn(|_| ReaderRetry::default());
+        assert!(!handler
+            .publish_pending(bus.as_ref(), &mut readers)
+            .await
+            .unwrap());
         bus.entered.notified().await;
-        assert_eq!(
-            handler.health_report().metrics.unwrap()["bus_aft_pending"],
-            1
-        );
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_pending"], 2);
         assert_eq!(
             handler
                 .with_store(|s| s.card_settled_pending(64))
@@ -367,10 +487,11 @@ mod tests {
             2
         );
         bus.fail.store(false, Ordering::Relaxed);
+        tokio::time::advance(Duration::from_millis(250)).await;
         let task = tokio::spawn({
             let handler = handler.clone();
             let bus = bus.clone();
-            async move { handler.publish_pending(bus.as_ref()).await }
+            async move { handler.publish_pending(bus.as_ref(), &mut readers).await }
         });
         bus.entered.notified().await;
         assert_eq!(
@@ -382,19 +503,16 @@ mod tests {
             2,
             "unacknowledged rows stay pending"
         );
-        assert_eq!(
-            handler.health_report().metrics.unwrap()["bus_aft_published"],
-            0
-        );
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_published"], 0);
         bus.ack.add_permits(2);
         task.await.unwrap().unwrap();
         let calls = bus.calls.lock().unwrap();
-        assert_eq!(calls.len(), 3);
-        assert_eq!(calls[0], calls[1], "retry preserves id and bytes");
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[0], calls[2], "retry preserves id and bytes");
+        assert_eq!(calls[1], calls[3], "each reader retries its own head");
         let metrics = handler.health_report().metrics.unwrap();
-        assert_eq!(metrics["bus_aft_pending"], 0);
-        assert_eq!(metrics["bus_aft_published"], 1);
-        assert_eq!(metrics["bus_prefrontal-core_published"], 1);
+        assert_eq!(metrics["bus_pending"], 0);
+        assert_eq!(metrics["bus_published"], 2);
     }
 
     struct AbsentBus {
@@ -408,7 +526,7 @@ mod tests {
             self.0.publish(row).await
         }
         fn connected(&self) -> bool {
-            true
+            self.0.connected()
         }
     }
 
@@ -416,8 +534,218 @@ mod tests {
     #[async_trait]
     impl Connector for FakeConnector {
         async fn connect(&self) -> Result<Box<dyn Publisher>, ()> {
+            self.0.connections.fetch_add(1, Ordering::Relaxed);
+            self.0.connected.store(true, Ordering::Relaxed);
             Ok(Box::new(SharedPublisher(self.0.clone())))
         }
+    }
+
+    #[derive(Default)]
+    struct SelectivePublisher {
+        calls: std::sync::Mutex<Vec<CardSettled>>,
+        entered: Notify,
+        recover: AtomicBool,
+        fail_aft: AtomicBool,
+        timeout: AtomicBool,
+    }
+
+    #[async_trait]
+    impl Publisher for Arc<SelectivePublisher> {
+        async fn publish(&self, row: &CardSettled) -> Result<(), ()> {
+            self.calls.lock().unwrap().push(row.clone());
+            self.entered.notify_one();
+            let failing_reader = if self.fail_aft.load(Ordering::Relaxed) {
+                "aft"
+            } else {
+                "prefrontal-core"
+            };
+            if row.reader == failing_reader && !self.recover.load(Ordering::Relaxed) {
+                if self.timeout.load(Ordering::Relaxed) {
+                    std::future::pending::<()>().await;
+                }
+                Err(())
+            } else {
+                Ok(())
+            }
+        }
+
+        fn connected(&self) -> bool {
+            true
+        }
+    }
+
+    #[async_trait]
+    impl Connector for Arc<SelectivePublisher> {
+        async fn connect(&self) -> Result<Box<dyn Publisher>, ()> {
+            Ok(Box::new(self.clone()))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn card_settled_failed_reader_does_not_block_healthy_reader_beyond_a_page() {
+        let (_dir, handler) = setup().await;
+        for _ in 0..65 {
+            handler
+                .with_store(|store| settle_store_for(store, "prefrontal-core"))
+                .await
+                .unwrap();
+        }
+        settle(&handler).await;
+        settle(&handler).await;
+        let bus = Arc::new(SelectivePublisher::default());
+        handler.start_publisher(Arc::new(bus.clone()));
+        tokio::time::timeout(Duration::from_millis(1), async {
+            loop {
+                let healthy = bus
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|row| row.reader == "aft")
+                    .count();
+                if healthy == 2 {
+                    break;
+                }
+                bus.entered.notified().await;
+            }
+        })
+        .await
+        .expect("a failed reader must not block healthy pointers beyond the first page");
+        tokio::task::yield_now().await;
+        let counts = handler
+            .with_store(|store| store.card_settled_counts())
+            .await
+            .unwrap();
+        assert_eq!(counts[0].published, 2);
+        assert_eq!(counts[0].pending, 0);
+        assert_eq!(counts[4].published, 0);
+        assert_eq!(counts[4].pending, 67);
+        let calls = bus.calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|row| row.reader == "prefrontal-core")
+                .count(),
+            1
+        );
+        let healthy: Vec<_> = calls.iter().filter(|row| row.reader == "aft").collect();
+        assert!(healthy[0].seq < healthy[1].seq);
+        handler.inner.stopping.send_replace(true);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn card_settled_reader_backoff_does_not_delay_other_readers_and_resets_on_recovery() {
+        let (_dir, handler) = setup().await;
+        settle(&handler).await;
+        let bus = Arc::new(SelectivePublisher::default());
+        let mut readers = std::array::from_fn(|_| ReaderRetry::default());
+        handler.publish_pending(&bus, &mut readers).await.unwrap();
+        let first_attempt = bus.calls.lock().unwrap()[1].clone();
+        let next = readers[4].next_attempt.unwrap();
+        assert_eq!(next - Instant::now(), Duration::from_millis(250));
+
+        tokio::time::advance(Duration::from_millis(249)).await;
+        settle(&handler).await;
+        handler.publish_pending(&bus, &mut readers).await.unwrap();
+        assert_eq!(
+            bus.calls.lock().unwrap().len(),
+            3,
+            "only the healthy reader retries on a write"
+        );
+        assert_eq!(readers[4].next_attempt, Some(next));
+        tokio::time::advance(Duration::from_millis(1)).await;
+        handler.publish_pending(&bus, &mut readers).await.unwrap();
+        assert_eq!(bus.calls.lock().unwrap()[3], first_attempt);
+        assert_eq!(
+            readers[4].next_attempt.unwrap() - Instant::now(),
+            Duration::from_millis(500)
+        );
+
+        bus.recover.store(true, Ordering::Relaxed);
+        tokio::time::advance(Duration::from_millis(500)).await;
+        handler.publish_pending(&bus, &mut readers).await.unwrap();
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_pending"], 0);
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_published"], 4);
+        assert!(readers[4].next_attempt.is_none());
+        assert!(!readers[4].retry.outage);
+        {
+            let calls = bus.calls.lock().unwrap();
+            assert_eq!(
+                calls[4], first_attempt,
+                "recovery retries the head before later pointers"
+            );
+            assert!(calls[4].seq < calls[5].seq);
+        }
+
+        bus.recover.store(false, Ordering::Relaxed);
+        settle(&handler).await;
+        handler.publish_pending(&bus, &mut readers).await.unwrap();
+        assert_eq!(
+            readers[4].next_attempt.unwrap() - Instant::now(),
+            Duration::from_millis(250)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn card_settled_reader_timeout_keeps_order_and_continues_other_readers() {
+        let (_dir, handler) = setup().await;
+        settle(&handler).await;
+        settle(&handler).await;
+        let bus = Arc::new(SelectivePublisher::default());
+        bus.fail_aft.store(true, Ordering::Relaxed);
+        bus.timeout.store(true, Ordering::Relaxed);
+        let mut readers = std::array::from_fn(|_| ReaderRetry::default());
+        assert!(!handler.publish_pending(&bus, &mut readers).await.unwrap());
+        let counts = handler
+            .with_store(|store| store.card_settled_counts())
+            .await
+            .unwrap();
+        assert_eq!(counts[0].pending, 2);
+        assert_eq!(counts[0].published, 0);
+        assert_eq!(counts[4].pending, 0);
+        assert_eq!(counts[4].published, 2);
+        assert_eq!(
+            bus.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|row| row.reader == "aft")
+                .count(),
+            1
+        );
+        assert!(readers[0].next_attempt.is_some());
+        assert!(readers[4].next_attempt.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn card_settled_connection_failure_reconnects_with_global_backoff() {
+        let (_dir, handler) = setup().await;
+        settle(&handler).await;
+        let bus = fake(true);
+        bus.disconnect_on_failure.store(true, Ordering::Relaxed);
+        handler.start_publisher(Arc::new(FakeConnector(bus.clone())));
+        bus.entered.notified().await;
+        tokio::task::yield_now().await;
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_connected"], 0);
+        assert_eq!(bus.connections.load(Ordering::Relaxed), 1);
+        tokio::time::advance(Duration::from_millis(249)).await;
+        assert_eq!(bus.connections.load(Ordering::Relaxed), 1);
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(bus.connections.load(Ordering::Relaxed), 2);
+        assert_eq!(bus.calls.lock().unwrap().len(), 2);
+        bus.fail.store(false, Ordering::Relaxed);
+        bus.ack.add_permits(2);
+        tokio::time::advance(Duration::from_millis(499)).await;
+        assert_eq!(bus.connections.load(Ordering::Relaxed), 2);
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(bus.connections.load(Ordering::Relaxed), 3);
+        let metrics = handler.health_report().metrics.unwrap();
+        assert_eq!(metrics["bus_connected"], 1);
+        assert_eq!(metrics["bus_pending"], 0);
+        assert_eq!(metrics["bus_published"], 2);
+        handler.inner.stopping.send_replace(true);
     }
 
     #[tokio::test(start_paused = true)]
@@ -428,16 +756,16 @@ mod tests {
         handler.start_publisher(Arc::new(FakeConnector(bus.clone())));
         bus.entered.notified().await;
         tokio::task::yield_now().await;
-        assert_eq!(handler.health_report().metrics.unwrap()["bus_connected"], 0);
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_connected"], 1);
         bus.fail.store(false, Ordering::Relaxed);
         bus.ack.add_permits(2);
         tokio::time::advance(Duration::from_millis(250)).await;
         tokio::task::yield_now().await;
         let metrics = handler.health_report().metrics.unwrap();
         assert_eq!(metrics["bus_connected"], 1);
-        assert_eq!(metrics["bus_aft_pending"], 0);
-        assert_eq!(metrics["bus_aft_published"], 1);
-        assert_eq!(bus.calls.lock().unwrap().len(), 3);
+        assert_eq!(metrics["bus_pending"], 0);
+        assert_eq!(metrics["bus_published"], 2);
+        assert_eq!(bus.calls.lock().unwrap().len(), 4);
         handler.inner.stopping.send_replace(true);
         tokio::task::yield_now().await;
     }
@@ -460,10 +788,7 @@ mod tests {
         tokio::task::yield_now().await;
         assert_eq!(tokio::time::Instant::now(), before, "no timer elapsed");
         assert_eq!(bus.calls.lock().unwrap().len(), 2);
-        assert_eq!(
-            handler.health_report().metrics.unwrap()["bus_aft_pending"],
-            0
-        );
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_pending"], 0);
         handler.inner.stopping.send_replace(true);
         tokio::task::yield_now().await;
     }
@@ -488,10 +813,7 @@ mod tests {
         .await
         .expect("a write during a publish must not lose its wake-up");
         assert_eq!(tokio::time::Instant::now(), before);
-        assert_eq!(
-            handler.health_report().metrics.unwrap()["bus_aft_pending"],
-            0
-        );
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_pending"], 0);
         handler.inner.stopping.send_replace(true);
         tokio::task::yield_now().await;
     }
@@ -523,31 +845,38 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn card_settled_full_page_reports_more_work_and_drains_immediately() {
         let (_dir, handler) = setup().await;
-        for _ in 0..33 {
+        for _ in 0..65 {
             settle(&handler).await;
         }
         let bus = fake(false);
-        bus.ack.add_permits(66);
-        assert!(handler.publish_pending(bus.as_ref()).await.unwrap());
-        assert_eq!(bus.calls.lock().unwrap().len(), 64);
-        assert!(!handler.publish_pending(bus.as_ref()).await.unwrap());
-        assert_eq!(bus.calls.lock().unwrap().len(), 66);
+        bus.ack.add_permits(130);
+        let mut readers = std::array::from_fn(|_| ReaderRetry::default());
+        assert!(handler
+            .publish_pending(bus.as_ref(), &mut readers)
+            .await
+            .unwrap());
+        assert_eq!(bus.calls.lock().unwrap().len(), 128);
+        assert!(!handler
+            .publish_pending(bus.as_ref(), &mut readers)
+            .await
+            .unwrap());
+        assert_eq!(bus.calls.lock().unwrap().len(), 130);
 
-        for _ in 0..33 {
+        for _ in 0..65 {
             settle(&handler).await;
         }
         bus.calls.lock().unwrap().clear();
-        bus.ack.add_permits(66);
+        bus.ack.add_permits(130);
         let before = tokio::time::Instant::now();
         handler.start_publisher(Arc::new(FakeConnector(bus.clone())));
         tokio::time::timeout(Duration::from_millis(1), async {
-            while bus.calls.lock().unwrap().len() < 66 {
+            while bus.calls.lock().unwrap().len() < 130 {
                 bus.entered.notified().await;
             }
         })
         .await
         .expect("full pages must drain without an idle wait");
-        assert_eq!(bus.calls.lock().unwrap().len(), 66);
+        assert_eq!(bus.calls.lock().unwrap().len(), 130);
         assert_eq!(tokio::time::Instant::now(), before);
         handler.inner.stopping.send_replace(true);
         tokio::task::yield_now().await;
@@ -558,7 +887,11 @@ mod tests {
         let (_dir, handler) = setup().await;
         settle(&handler).await;
         let bus = fake(false);
-        assert!(handler.publish_pending(bus.as_ref()).await.is_err());
+        let mut readers = std::array::from_fn(|_| ReaderRetry::default());
+        assert!(!handler
+            .publish_pending(bus.as_ref(), &mut readers)
+            .await
+            .unwrap());
         assert_eq!(
             handler
                 .with_store(|s| s.card_settled_pending(64))
@@ -567,10 +900,7 @@ mod tests {
                 .len(),
             2
         );
-        assert_eq!(
-            handler.health_report().metrics.unwrap()["bus_aft_published"],
-            0
-        );
+        assert_eq!(handler.health_report().metrics.unwrap()["bus_published"], 0);
     }
 
     #[test]
@@ -623,8 +953,8 @@ mod tests {
         );
         let metrics = handler.health_report().metrics.unwrap();
         assert_eq!(metrics["bus_connected"], 0);
-        assert_eq!(metrics["bus_aft_pending"], 1);
-        assert_eq!(metrics["bus_aft_dropped"], 0);
+        assert_eq!(metrics["bus_pending"], 2);
+        assert_eq!(metrics["bus_dropped"], 0);
         handler.inner.stopping.send_replace(true);
         tokio::task::yield_now().await;
     }
