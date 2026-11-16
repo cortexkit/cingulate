@@ -66,15 +66,17 @@ pub(super) fn statement_version_ok(
     };
     match (version, asking_member_id) {
         ("v1" | "v3", None) => true,
-        ("v2" | "v3", Some(asking)) => {
-            asking
-                .strip_prefix("fed-computer:")
-                .is_some_and(|hex| lowercase_hex(hex, 32))
-                // The home vault never forwards to itself.
-                && asking != member_id
-        }
+        ("v2" | "v3", Some(asking)) => asking_member_ok(asking, member_id),
         _ => false,
     }
+}
+
+fn asking_member_ok(asking: &str, member_id: &str) -> bool {
+    asking
+        .strip_prefix("fed-computer:")
+        .is_some_and(|hex| lowercase_hex(hex, 32))
+        // The home vault never forwards to itself.
+        && asking != member_id
 }
 
 fn safe_numbers(value: &Value) -> bool {
@@ -116,16 +118,67 @@ pub struct UseStatement {
     pub request_id: String,
     pub member_id: String,
     /// The paired computer the agent asked from; present exactly for forwarded
-    /// requests (v2, or forwarded v3).
+    /// requests (v2, forwarded v3, or forwarded local-use v1).
     #[serde(default, deserialize_with = "present_string")]
     pub asking_member_id: Option<String>,
     pub agent_id: Option<String>,
     pub scope: StatementScope,
     pub coverage: String,
-    pub secret: StatementSecret,
+    pub secret: Option<StatementSecret>,
     pub r#use: StatementUse,
     pub durations: Vec<String>,
     pub request_expires_at_ms: u64,
+    pub program: Option<LocalProgram>,
+    pub key: Option<StatementKey>,
+    pub target: Option<LocalTarget>,
+    pub command: Option<String>,
+    pub workdir: Option<String>,
+    pub purpose: Option<String>,
+    pub expects: Option<String>,
+    pub undoable: Option<Undoable>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalProgram {
+    Sudo,
+    Ssh,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalUse {
+    SudoPassword,
+    SshSign,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Undoable {
+    Yes,
+    No,
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatementKey {
+    pub credential_id: String,
+    pub incarnation: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum LocalTarget {
+    Sudo {
+        user: String,
+    },
+    Ssh {
+        user: String,
+        host: String,
+        port: u16,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +201,7 @@ pub struct StatementSecret {
 #[derive(Debug, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum StatementUse {
+    Local(LocalUse),
     ApiKey {
         host: String,
         // Signed legacy statements always emit this key, using "" for no prefix.
@@ -169,9 +223,77 @@ pub enum StatementUse {
 impl StatementUse {
     fn shape_ok(&self, v3: bool, kind: &str) -> bool {
         match self {
+            Self::Local(_) => false,
             Self::ApiKey { .. } | Self::Login { .. } => !v3,
             Self::ExtendedApiKey { .. } => v3 && kind == "agent_api_key",
             Self::ExtendedLogin { .. } => v3 && kind == "site_login",
+        }
+    }
+}
+
+impl UseStatement {
+    pub fn is_local(&self) -> bool {
+        self.v == "ck-secret-local-use-statement/v1"
+    }
+
+    fn shape_ok(&self, value: &Value) -> bool {
+        const LOCAL_FIELDS: [&str; 8] = [
+            "program", "key", "target", "command", "workdir", "purpose", "expects", "undoable",
+        ];
+        if !self.is_local() {
+            return statement_version_ok(
+                &self.v,
+                "ck-secret-use-statement",
+                self.asking_member_id.as_deref(),
+                &self.member_id,
+            ) && self.secret.as_ref().is_some_and(|secret| {
+                self.r#use
+                    .shape_ok(self.v == "ck-secret-use-statement/v3", &secret.kind)
+            }) && LOCAL_FIELDS.iter().all(|field| value.get(field).is_none());
+        }
+
+        if self
+            .asking_member_id
+            .as_deref()
+            .is_some_and(|asking| !asking_member_ok(asking, &self.member_id))
+            || self.command.is_none()
+            || self.workdir.is_none()
+            || self.purpose.is_none()
+        {
+            return false;
+        }
+        // The vault owns text limits and target grammar. Only the signed
+        // member shapes and the closed program/use pairs are checked here.
+        match (&self.program, &self.r#use, &self.target) {
+            (
+                Some(LocalProgram::Sudo),
+                StatementUse::Local(LocalUse::SudoPassword),
+                Some(LocalTarget::Sudo { .. }),
+            ) => {
+                self.secret
+                    .as_ref()
+                    .is_some_and(|secret| secret.kind == "local_program")
+                    && value.get("key").is_none()
+                    && self.expects.is_some()
+                    && self.undoable.is_some()
+                    && self.durations == ["once"]
+            }
+            (
+                Some(LocalProgram::Ssh),
+                StatementUse::Local(LocalUse::SshSign),
+                Some(LocalTarget::Ssh { .. }),
+            ) => {
+                self.key.is_some()
+                    && ["secret", "expects", "undoable"]
+                        .iter()
+                        .all(|field| value.get(field).is_none())
+                    && self
+                        .durations
+                        .iter()
+                        .all(|duration| ["once", "hour", "session"].contains(&duration.as_str()))
+                    && self.durations.iter().collect::<HashSet<_>>().len() == self.durations.len()
+            }
+            _ => false,
         }
     }
 }
@@ -227,20 +349,10 @@ impl SecretUse {
         let mut statements: Vec<UseStatement> = Vec::new();
         for item in &self.items {
             let (statement, _): (UseStatement, _) = canonical(&item.statement_b64url)?;
-            // Option fields accept omission in serde, but agent_id is a required
-            // nullable key in the vault statement.
             let (value, _): (Value, _) = canonical(&item.statement_b64url)?;
+            // Every vault statement carries agent_id, using null for no agent.
             if value.get("agent_id").is_none()
-                || !statement_version_ok(
-                    &statement.v,
-                    "ck-secret-use-statement",
-                    statement.asking_member_id.as_deref(),
-                    &statement.member_id,
-                )
-                || !statement.r#use.shape_ok(
-                    statement.v == "ck-secret-use-statement/v3",
-                    &statement.secret.kind,
-                )
+                || !statement.shape_ok(&value)
                 || !ulid(&item.request_id)
                 || statement.request_id != item.request_id
                 || !seen.insert(&item.request_id)
@@ -256,6 +368,7 @@ impl SecretUse {
                     first.agent_id != statement.agent_id
                         || first.member_id != statement.member_id
                         || first.asking_member_id != statement.asking_member_id
+                        || first.is_local() != statement.is_local()
                 })
             {
                 return Err(invalid());

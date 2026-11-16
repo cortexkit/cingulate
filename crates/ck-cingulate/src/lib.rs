@@ -1028,7 +1028,11 @@ impl Handler {
         }
         if let Some(body) = &request.secret_use {
             let scope = stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
-            if body.statements()?.iter().any(|s| {
+            let statements = body.statements()?;
+            if statements.iter().any(|s| s.is_local()) && stamp.label() != "reserved:aft" {
+                return Err(stamp.refuse());
+            }
+            if statements.iter().any(|s| {
                 if scope.kind == subc_protocol::scope::ScopeKind::Worker {
                     s.agent_id.is_some() && s.agent_id != scope.attributes.on_behalf_of_agent
                 } else {

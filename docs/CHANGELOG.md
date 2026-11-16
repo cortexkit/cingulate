@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.25.0 (ck-cingulate)
+
+- Accept the vault's local-use statements (`ck-secret-local-use-statement/v1`)
+  on `secret_use` cards, for releasing a sudo password once and for SSH signing.
+  Only the AFT module may file them. Each statement has a closed shape: sudo
+  carries a `local_program` secret, a sudo target, `expects` and `undoable`, and
+  offers only `once`; SSH signing carries the enrolled key and an SSH target and
+  offers `once`, `hour` or `session`. A card never mixes local-use and other
+  statements. `agent_id` is always present and may be null; a worker scope
+  accepts null or its `on_behalf_of_agent`. Pin the vault's v1 and corrected
+  v1.1 sample packs unchanged.
+
 ## 0.24.0 (ck-cingulate)
 
 - Publish a `card_settled.v1` bus pointer when a card settles: one message per
