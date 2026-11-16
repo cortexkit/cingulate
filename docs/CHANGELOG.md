@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.16.3 (cingulate-vectors)
+
+- Add the test-only `local-secret-cards-served-v1.2` corpus from AFT's local
+  secret request cards v1.2 and the vault's local-use samples v1.2. Pin all seven
+  inputs and all served bytes, and regenerate the complete corpus through the
+  consent handlers. Only SSH card files differ from v1.1; sudo and Git files
+  remain byte-identical. No runtime, wire-reader or store migration change.
 - Add the test-only `local-secret-cards-served-v1.1` corpus from AFT's rebuilt
   requests, with vault cards filed under their statement-matching head stamps.
   Pin and regenerate both corpora independently; the served v1 corpus and its

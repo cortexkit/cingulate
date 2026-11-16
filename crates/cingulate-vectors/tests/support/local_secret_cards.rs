@@ -20,6 +20,7 @@ mod secret_use;
 
 pub const CORPUS: &str = "local-secret-cards-served-v1";
 pub const CORPUS_V1_1: &str = "local-secret-cards-served-v1.1";
+pub const CORPUS_V1_2: &str = "local-secret-cards-served-v1.2";
 pub const CARDS: [&str; 7] = [
     "sudo-typed",
     "sudo-vault",
@@ -110,7 +111,7 @@ pub async fn generate(corpus_name: &str) -> BTreeMap<String, Vec<u8>> {
 }
 
 pub async fn generate_cards(corpus_name: &str, cards: &[&str]) -> BTreeMap<String, Vec<u8>> {
-    assert!(matches!(corpus_name, CORPUS | CORPUS_V1_1));
+    assert!(matches!(corpus_name, CORPUS | CORPUS_V1_1 | CORPUS_V1_2));
     let root = corpus(corpus_name);
     let mut files = BTreeMap::new();
     let desktop = desktop_stamp();
@@ -121,14 +122,14 @@ pub async fn generate_cards(corpus_name: &str, cards: &[&str]) -> BTreeMap<Strin
         let input = fs::read(root.join(&input_name)).unwrap();
         let params: Value = serde_json::from_slice(&input).unwrap();
         let vault = params["kind"] == "secret_use";
-        // The v1.1 vault statements bind a head scope, not the ordinary worker.
+        // The v1.1 and v1.2 vault statements bind a head scope, not the ordinary worker.
         // Keep route identity fixed independently of the request body.
         let requester = match (corpus_name, card) {
-            (CORPUS_V1_1, "sudo-vault") => secret_use::filer("aft", Some("agent-A")),
-            (CORPUS_V1_1, "ssh-vault") => secret_use::filer("aft", None),
+            (CORPUS_V1_1 | CORPUS_V1_2, "sudo-vault") => secret_use::filer("aft", Some("agent-A")),
+            (CORPUS_V1_1 | CORPUS_V1_2, "ssh-vault") => secret_use::filer("aft", None),
             _ => requester_stamp(),
         };
-        let fixture = if corpus_name == CORPUS_V1_1 && vault {
+        let fixture = if matches!(corpus_name, CORPUS_V1_1 | CORPUS_V1_2) && vault {
             secret_use::fixture().await
         } else {
             Fixture::open(None).await
@@ -136,11 +137,13 @@ pub async fn generate_cards(corpus_name: &str, cards: &[&str]) -> BTreeMap<Strin
         fixture
             .handler
             .set_access_runtime(worker::Runtime::new(Ok(ScopeLife::Live(worker::head()))));
-        fixture.clock.set(if corpus_name == CORPUS_V1_1 {
-            secret_use::NOW
-        } else {
-            FILED_AT_MS
-        });
+        fixture
+            .clock
+            .set(if matches!(corpus_name, CORPUS_V1_1 | CORPUS_V1_2) {
+                secret_use::NOW
+            } else {
+                FILED_AT_MS
+            });
         fixture.pin_store_instance(INSTANCE);
 
         let mut desktop_watch =

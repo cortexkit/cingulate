@@ -1,0 +1,64 @@
+{
+  "kind": "consent",
+  "title": "Allow ssh login",
+  "prompt": "Use your ssh key to log in to alice@example.test?",
+  "facts": [
+    {
+      "label": "What it allows",
+      "value": "A login gives the agent a shell on example.test as alice."
+    },
+    {
+      "label": "Command",
+      "value": "ssh alice@example.test"
+    },
+    {
+      "label": "Folder",
+      "value": "/work/project"
+    },
+    {
+      "label": "Agent",
+      "value": "Fake agent"
+    }
+  ],
+  "options": [
+    {
+      "id": "once",
+      "label": "Allow once",
+      "effect": "grant"
+    },
+    {
+      "id": "hour",
+      "label": "Allow for 1 hour",
+      "effect": "grant"
+    },
+    {
+      "id": "session",
+      "label": "Allow for this session",
+      "effect": "grant"
+    },
+    {
+      "id": "decline",
+      "label": "Decline",
+      "effect": "decline"
+    }
+  ],
+  "default": "decline",
+  "urgency": "normal",
+  "on_expiry": "deny",
+  "material_damage": false,
+  "late_execution": "notify_only",
+  "target": {
+    "kind": "ssh",
+    "label": "alice@example.test"
+  },
+  "expires_in_ms": 600000,
+  "scope": {
+    "owner": {
+      "kind": "reserved",
+      "module_id": "prefrontal-core"
+    },
+    "kind": "worker",
+    "scope_ref": "fake-agent",
+    "scope_epoch": 7
+  }
+}
