@@ -295,7 +295,6 @@ impl UseStatement {
             .is_some_and(|asking| !asking_member_ok(asking, &self.member_id))
             || self.command.is_none()
             || self.workdir.is_none()
-            || self.purpose.is_none()
         {
             return false;
         }
@@ -311,6 +310,10 @@ impl UseStatement {
                     .as_ref()
                     .is_some_and(|secret| secret.kind == "local_program")
                     && value.get("key").is_none()
+                    && self
+                        .purpose
+                        .as_ref()
+                        .is_some_and(|purpose| !purpose.is_empty())
                     && self.expects.is_some()
                     && self.undoable.is_some()
                     && self.durations == ["once"]
@@ -321,7 +324,7 @@ impl UseStatement {
                 Some(LocalTarget::Ssh { .. }),
             ) => {
                 self.key.is_some()
-                    && ["secret", "expects", "undoable"]
+                    && ["secret", "expects", "undoable", "purpose"]
                         .iter()
                         .all(|field| value.get(field).is_none())
                     && self

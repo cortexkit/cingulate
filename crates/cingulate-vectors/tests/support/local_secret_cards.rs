@@ -104,14 +104,19 @@ async fn served(fixture: &Fixture, surface: &Stamp, method: &str, params: Value)
     }
 }
 
+#[allow(dead_code)]
 pub async fn generate(corpus_name: &str) -> BTreeMap<String, Vec<u8>> {
+    generate_cards(corpus_name, &CARDS).await
+}
+
+pub async fn generate_cards(corpus_name: &str, cards: &[&str]) -> BTreeMap<String, Vec<u8>> {
     assert!(matches!(corpus_name, CORPUS | CORPUS_V1_1));
     let root = corpus(corpus_name);
     let mut files = BTreeMap::new();
     let desktop = desktop_stamp();
     let phone = phone_stamp();
     let features = json!({"clientFeatures":["secret-use-approval"]});
-    for card in CARDS {
+    for &card in cards {
         let input_name = format!("{card}-request.json");
         let input = fs::read(root.join(&input_name)).unwrap();
         let params: Value = serde_json::from_slice(&input).unwrap();

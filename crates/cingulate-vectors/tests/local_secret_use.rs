@@ -16,9 +16,12 @@ const VECTORS_V1_1: &[u8] =
     include_bytes!("../../../test-vectors/secret-local-use-v1.1/vectors.json");
 const README_V1_1: &[u8] = include_bytes!("../../../test-vectors/secret-local-use-v1.1/README.md");
 const SUMS_V1_1: &str = include_str!("../../../test-vectors/secret-local-use-v1.1/SHA256SUMS");
+const VECTORS_V1_2: &[u8] =
+    include_bytes!("../../../test-vectors/secret-local-use-v1.2/vectors.json");
+const SUMS_V1_2: &str = include_str!("../../../test-vectors/secret-local-use-v1.2/SHA256SUMS");
 
 fn vectors() -> Value {
-    serde_json::from_slice(VECTORS_V1_1).unwrap()
+    serde_json::from_slice(VECTORS_V1_2).unwrap()
 }
 
 fn v1_vectors() -> Value {
@@ -106,6 +109,72 @@ fn local_use_v1_1_tagged_files_have_pinned_checksums() {
     );
 }
 
+#[test]
+fn local_use_v1_2_tagged_files_have_pinned_checksums() {
+    for (bytes, digest) in [
+        (
+            VECTORS_V1_2,
+            "02b6c9a5cff3f67434e9d74a6d510ca9ee81c7118002b3767dfe6250359f1e18",
+        ),
+        (
+            SUMS_V1_2.as_bytes(),
+            "6d5d00f897425709b1796813ae1d40b654da2092c40152e803d79e3c7ddb0b56",
+        ),
+    ] {
+        assert_eq!(format!("{:x}", Sha256::digest(bytes)), digest);
+    }
+    assert_eq!(
+        SUMS_V1_2,
+        "02b6c9a5cff3f67434e9d74a6d510ca9ee81c7118002b3767dfe6250359f1e18  vectors.json\n"
+    );
+}
+
+#[test]
+fn local_use_purpose_ssh_with_member_is_refused() {
+    let pack: Value = serde_json::from_slice(VECTORS_V1_2).unwrap();
+    for name in ["ssh_sign-local", "ssh_sign-forwarded"] {
+        let original = tagged_case(&pack, name)["statement"]["json"].clone();
+        for purpose in [json!("connect to the host"), json!(""), Value::Null] {
+            let mut statement = original.clone();
+            statement["purpose"] = purpose;
+            refuses(&statement);
+        }
+    }
+}
+
+#[test]
+fn local_use_purpose_ssh_without_member_is_accepted() {
+    let pack: Value = serde_json::from_slice(VECTORS_V1_2).unwrap();
+    for name in ["ssh_sign-local", "ssh_sign-forwarded"] {
+        let sample = tagged_case(&pack, name);
+        assert!(sample["statement"]["json"].get("purpose").is_none());
+        let mut request = body(&sample["statement"]["json"]);
+        request["secret_use"]["items"][0]["statement_b64url"] =
+            sample["statement"]["b64url"].clone();
+        ConsentRequest::decode(request).unwrap();
+    }
+}
+
+#[test]
+fn local_use_purpose_sudo_without_member_is_still_refused() {
+    let pack: Value = serde_json::from_slice(VECTORS_V1_2).unwrap();
+    for name in ["sudo_password-local", "sudo_password-forwarded"] {
+        let mut statement = tagged_case(&pack, name)["statement"]["json"].clone();
+        statement.as_object_mut().unwrap().remove("purpose");
+        refuses(&statement);
+    }
+}
+
+#[test]
+fn local_use_purpose_sudo_empty_member_is_refused() {
+    let pack: Value = serde_json::from_slice(VECTORS_V1_2).unwrap();
+    for name in ["sudo_password-local", "sudo_password-forwarded"] {
+        let mut statement = tagged_case(&pack, name)["statement"]["json"].clone();
+        statement["purpose"] = json!("");
+        refuses(&statement);
+    }
+}
+
 async fn sample_files_and_binds(name: &str) {
     let sample = case(name);
     let statement = &sample["statement"]["json"];
@@ -183,8 +252,55 @@ approval_case!(sudo_password_forwarded_sample, "sudo_password-forwarded");
 approval_case!(ssh_sign_local_sample, "ssh_sign-local");
 approval_case!(ssh_sign_forwarded_sample, "ssh_sign-forwarded");
 
+#[test]
+fn known_v1_1_ssh_statements_with_purpose_are_refused() {
+    // The statement version stayed v1, but v1.2 forbids purpose on SSH.
+    // Keep the previously accepted local and forwarded bytes as refusals.
+    let pack: Value = serde_json::from_slice(VECTORS_V1_1).unwrap();
+    for name in ["ssh_sign-local", "ssh_sign-forwarded"] {
+        let sample = tagged_case(&pack, name);
+        assert!(sample["statement"]["json"]["purpose"].is_string());
+        check_record(&sample["statement"]);
+        let mut request = body(&sample["statement"]["json"]);
+        request["secret_use"]["items"][0]["statement_b64url"] =
+            sample["statement"]["b64url"].clone();
+        assert_eq!(
+            ConsentRequest::decode(request).unwrap_err().code,
+            "elicitation_invalid_request"
+        );
+    }
+}
+
+#[test]
+fn local_use_v1_2_sudo_cases_are_unchanged_from_v1_1() {
+    let previous: Value = serde_json::from_slice(VECTORS_V1_1).unwrap();
+    let current = vectors();
+    for name in ["sudo_password-local", "sudo_password-forwarded"] {
+        assert_eq!(tagged_case(&current, name), tagged_case(&previous, name));
+    }
+    assert_eq!(current["sudo_hour_refused"], previous["sudo_hour_refused"]);
+    for refusal in previous["refusals"].as_array().unwrap() {
+        if refusal["operation"] == "secret.use" {
+            let current_refusal = current["refusals"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|sample| sample["case"] == refusal["case"])
+                .unwrap();
+            assert_eq!(current_refusal, refusal);
+        }
+    }
+}
+
 async fn known_sample_fingerprint_defect(name: &str) {
-    let sample = tagged_case(&v1_vectors(), name);
+    let historical = tagged_case(&v1_vectors(), name);
+    // SSH's old purpose member is now refused before answering. Use a current
+    // statement and envelope so the old fingerprint remains the only defect.
+    let sample = if name.starts_with("ssh") {
+        case(name)
+    } else {
+        historical.clone()
+    };
     let statement = &sample["statement"]["json"];
     let f = fixture().await;
     let id = f
@@ -194,10 +310,12 @@ async fn known_sample_fingerprint_defect(name: &str) {
         )
         .await;
     // V1's 64-hex phone fingerprint defect, fixed in v1.1, must stay refused.
-    let device = sample["approval"]["envelope"]["json"]["device_fingerprint"]
+    let device = historical["approval"]["envelope"]["json"]["device_fingerprint"]
         .as_str()
         .unwrap();
     assert_eq!(device.len(), 64);
+    let mut envelope = sample["approval"]["envelope"]["json"].clone();
+    envelope["device_fingerprint"] = json!(device);
     let before = f.rows();
     assert!(f
         .call(
@@ -205,7 +323,7 @@ async fn known_sample_fingerprint_defect(name: &str) {
             "consent.answer",
             json!({
                 "elicitationId":id,"choiceId":"allow","clientFeatures":["secret-use-approval"],
-                "envelope_b64url":sample["approval"]["envelope"]["b64url"]
+                "envelope_b64url":encoded(&envelope)
             })
         )
         .await
@@ -327,7 +445,10 @@ fn local_use_exact_members_and_nullability_are_closed() {
     }
     for (name, fields) in [
         ("sudo_password-local", vec!["key"]),
-        ("ssh_sign-local", vec!["secret", "expects", "undoable"]),
+        (
+            "ssh_sign-local",
+            vec!["secret", "expects", "undoable", "purpose"],
+        ),
     ] {
         for field in fields {
             for value in [Value::Null, json!("unexpected")] {
@@ -740,15 +861,14 @@ fn vault_side_refusal(name: &str, operation: &str, code: &str) {
             &["name", "stamp", "target"]
         }
         "secret.ssh_sign" => {
-            for field in ["key", "data", "command", "workdir", "purpose"] {
+            for field in ["key", "data", "command", "workdir"] {
                 assert!(request[field].is_string(), "{name}: {field}");
             }
+            assert!(request.get("purpose").is_none());
             assert!(request["target"]["user"].is_string());
             assert!(request["target"]["host"].is_string());
             assert!(request["target"]["port"].as_u64().is_some());
-            &[
-                "key", "data", "command", "workdir", "purpose", "stamp", "target",
-            ]
+            &["key", "data", "command", "workdir", "stamp", "target"]
         }
         "secret.deposit" => {
             for field in [

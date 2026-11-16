@@ -22,6 +22,7 @@ async fn main() {
         _ => panic!("usage: generate_local_secret_cards_vectors [corpus-name] [--check]"),
     };
     let root = support::corpus(corpus_name);
+    // Historical v1/v1.1 inputs fail at ssh-vault because SSH now forbids purpose.
     let files = local_secret_cards::generate(corpus_name).await;
     if check {
         let actual: BTreeSet<_> = fs::read_dir(&root)

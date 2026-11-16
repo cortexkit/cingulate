@@ -7,6 +7,17 @@
   Pin and regenerate both corpora independently; the served v1 corpus and its
   manifest pin remain unchanged. No runtime, wire-reader or store migration change.
 
+## 0.25.2 (ck-cingulate), 0.13.2 (cingulate-decode), 0.16.2 (cingulate-vectors)
+
+- Accept the vault's local-use samples v1.2: SSH statements must omit `purpose`,
+  while sudo statements still require a non-empty `purpose`. The statement
+  version remains `ck-secret-local-use-statement/v1`.
+- Pin the v1.2 sample bytes and exercise their local and forwarded approvals.
+  Retain the v1 and v1.1 corpora and their named tests; previously accepted v1.1
+  SSH statements with `purpose` are now explicit refusal cases.
+- Keep both historical served-card corpora byte-pinned. Their SSH vault cards
+  now have named refusal tests; all other cards still regenerate byte-for-byte.
+
 ## 0.16.1 (cingulate-vectors)
 
 - Add byte-pinned local-secret request cards and their served list, get and watch records.

@@ -10,6 +10,9 @@ mod watch_pending;
 
 use std::{collections::BTreeSet, fs};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use cingulate_decode::ConsentRequest;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use support::corpus;
 
@@ -25,11 +28,20 @@ async fn local_secret_cards_served_v1_1_vectors_regenerate_byte_for_byte() {
 
 async fn assert_regenerates(corpus_name: &str) {
     let root = corpus(corpus_name);
-    let generated = local_secret_cards::generate(corpus_name).await;
-    assert_eq!(generated.len(), 40);
+    // Only the historical SSH vault statement is invalid under samples v1.2.
+    // Keep byte-for-byte regeneration for every other card, including ordinary SSH.
+    let cards: Vec<_> = local_secret_cards::CARDS
+        .into_iter()
+        .filter(|card| *card != "ssh-vault")
+        .collect();
+    let mut generated = local_secret_cards::generate_cards(corpus_name, &cards).await;
+    // The full, unchanged manifest is checked separately; this map is a subset.
+    generated.remove("SHA256SUMS");
+    assert_eq!(generated.len(), 35);
     let actual: BTreeSet<_> = fs::read_dir(&root)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name != "SHA256SUMS" && !name.starts_with("ssh-vault-"))
         .collect();
     assert_eq!(
         actual,
@@ -43,6 +55,37 @@ async fn assert_regenerates(corpus_name: &str) {
             "{corpus_name} served vector differs: {name}"
         );
     }
+}
+
+#[test]
+fn local_secret_cards_served_v1_ssh_with_purpose_is_historically_refused() {
+    // Since the vault's samples v1.2, an SSH statement carrying purpose is refused.
+    assert_historical_ssh_purpose_refused(local_secret_cards::CORPUS);
+}
+
+#[test]
+fn local_secret_cards_served_v1_1_ssh_with_purpose_is_historically_refused() {
+    // Since the vault's samples v1.2, an SSH statement carrying purpose is refused.
+    assert_historical_ssh_purpose_refused(local_secret_cards::CORPUS_V1_1);
+}
+
+fn assert_historical_ssh_purpose_refused(corpus_name: &str) {
+    let input = fs::read(corpus(corpus_name).join("ssh-vault-request.json")).unwrap();
+    let mut params: Value = serde_json::from_slice(&input).unwrap();
+    let error = ConsentRequest::decode(params.clone()).unwrap_err();
+    assert_eq!(error.code, "elicitation_invalid_request");
+    let item = &mut params["secret_use"]["items"][0];
+    let bytes = URL_SAFE_NO_PAD
+        .decode(item["statement_b64url"].as_str().unwrap())
+        .unwrap();
+    let mut statement: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(statement["program"], "ssh");
+    assert!(statement["purpose"].is_string());
+    // Removing only purpose must make the same historical statement valid.
+    statement.as_object_mut().unwrap().remove("purpose");
+    item["statement_b64url"] =
+        json!(URL_SAFE_NO_PAD.encode(serde_jcs::to_vec(&statement).unwrap()));
+    ConsentRequest::decode(params).unwrap();
 }
 
 #[test]
