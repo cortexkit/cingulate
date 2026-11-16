@@ -1,0 +1,23 @@
+name: Design gate
+
+# A pull request that changes behaviour must link an open issue labelled
+# `design-approved` in this repository (see CONTRIBUTING.md). The check itself is
+# the shared CortexKit design gate; it reads labels and pull request text through
+# the API and never checks out or runs pull request code, which is why it may use
+# pull_request_target.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  issues:
+    types: [labeled]
+
+jobs:
+  design-gate:
+    permissions:
+      contents: read # fetch the gate action
+      issues: read # read the linked issue's labels
+      pull-requests: write # gate comment, draft conversion, ready for review
+      checks: write # publish the design-gate check run
+    # The shared gate writes with this job's GITHUB_TOKEN. No App key is passed, so
+    # no organisation key ever reaches a public repository's workflow.
+    uses: cortexkit/subconscious/.github/workflows/design-gate.yml@master

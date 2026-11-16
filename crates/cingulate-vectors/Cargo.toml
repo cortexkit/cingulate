@@ -2,6 +2,8 @@
 name = "cingulate-vectors"
 version = "0.14.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/cortexkit/cingulate"
 publish = false
 
 [dev-dependencies]

@@ -156,8 +156,8 @@ file and an unwritable location.
 
 ## Verification
 
-From the workspace root, run the repository worker guide's format, lint, tests
-and independence gates. `cargo test -p ck-cingulate --all-targets --locked` runs
+From the workspace root, run the gates in [CONTRIBUTING.md](../../CONTRIBUTING.md)
+(`./scripts/gate.sh`). `cargo test -p ck-cingulate --all-targets --locked` runs
 the module-specific tests, including full snapshots of both lifecycle tables
 and notifications for no-write refusals, a notifier that reads committed SQL
 through an independent connection, and injected-clock await/retry/timer paths.

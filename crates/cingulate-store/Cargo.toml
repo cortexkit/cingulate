@@ -3,6 +3,7 @@ name = "cingulate-store"
 version = "0.10.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/cortexkit/cingulate"
 publish = false
 description = "Durable, orchestrator-independent consent card lifecycle and feeds."
 

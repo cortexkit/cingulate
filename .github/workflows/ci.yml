@@ -1,0 +1,140 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Lets the release workflow run this exact gate against the commit it is about
+  # to build. `ref` is empty for every other trigger, and checkout then uses the
+  # event's own commit.
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to check out and test"
+        type: string
+        default: ""
+  # Manual trigger, so a commit whose push webhook was missed can be re-run
+  # without an empty commit: `gh workflow run CI`.
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Every gate runs on all three desktop platforms, once with the default
+  # features and once with the development-only `dev-local-operator` feature.
+  # Release builds never enable that feature, but its code is compiled and
+  # tested here so it cannot rot, and so the tests that prove phone-only cards
+  # keep their gates with the feature on keep running.
+  #
+  # Runners are GitHub-hosted. Fork pull requests need no secrets: every Rust
+  # dependency comes from crates.io, and no step reads a sibling checkout.
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.variant }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One platform failing must not hide the others' results.
+      fail-fast: false
+      matrix:
+        os: [ubuntu, macos, windows]
+        variant: [default-features, dev-local-operator]
+        include:
+          - os: ubuntu
+            runner: ubuntu-latest
+          - os: macos
+            runner: macos-latest
+          - os: windows
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
+        with:
+          key: ${{ matrix.variant }}
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        shell: bash
+        env:
+          FEATURES: ${{ matrix.variant == 'dev-local-operator' && '--features ck-cingulate/dev-local-operator' || '' }}
+        run: |
+          # FEATURES is empty or one flag and its value; it must split into words.
+          # shellcheck disable=SC2086
+          cargo clippy --workspace --all-targets --locked $FEATURES -- -D warnings
+
+      - name: Test
+        shell: bash
+        env:
+          FEATURES: ${{ matrix.variant == 'dev-local-operator' && '--features ck-cingulate/dev-local-operator' || '' }}
+        run: |
+          # FEATURES is empty or one flag and its value; it must split into words.
+          # shellcheck disable=SC2086
+          cargo test --workspace --all-targets --locked $FEATURES
+
+  # Checks that do not depend on the platform run once.
+  repository:
+    name: Vectors and independence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
+
+      # Each generator rebuilds its corpus in memory from the real handler and
+      # fails on any byte difference from the checked-in vectors, including
+      # their SHA256SUMS. Nothing is written.
+      - name: Vector corpora match their generators
+        run: |
+          set -euo pipefail
+          for example in \
+            generate_vectors \
+            generate_consent_outcomes_refs_vectors \
+            generate_no_expiry_vectors \
+            generate_session_ended_vectors \
+            generate_watch_pending_vectors; do
+            echo "== $example"
+            cargo run -q -p cingulate-vectors --example "$example" --locked -- --check
+          done
+
+      # Cingulate must stay usable without any orchestrator: no prefrontal-*
+      # crate may appear among its normal dependencies.
+      - name: No orchestrator dependency
+        run: |
+          set -euo pipefail
+          tree="$(cargo tree --workspace --edges normal --locked --prefix none --color never)"
+          test -n "$tree" || { echo "empty dependency tree; refusing" >&2; exit 1; }
+          if printf '%s\n' "$tree" | grep -E '^prefrontal-'; then
+            echo "REFUSING: an orchestrator crate is a normal dependency" >&2
+            exit 1
+          fi
+          echo "no prefrontal-* crate in the normal dependency tree"
+
+      # Maintainer-local files under .cortexkit/ are ignored; none may be tracked.
+      - name: No ignored .cortexkit file is tracked
+        run: |
+          set -euo pipefail
+          tracked="$(git ls-files -ci --exclude-standard -- .cortexkit)"
+          if [ -n "$tracked" ]; then
+            echo "REFUSING: ignored files are tracked:" >&2
+            printf '%s\n' "$tracked" >&2
+            exit 1
+          fi

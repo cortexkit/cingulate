@@ -1,0 +1,386 @@
+name: Release
+
+# TAG-TRIGGERED: pushing `v<version>` on main builds `ck-cingulate` for the five
+# platforms the `ck` release index serves, on runners of that platform, and
+# publishes a GitHub release only after every asset is in and verified.
+#
+# The signed `ck` release index reads this repository's latest non-draft release:
+# each `ck-cingulate-<os>-<arch>.zip` with its `.zip.sha256` sidecar, plus
+# `release-manifest.json` naming the minimum subc-core. It derives the expected
+# version from the tag (`v0.23.0` -> `0.23.0`), and `ck setup` refuses a binary
+# whose `--version` does not print it. Nothing here signs the index; the index
+# service does that when it next rebuilds.
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual, so a release can be re-cut for an existing tag (a dropped webhook, or
+  # assets re-uploaded after a workflow fix) without inventing a throwaway tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and upload assets for"
+        required: true
+      replace_published:
+        description: "Explicitly replace assets on an already-published release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Keep draft creation, uploads and publication for one tag in one run.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Checks the tag once, then creates the draft release every platform uploads
+  # into. A separate job, so the platform legs cannot race to create it.
+  prepare:
+    permissions:
+      contents: write
+    name: Check the tag and create the draft release
+    runs-on: ubuntu-latest
+    outputs:
+      checked_sha: ${{ steps.checked.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Full history: the ancestry check below needs it, and a shallow clone
+      # would answer about a graph that is not there.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      # A released binary must be code that passed main's CI, so a tag that
+      # points off main is refused. There is no override.
+      - name: Refuse a tag that is not on main
+        id: checked
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          checked_sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$checked_sha" origin/main; then
+            echo "REFUSING: $(git rev-parse --short HEAD) is not an ancestor of origin/main." >&2
+            echo "  Land the commit on main first, then move the tag." >&2
+            exit 1
+          fi
+          echo "tag commit $(git rev-parse --short HEAD) is on main"
+          echo "sha=$checked_sha" >> "$GITHUB_OUTPUT"
+
+      # The index derives the expected version from the tag and `ck setup`
+      # requires it in `--version`, so a mismatch would fail every install.
+      - name: Refuse a tag that disagrees with the crate version
+        id: version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          want="${TAG#v}"
+          have=$(cargo metadata --no-deps --format-version 1 \
+                 | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="ck-cingulate"))')
+          echo "tag wants $want; ck-cingulate is $have"
+          if [ "$want" != "$have" ]; then
+            echo "REFUSING: tag $TAG implies version $want but ck-cingulate is $have." >&2
+            echo "Bump crates/ck-cingulate/Cargo.toml to $want, or tag v$have." >&2
+            exit 1
+          fi
+          echo "version=$have" >> "$GITHUB_OUTPUT"
+
+      # The minimum supervisor version lives in the root Cargo.toml under
+      # [workspace.metadata.release] requires_core; the script refuses when it
+      # is missing or malformed rather than publishing without it.
+      - name: Resolve minimum core version
+        id: core
+        run: |
+          set -euo pipefail
+          requires_core=$(python3 scripts/release-manifest.py)
+          printf 'requires_core=%s\n' "$requires_core" >> "$GITHUB_OUTPUT"
+
+      - name: Create the draft release if it does not exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          REPLACE_PUBLISHED: ${{ inputs.replace_published || false }}
+          REQUIRES_CORE: ${{ steps.core.outputs.requires_core }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.txt <<NOTES
+          Install with \`ck setup cingulate\`. Assets are built on the platform they
+          run on, except windows-arm64, which is cross-built on the x64 Windows runner.
+          Each zip has a SHA-256 sidecar holding the digest of the zip bytes.
+
+          These builds never contain the development-only \`dev-local-operator\`
+          feature: \`ck-cingulate --version\` prints \`dev-local-operator: off\`.
+
+          The macOS binary is ad-hoc signed, not notarized: a browser-downloaded zip
+          carries a quarantine attribute and Gatekeeper will refuse it. Installing
+          with \`ck setup\` does not apply that attribute.
+
+          REQUIRES subc-core ${REQUIRES_CORE} OR NEWER. Upgrade the supervisor
+          before installing this release.
+          NOTES
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+            if [ "$draft" != "true" ] && [ "$REPLACE_PUBLISHED" != "true" ]; then
+              echo "REFUSING: $TAG is published; set replace_published explicitly to replace its assets." >&2
+              exit 1
+            fi
+            # Hide the release while its replacement asset set is incomplete.
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=true --notes-file release-notes.txt
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --draft --verify-tag \
+              --notes-file release-notes.txt
+          fi
+
+      - name: Upload release manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          REQUIRES_CORE: ${{ steps.core.outputs.requires_core }}
+        run: |
+          set -euo pipefail
+          printf '{"requires_core":"%s"}\n' "$REQUIRES_CORE" > release-manifest.json
+          gh release upload "$TAG" release-manifest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  # The full CI gate (all three platforms, with and without the development
+  # feature) on exactly the commit being released. Publication waits for it.
+  ci:
+    name: CI on the tagged commit
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.checked_sha }}
+
+  assets:
+    permissions:
+      contents: write
+    name: ${{ matrix.asset_os }}-${{ matrix.asset_arch }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One platform failing must not cancel the others; the publish job keeps an
+      # incomplete release in draft, where nobody installs from it.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            asset_os: darwin
+            asset_arch: arm64
+            target: aarch64-apple-darwin
+            runs_here: true
+          - runner: ubuntu-latest
+            asset_os: linux
+            asset_arch: x64
+            target: x86_64-unknown-linux-gnu
+            runs_here: true
+          - runner: ubuntu-24.04-arm
+            asset_os: linux
+            asset_arch: arm64
+            target: aarch64-unknown-linux-gnu
+            runs_here: true
+          - runner: windows-latest
+            asset_os: windows
+            asset_arch: x64
+            target: x86_64-pc-windows-msvc
+            runs_here: true
+          # Cross-built on the x64 runner, which cannot execute it; its packaged
+          # binary is checked for the ARM64 machine type instead of being run.
+          - runner: windows-latest
+            asset_os: windows
+            asset_arch: arm64
+            target: aarch64-pc-windows-msvc
+            runs_here: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.checked_sha }}
+
+      # A tag can move after prepare checked it. Build only that checked commit.
+      - name: Refuse a checkout that is not the checked commit
+        shell: bash
+        env:
+          CHECKED_SHA: ${{ needs.prepare.outputs.checked_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse HEAD)" != "$CHECKED_SHA" ]]; then
+            echo "REFUSING: asset checkout differs from the ancestry-checked commit." >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Default features only: `dev-local-operator` must never reach a release.
+      # --locked so the artifact resolves the committed lockfile.
+      - name: Build the release binary
+        shell: bash
+        run: cargo build --locked --release -p ck-cingulate --bin ck-cingulate --target ${{ matrix.target }}
+
+      # Ad-hoc signature with a pinned identifier, so the identity macOS keys its
+      # privacy grants on stays stable across builds, and the hardened runtime, so
+      # a same-user process cannot attach a debugger. Not notarized.
+      - name: Sign with a pinned identifier (macOS)
+        if: matrix.asset_os == 'darwin'
+        run: |
+          set -euo pipefail
+          b="target/${{ matrix.target }}/release/ck-cingulate"
+          codesign --force --sign - --options runtime --identifier ck-cingulate "$b"
+          # Capture, then match: `codesign | grep -q` can fail under pipefail on a
+          # good binary when grep exits before codesign finishes writing.
+          signature="$(codesign -dv "$b" 2>&1)"
+          case "$signature" in
+            *"Identifier=ck-cingulate"*) ;;
+            *) echo "REFUSING: ck-cingulate did not take the pinned identifier" >&2; exit 1 ;;
+          esac
+          case "$signature" in
+            *flags=*runtime*) ;;
+            *) echo "REFUSING: ck-cingulate was signed without the hardened runtime" >&2; exit 1 ;;
+          esac
+
+      # The archiver is detected, not assumed: Git Bash on the Windows runner has
+      # no `zip`, but has 7z and PowerShell. The sidecar uses the two-field
+      # `shasum` format and is verified with the command a user would run.
+      - name: Package the asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          make_zip() {
+            if command -v zip >/dev/null 2>&1; then
+              zip -q "$1" "$2"
+            elif command -v 7z >/dev/null 2>&1; then
+              7z a -tzip -bso0 -bsp0 "$1" "$2" >/dev/null
+            elif command -v powershell >/dev/null 2>&1; then
+              powershell -NoProfile -NonInteractive -Command \
+                "Compress-Archive -Path '$2' -DestinationPath '$1' -Force"
+            else
+              echo "REFUSING: no archiver on this runner (tried zip, 7z, powershell)" >&2
+              exit 1
+            fi
+          }
+          ext=""; [ "${{ matrix.asset_os }}" = "windows" ] && ext=".exe"
+          name="ck-cingulate-${{ matrix.asset_os }}-${{ matrix.asset_arch }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/ck-cingulate$ext" "dist/ck-cingulate$ext"
+          (cd dist && make_zip "$name.zip" "ck-cingulate$ext" && rm -f "ck-cingulate$ext")
+          if command -v shasum >/dev/null 2>&1; then
+            (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256" && shasum -c "$name.zip.sha256")
+          else
+            (cd dist && sha256sum "$name.zip" > "$name.zip.sha256" && sha256sum -c "$name.zip.sha256")
+          fi
+
+      # The asset answers for itself, from the zip a user receives: its version
+      # must match the tag and it must report the development feature off.
+      - name: Verify the packaged binary
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          RUNS_HERE: ${{ matrix.runs_here }}
+        run: |
+          set -euo pipefail
+          extract() {
+            if command -v unzip >/dev/null 2>&1; then
+              unzip -qo "$1"
+            elif command -v 7z >/dev/null 2>&1; then
+              7z x -y -bso0 -bsp0 "$1" >/dev/null
+            elif command -v powershell >/dev/null 2>&1; then
+              powershell -NoProfile -NonInteractive -Command \
+                "Expand-Archive -Path '$1' -DestinationPath . -Force"
+            else
+              echo "REFUSING: no extractor on this runner (tried unzip, 7z, powershell)" >&2
+              exit 1
+            fi
+          }
+          ext=""; [ "${{ matrix.asset_os }}" = "windows" ] && ext=".exe"
+          t="$RUNNER_TEMP/verify"
+          rm -rf "$t"; mkdir -p "$t"
+          cp dist/*.zip "$t/"
+          (cd "$t" && extract ck-cingulate-*.zip)
+          if [ "$RUNS_HERE" = "true" ]; then
+            v=$("$t/ck-cingulate$ext" --version)
+            echo "ck-cingulate --version -> $v"
+            case "$v" in
+              "ck-cingulate $VERSION ("*) ;;
+              *) echo "REFUSING: the binary does not report version $VERSION" >&2; exit 1 ;;
+            esac
+            case "$v" in
+              *"dev-local-operator: off"*) ;;
+              *) echo "REFUSING: the binary does not report dev-local-operator: off" >&2; exit 1 ;;
+            esac
+          else
+            # PE header: the offset at 0x3c points at "PE\0\0", followed by the
+            # machine field. 0xAA64 is ARM64.
+            python3 - "$t/ck-cingulate$ext" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          offset = struct.unpack_from("<I", data, 0x3C)[0]
+          if data[offset:offset + 4] != b"PE\0\0":
+              raise SystemExit("REFUSING: not a PE executable")
+          machine = struct.unpack_from("<H", data, offset + 4)[0]
+          if machine != 0xAA64:
+              raise SystemExit(f"REFUSING: machine type {machine:#06x} is not ARM64")
+          print("ARM64 PE executable")
+          PY
+            # The version string is compiled in: the release build must carry the
+            # "off" text and must not carry the "on" text.
+            if ! grep -aq "dev-local-operator: off" "$t/ck-cingulate$ext" \
+               || grep -aq "dev-local-operator: on" "$t/ck-cingulate$ext"; then
+              echo "REFUSING: the binary does not report dev-local-operator: off" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Upload to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Publish last, and only when CI passed on the tagged commit and every platform
+  # uploaded. A skipped or failed dependency leaves the release in draft, which is
+  # visible and fixable; a published release missing a platform is not.
+  publish:
+    permissions:
+      contents: write
+    name: Publish once every asset is verified
+    needs: [prepare, ci, assets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the stored assets and undraft the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          platforms="darwin-arm64 linux-x64 linux-arm64 windows-x64 windows-arm64"
+          names=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for platform in $platforms; do
+            for suffix in zip zip.sha256; do
+              expected="ck-cingulate-$platform.$suffix"
+              if ! grep -Fx "$expected" <<< "$names" >/dev/null; then
+                echo "REFUSING to publish: missing $expected. Leaving release in draft." >&2
+                exit 1
+              fi
+            done
+          done
+          if ! grep -Fx "release-manifest.json" <<< "$names" >/dev/null; then
+            echo "REFUSING to publish: missing release-manifest.json. Leaving release in draft." >&2
+            exit 1
+          fi
+          # Verify the bytes the release stores, not the files before upload.
+          t="$RUNNER_TEMP/published"
+          rm -rf "$t"; mkdir -p "$t"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$t" \
+            --pattern '*.zip' --pattern '*.zip.sha256'
+          for platform in $platforms; do
+            (cd "$t" && sha256sum -c "ck-cingulate-$platform.zip.sha256")
+          done
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
