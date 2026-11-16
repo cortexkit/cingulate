@@ -34,8 +34,15 @@ user's answering surfaces, and records the first answer. Its guarantees:
   desktop app the daemon recognises as the operator app (its `operator_app` stamp). A
   requester can never answer its own card through its requester route, and a simulator or
   other paired device class cannot answer.
-  Tool-permission asks also allow a verified core relay for the stamped head, within the
-  recorded head policy; that is not authority for arbitrary requester answers.
+  Tool-permission asks have a separate supervising-agent stage. Prefrontal core (the
+  orchestrator) can forward that agent's decision. Cingulate checks the reference
+  identifying the supervising agent's running session, that session's generation
+  (epoch), and the agent id against the parent identity stamped by the daemon when
+  the worker filed the ask.
+  An allow at that stage requires the filing tool provider to have recorded that the
+  supervising agent already holds permission for the requested tool action. Otherwise
+  that agent may deny or escalate to the person. This does not let requesters answer
+  their own ordinary cards.
 - **Signed-statement cards need the phone.** These kinds are visible to, and answerable from,
   only the paired phone advertising the matching client feature. The answer must carry the
   approval bound to the exact signed statement the card was filed with for a grant:
