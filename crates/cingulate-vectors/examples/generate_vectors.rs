@@ -446,6 +446,30 @@ fn holder_lifetime_grants() -> Value {
     ])
 }
 
+/// Rows whose `scope` tokens no earlier sample used, as a provider adding a new
+/// grant kind sends them. A reader keeps such a row and shows its `scope_label`;
+/// it never interprets the token.
+fn unknown_scope_grants() -> Value {
+    json!([
+        {
+            "id": "grt_local_01", "agent_id": "agent-maple",
+            "holder": {"kind": "agent", "agent_id": "agent-maple"},
+            "module": "claustrum", "subject_label": "sudo password",
+            "scope": "local_sudo", "scope_label": "run sudo as root on this computer, once",
+            "granted_at_ms": NOW_MS, "expires_at_ms": NOW_MS + HALF_HOUR_MS,
+            "card_ref": "el_local_1"
+        },
+        {
+            "id": "grt_local_02", "agent_id": "agent-maple",
+            "holder": {"kind": "worker", "agent_id": "agent-maple", "scope_ref": "scope:wkr-maple"},
+            "module": "claustrum", "subject_label": "deploy key",
+            "scope": "local_ssh_sign",
+            "scope_label": "sign SSH logins to git@git.example.com, port 22, with key SHA256:c2FtcGxlLWtleS1maW5nZXJwcmludA",
+            "granted_at_ms": NOW_MS + 20_000, "card_ref": "el_local_2"
+        }
+    ])
+}
+
 fn worker_grant_sources() -> Value {
     json!([
         {
@@ -807,6 +831,19 @@ fn permissions_cases() -> Vec<(&'static str, Value)> {
                     cingulate_route(),
                     json!({}),
                     reply(json!({"grants": holder_lifetime_grants()})),
+                ),
+                listed_at,
+            ),
+        ),
+        (
+            "provider-list-unknown-scope",
+            with_now(
+                case(
+                    PERMISSIONS,
+                    "permissions.list",
+                    cingulate_route(),
+                    json!({}),
+                    reply(json!({"grants": unknown_scope_grants()})),
                 ),
                 listed_at,
             ),

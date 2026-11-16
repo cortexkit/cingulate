@@ -155,7 +155,23 @@ fn danger_corpus_triples_are_canonical() {
 
 #[test]
 fn permissions_corpus_triples_are_canonical() {
-    assert_eq!(cases(PERMISSIONS).len(), 42);
+    assert_eq!(cases(PERMISSIONS).len(), 43);
+}
+
+#[test]
+fn unknown_scope_sample_carries_a_sentence_for_every_new_token() {
+    let cases = cases(PERMISSIONS);
+    let grants = cases["provider-list-unknown-scope"]["reply"]["grants"]
+        .as_array()
+        .unwrap();
+    assert_eq!(grants.len(), 2);
+    for (grant, scope) in grants.iter().zip(["local_sudo", "local_ssh_sign"]) {
+        assert_eq!(grant["scope"], scope);
+        // The reader shows the sentence and never the token, so every row in the
+        // sample must carry one; a row without it would test nothing.
+        assert!(!grant["scope_label"].as_str().unwrap().is_empty());
+        assert!(grant["id"].is_string() && grant["module"].is_string());
+    }
 }
 
 #[test]

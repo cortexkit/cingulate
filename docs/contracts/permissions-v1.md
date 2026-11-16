@@ -44,7 +44,7 @@ Returns `{grants: [row, ...]}`, live grants only, filtered to one agent when
 | `holder` | An open tagged object: `kind` is `agent`, `worker`, `operator`, `flow`, `module`, `enrolled`, `federated`, or a future kind. See the kind-specific fields below. |
 | `module` | The provider's module id, so the page can address a revoke. |
 | `subject_label` | What the grant covers, for display: an app name, a site, "Whole computer". |
-| `scope` | A token from the provider's declared vocabulary. Cerebellum declares exactly `app`, `whole_computer`, `site` and `all_sites`. |
+| `scope` | A token from the provider's declared vocabulary. Cerebellum declares exactly `app`, `whole_computer`, `site` and `all_sites`. Readers treat it as opaque: a reader that meets a token it doesn't know keeps the row, shows its `scope_label` and offers revoke, and never drops the row or fails the list for it, so a provider can add a grant kind without a reader release ([`provider-list-unknown-scope`](../../test-vectors/permissions-v1/provider-list-unknown-scope.json)). |
 | `scope_label` | A human sentence for the grant. Surfaces show it as given and never compose wording from `scope`. |
 | `group?` | `"danger"` for grants as broad as the danger option that minted them. Cerebellum sets it on `whole_computer` and `all_sites`, and only there. |
 | `methods?` | A non-empty list of uppercase HTTP method names, such as `["GET"]`. A provider sends it only for grants it limits by method. Surfaces show it as given. |

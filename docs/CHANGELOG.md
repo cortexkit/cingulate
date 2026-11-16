@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `permissions/v1`: state that `scope` is opaque to readers. A reader keeps a row
+  whose `scope` token it doesn't know, shows its `scope_label` and offers revoke.
+  Add the checksum-pinned `provider-list-unknown-scope` sample with the vault's
+  `local_sudo` and `local_ssh_sign` tokens. Contract and test data only; no
+  runtime behaviour change.
 - Add the optional `permissions/v1` row member `ends_with_holder` and the
   checksum-pinned `provider-list-ends-with-holder` sample for holder-bound grants
   with and without an expiry. Contract and test data only; no runtime behaviour
