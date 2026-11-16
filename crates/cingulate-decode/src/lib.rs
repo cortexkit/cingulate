@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 
 mod access;
 mod config_plan;
+mod flow_card_structure;
 mod flow_secrets;
 mod manifest_binding;
 mod sealed_text;
@@ -20,6 +21,7 @@ pub use config_plan::{
     ConfigOperation, ConfigPlan, ConfigPolicyChange, ConfigPolicyKind, ConfigProgramChange,
     ConfigReview, ConfigRollbackProgram, ConfigTransition,
 };
+pub use flow_card_structure::{Capabilities, CapabilityRow, Comparison, ComparisonRow};
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};
 pub use sealed_text::{
@@ -172,6 +174,24 @@ pub struct ConsentRequest {
         deserialize_with = "deserialize_changes"
     )]
     pub changes: Option<AuthorText>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "flow_card_structure::present"
+    )]
+    pub warnings: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "flow_card_structure::present"
+    )]
+    pub comparison: Option<Comparison>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "flow_card_structure::present"
+    )]
+    pub capabilities: Option<Capabilities>,
     pub kind: String,
     pub title: String,
     pub prompt: String,
@@ -390,14 +410,25 @@ impl ConsentRequest {
         {
             return Err(Refusal::invalid("inputs require consent kind"));
         }
-        let body = if body.get("kind").and_then(Value::as_str) == Some("secret_use") {
-            for field in ["explanation", "changes"] {
+        if !matches!(
+            body.get("kind").and_then(Value::as_str),
+            Some("flow_install" | "package")
+        ) {
+            for field in [
+                "explanation",
+                "changes",
+                "warnings",
+                "comparison",
+                "capabilities",
+            ] {
                 if body.get(field).is_some() {
                     return Err(Refusal::invalid(format!(
                         "{field} is only valid for flow_install or package cards"
                     )));
                 }
             }
+        }
+        let body = if body.get("kind").and_then(Value::as_str) == Some("secret_use") {
             secret_use::normalize(body)?
         } else if body.get("kind").and_then(Value::as_str) == Some("config_plan") {
             config_plan::normalize(body)?
@@ -430,6 +461,7 @@ impl ConsentRequest {
     /// `decode`, so malformed fields cannot be masked by semantic refusals.
     pub fn validate(&self) -> Result<(), Refusal> {
         self.validate_inputs()?;
+        self.validate_flow_card_structure()?;
         if (self.kind == "config_plan") != self.config_plan.is_some() {
             return Err(Refusal::invalid(
                 "config_plan body requires config_plan kind",

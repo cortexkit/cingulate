@@ -23,6 +23,49 @@ Generic consent also admits worker sessions without their own agent id, as
 specified below. Cards raised by other sessions and existing served vectors
 remain unchanged.
 
+## Structured flow-card content
+
+Since ck-cingulate 0.25.3, `package` and `flow_install` cards may also carry
+`warnings`, `comparison` and `capabilities` on phone and desktop list/get/answer
+records and changed-card watch items. Their names and nested keys are unchanged
+on every projection. Absent members are omitted, never null; pointer and
+settlement notices do not carry them. Package lists keep these members even
+when script and manifest bodies are omitted.
+
+All strings are nonempty plain text with these UTF-8 byte bounds:
+
+| Member | Shape and bounds |
+|---|---|
+| `warnings` | 1–4 strings, each 1–300 bytes |
+| `comparison` | `{against, note?, rows}`: `against` 1–120 bytes, `note` 1–1,200 bytes, 1–24 rows |
+| Comparison row | `{label, change, before?, after?}`: `label` 1–64 bytes, `change` 1–32 bytes, `before` and `after` each 1–1,200 bytes |
+| `capabilities` | `{rows}`: 1–24 rows of `{label, value}`, `label` 1–64 bytes, `value` 1–1,200 bytes |
+
+All object member sets are closed. `change` permits only lowercase ASCII letters
+and underscores, but the token set is open. `changed` requires `after` and
+optionally includes `before`; `added` requires `after` without `before`;
+`removed` requires `before` without `after`. Unknown values require at least
+one of `before`/`after`: readers draw unknown change values as plain rows.
+Warnings, `against`, row labels and `change` reject all C0/C1 controls, including
+newline. `note`, `before`, `after` and capability `value` permit newline but no
+other C0/C1 controls, like author text. Limits are byte counts, not character
+counts. Invalid shapes, nulls, bounds or change rules are refused with fixed
+`elicitation_invalid_request` messages. Other kinds refuse these members;
+`secret_use`, `config_plan` and `manifest_binding` do so before normalization.
+
+Draw warnings immediately below the question. Comparison rows can show the old
+value struck through followed by the new value; a changed row without `before`
+shows only its new value. Capability rows describe new installs. All words come
+from the producer; render plain text rather than interpreting markup or treating
+claims as verified. Readers without support keep showing `changes`. Producers
+retain that fallback until the new readers ship.
+
+These members are stored unchanged as card content, including for deduplication:
+changed content replaces a matching pending `dedup_key`, identical content
+refreshes it. The [requester contract](consent-requester-v1.md#optional-structured-flow-card-content)
+and [served samples](../../test-vectors/flow-card-structure-v1/README.md) cover the
+same data on requester, phone and desktop surfaces.
+
 ## Identity and visibility
 
 Federated generic-consent cards carry `subject.federated` (nested protocol keys

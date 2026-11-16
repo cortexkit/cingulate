@@ -29,6 +29,52 @@ also include them; absent members are omitted and notifications never carry
 them. The [explanations contract](consent-card-explanations-v1.md) defines storage,
 display semantics and checksum-pinned phone/desktop samples.
 
+## Optional structured flow-card content
+
+Since ck-cingulate 0.25.3, `package` and `flow_install` cards also accept three
+independent optional members. Every string below is nonempty plain text; all
+length limits count UTF-8 bytes, not characters.
+
+| Member | Shape and bounds |
+|---|---|
+| `warnings` | Array of 1–4 strings, each 1–300 bytes |
+| `comparison` | Object with `against` (1–120 bytes), optional `note` (1–1,200 bytes), and `rows` (1–24 objects) |
+| `comparison.rows[]` | `label` (1–64 bytes), `change` (1–32 bytes), optional `before` and `after` (each 1–1,200 bytes) |
+| `capabilities` | Object with `rows` (1–24 objects), each with `label` (1–64 bytes) and `value` (1–1,200 bytes) |
+
+`change` is an open token set: only lowercase ASCII letters and underscores are
+allowed. `changed` requires `after` and permits `before` to be absent (for
+example, a script row). `added` requires `after` and forbids `before`. `removed`
+requires `before` and forbids `after`. Any unknown `change` requires at least
+one of `before` or `after`; readers draw unknown change values as plain rows.
+
+All objects have closed member sets, including each row. Missing required
+members, unknown keys and explicit nulls are refused. `warnings` items,
+`against`, row labels and `change` reject all C0/C1 controls
+(U+0000–U+001F, U+007F–U+009F), including newline. Longer text (`note`, `before`,
+`after` and capabilities `value`) follows the author-text rule: newline U+000A
+is allowed, but every other C0/C1 control is refused. Whitespace is preserved,
+not trimmed. The existing whole-request size limit still applies.
+
+Invalid content returns `elicitation_invalid_request` with fixed messages
+that never quote caller data. Other card kinds refuse these members by name,
+including `secret_use`, `config_plan` and `manifest_binding` before their
+normalizers run. No member supplies requester or subject identity.
+
+The values are stored verbatim in `record_json` and participate in pending-card
+content equality: a changed value replaces a card with the same `dedup_key`;
+identical content refreshes its expiry in place. Existing records omit the
+members and remain readable without a storage migration. Requester get and
+pending-list projections, phone and desktop get/list/answer readbacks, and
+changed-card watch items carry them unchanged. Absent members stay omitted;
+package lists still omit only their large script and manifest bodies. Pointer
+notifications and settlement notices do not include this content.
+
+Readers render the producer's words as plain text, never as verified claims,
+HTML, Markdown or instructions. Readers without support keep showing `changes`;
+producers retain that fallback during the readers-first rollout. See the
+[served update and install samples](../../test-vectors/flow-card-structure-v1/README.md).
+
 ## Identity and admission
 
 Only the daemon's route bind supplies requester and subject identity. Ownership

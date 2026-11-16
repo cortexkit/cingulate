@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.25.3 (ck-cingulate), 0.13.3 (cingulate-decode), 0.16.4 (cingulate-vectors)
+
+- Accept optional structured warnings, comparisons and capabilities on package
+  and flow-install consent cards. Validate closed shapes, byte bounds and
+  comparison change rules while permitting future change tokens as plain rows.
+  Refuse these members on other kinds before specialized normalization.
+- Preserve the structured members through durable storage, deduplication and
+  requester, phone and desktop card projections, with no storage migration.
+  Readers without support continue to show the producer's `changes` text.
+- Add the checksum-pinned `flow-card-structure-v1` corpus, based on the real
+  module-self-diagnosis version 3 package, with update and new-install requests
+  and byte-for-byte requester, phone, watch and desktop served records.
+
 ## 0.16.3 (cingulate-vectors)
 
 - Add the test-only `local-secret-cards-served-v1.2` corpus from AFT's local
