@@ -1,0 +1,47 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "affected_projects": [
+        "example-project"
+      ],
+      "apply": {
+        "modules": [
+          {
+            "deferred_live_fields": [
+              "settings.enabled"
+            ],
+            "explanation": "Restart the module to apply its new settings.",
+            "module_id": "example-module",
+            "transition": "module_restart",
+            "waits_for_daemon_restart": false,
+            "waits_for_next_start": false,
+            "whole_generation": true
+          }
+        ],
+        "operation": "change",
+        "review": {
+          "supervisor_reconcile": true
+        },
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [],
+      "launch_manifests": [],
+      "plan_digest": "fake-plan-digest",
+      "policy_changes": []
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "config_plan must contain at least one row across changes, policy_changes and launch_manifests"
+    }
+  },
+  "tag": "config-plan-v4"
+}

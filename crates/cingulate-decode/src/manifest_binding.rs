@@ -232,7 +232,7 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
         statement_b64url: String,
     }
     let filing: Filing = serde_json::from_value(body)
-        .map_err(|error| Refusal::invalid(format!("manifest_binding filing: {error}")))?;
+        .map_err(|_| Refusal::invalid("manifest_binding filing has invalid fields"))?;
     let binding = ManifestBinding::from_statement(filing.manifest_binding.statement_b64url)?;
     Ok(json!({
         "kind": filing.kind, "manifest_binding": binding,

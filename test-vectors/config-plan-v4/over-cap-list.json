@@ -1,0 +1,164 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "affected_projects": [
+        "project-0",
+        "project-1",
+        "project-2",
+        "project-3",
+        "project-4",
+        "project-5",
+        "project-6",
+        "project-7",
+        "project-8",
+        "project-9",
+        "project-10",
+        "project-11",
+        "project-12",
+        "project-13",
+        "project-14",
+        "project-15",
+        "project-16",
+        "project-17",
+        "project-18",
+        "project-19",
+        "project-20",
+        "project-21",
+        "project-22",
+        "project-23",
+        "project-24",
+        "project-25",
+        "project-26",
+        "project-27",
+        "project-28",
+        "project-29",
+        "project-30",
+        "project-31",
+        "project-32",
+        "project-33",
+        "project-34",
+        "project-35",
+        "project-36",
+        "project-37",
+        "project-38",
+        "project-39",
+        "project-40",
+        "project-41",
+        "project-42",
+        "project-43",
+        "project-44",
+        "project-45",
+        "project-46",
+        "project-47",
+        "project-48",
+        "project-49",
+        "project-50",
+        "project-51",
+        "project-52",
+        "project-53",
+        "project-54",
+        "project-55",
+        "project-56",
+        "project-57",
+        "project-58",
+        "project-59",
+        "project-60",
+        "project-61",
+        "project-62",
+        "project-63",
+        "project-64"
+      ],
+      "apply": {
+        "modules": [
+          {
+            "deferred_live_fields": [
+              "settings.enabled"
+            ],
+            "explanation": "Restart the module to apply its new settings.",
+            "module_id": "example-module",
+            "transition": "module_restart",
+            "waits_for_daemon_restart": false,
+            "waits_for_next_start": false,
+            "whole_generation": true
+          }
+        ],
+        "operation": "change",
+        "review": {
+          "supervisor_reconcile": true
+        },
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [
+        {
+          "apply": "live",
+          "module_id": "example-module",
+          "new": true,
+          "new_source": "project",
+          "old": false,
+          "old_source": "default",
+          "path": "settings.enabled",
+          "project_id": "example-project"
+        }
+      ],
+      "launch_manifests": [
+        {
+          "module_id": "example-module",
+          "origin": "project",
+          "programs": [
+            {
+              "input": "bin/tool",
+              "new": {
+                "args": [
+                  "--safe"
+                ],
+                "program": "bin/tool"
+              },
+              "old": null
+            }
+          ]
+        }
+      ],
+      "plan_digest": "fake-plan-digest",
+      "policy_changes": [
+        {
+          "kind": "declaration",
+          "module_id": "example-module",
+          "new": {
+            "read": true
+          },
+          "old": null,
+          "reason": "Allow project reads"
+        },
+        {
+          "kind": "subc_jsonc",
+          "new": {
+            "redacted": true
+          },
+          "old": {
+            "redacted": true
+          }
+        },
+        {
+          "kind": "reviewed_program",
+          "module_id": "example-module",
+          "new": "bin/tool",
+          "old": null
+        }
+      ]
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "config_plan.affected_projects must contain 0..=64 rows"
+    }
+  },
+  "tag": "config-plan-v4"
+}

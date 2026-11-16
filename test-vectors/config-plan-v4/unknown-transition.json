@@ -1,0 +1,100 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "affected_projects": [
+        "example-project"
+      ],
+      "apply": {
+        "modules": [
+          {
+            "deferred_live_fields": [
+              "settings.enabled"
+            ],
+            "explanation": "Restart the module to apply its new settings.",
+            "module_id": "example-module",
+            "transition": "future",
+            "waits_for_daemon_restart": false,
+            "waits_for_next_start": false,
+            "whole_generation": true
+          }
+        ],
+        "operation": "change",
+        "review": {
+          "supervisor_reconcile": true
+        },
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [
+        {
+          "apply": "live",
+          "module_id": "example-module",
+          "new": true,
+          "new_source": "project",
+          "old": false,
+          "old_source": "default",
+          "path": "settings.enabled",
+          "project_id": "example-project"
+        }
+      ],
+      "launch_manifests": [
+        {
+          "module_id": "example-module",
+          "origin": "project",
+          "programs": [
+            {
+              "input": "bin/tool",
+              "new": {
+                "args": [
+                  "--safe"
+                ],
+                "program": "bin/tool"
+              },
+              "old": null
+            }
+          ]
+        }
+      ],
+      "plan_digest": "fake-plan-digest",
+      "policy_changes": [
+        {
+          "kind": "declaration",
+          "module_id": "example-module",
+          "new": {
+            "read": true
+          },
+          "old": null,
+          "reason": "Allow project reads"
+        },
+        {
+          "kind": "subc_jsonc",
+          "new": {
+            "redacted": true
+          },
+          "old": {
+            "redacted": true
+          }
+        },
+        {
+          "kind": "reviewed_program",
+          "module_id": "example-module",
+          "new": "bin/tool",
+          "old": null
+        }
+      ]
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "config_plan.apply.modules.transition has invalid fields"
+    }
+  },
+  "tag": "config-plan-v4"
+}

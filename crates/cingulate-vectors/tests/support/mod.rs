@@ -181,7 +181,7 @@ impl Clock for TestClock {
     }
 }
 
-struct AlfResolver;
+pub(super) struct AlfResolver;
 #[async_trait]
 impl Resolver for AlfResolver {
     async fn resolve(&self, agent: &str) -> Result<Option<ResolvedAgent>, String> {
@@ -238,8 +238,18 @@ impl Fixture {
         change_log_rows: i64,
         resolver: Arc<dyn Resolver>,
     ) -> Self {
+        Self::open_seeded(machine, change_log_rows, resolver, |_| {}).await
+    }
+
+    pub async fn open_seeded(
+        machine: Option<&str>,
+        change_log_rows: i64,
+        resolver: Arc<dyn Resolver>,
+        seed: impl FnOnce(&std::path::Path),
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cards.sqlite");
+        seed(&path);
         let clock = Arc::new(TestClock(AtomicI64::new(NOW)));
         let recorder = Arc::new(Recorder::default());
         let handler = Handler::new(Options {

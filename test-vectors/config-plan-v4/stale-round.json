@@ -1,0 +1,22 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "approve",
+    "clientFeatures": [
+      "config-plan"
+    ],
+    "elicitationId": "el_1",
+    "signature_b64url": "AQIDBA",
+    "statement": "_wABeCBub3QtSlNPTgo"
+  },
+  "reply": {
+    "result": {
+      "code": "round_changed",
+      "detail": {
+        "currentRound": 1
+      },
+      "ok": false
+    }
+  },
+  "tag": "config-plan-v4"
+}

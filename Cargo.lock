@@ -334,6 +334,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tracing",
 ]
 
 [[package]]
@@ -346,6 +347,7 @@ dependencies = [
  "cingulate-store",
  "ck-cingulate",
  "cortexkit-presence",
+ "cortexkit-store",
  "hpke",
  "rand_chacha",
  "rusqlite",
@@ -373,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "async-trait",
  "cingulate-decode",

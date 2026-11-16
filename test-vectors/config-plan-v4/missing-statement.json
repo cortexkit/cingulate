@@ -1,0 +1,18 @@
+{
+  "method": "consent.answer",
+  "params": {
+    "choiceId": "approve",
+    "clientFeatures": [
+      "config-plan"
+    ],
+    "elicitationId": "el_1",
+    "signature_b64url": "AQIDBA"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "elicitation_invalid_request: config_plan approve requires statement and signature_b64url"
+    }
+  },
+  "tag": "config-plan-v4"
+}

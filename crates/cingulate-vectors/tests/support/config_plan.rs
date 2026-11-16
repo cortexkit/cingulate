@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::support;
 
-pub const CORPUS: &str = "config-plan-v3";
+pub const CORPUS: &str = "config-plan-v4";
 // Deliberately not JSON and not a real signature: Cingulate is a byte carrier.
 pub const STATEMENT: &str = "_wABeCBub3QtSlNPTgo";
 pub const SIGNATURE: &str = "AQIDBA";

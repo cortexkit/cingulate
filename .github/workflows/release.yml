@@ -51,7 +51,7 @@ jobs:
     steps:
       # Full history: the ancestry check below needs it, and a shallow clone
       # would answer about a graph that is not there.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -80,6 +80,10 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          [[ "$TAG" == v* ]] || { echo 'REFUSING: tag must start with v' >&2; exit 1; }
+          git check-ref-format "refs/tags/$TAG"
+          git show-ref --verify --quiet "refs/tags/$TAG" || { echo 'REFUSING: tag does not exist' >&2; exit 1; }
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$(git rev-parse HEAD)" || { echo 'REFUSING: checkout is not the tag commit' >&2; exit 1; }
           want="${TAG#v}"
           have=$(cargo metadata --no-deps --format-version 1 \
                  | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="ck-cingulate"))')
@@ -109,6 +113,7 @@ jobs:
           REQUIRES_CORE: ${{ steps.core.outputs.requires_core }}
         run: |
           set -euo pipefail
+          [[ "$REQUIRES_CORE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'REFUSING: invalid REQUIRES_CORE' >&2; exit 1; }
           cat > release-notes.txt <<NOTES
           Install with \`ck setup cingulate\`. Assets are built on the platform they
           run on, except windows-arm64, which is cross-built on the x64 Windows runner.
@@ -122,7 +127,9 @@ jobs:
           with \`ck setup\` does not apply that attribute.
 
           REQUIRES subc-core ${REQUIRES_CORE} OR NEWER. Upgrade the supervisor
-          before installing this release.
+          before installing this release. Public installation must wait until a
+          public subc-core ${REQUIRES_CORE} or newer is available; ck setup refuses
+          an older core rather than installing an incompatible component.
           NOTES
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
@@ -145,6 +152,7 @@ jobs:
           REQUIRES_CORE: ${{ steps.core.outputs.requires_core }}
         run: |
           set -euo pipefail
+          [[ "$REQUIRES_CORE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'REFUSING: invalid REQUIRES_CORE' >&2; exit 1; }
           printf '{"requires_core":"%s"}\n' "$REQUIRES_CORE" > release-manifest.json
           gh release upload "$TAG" release-manifest.json \
             --repo "$GITHUB_REPOSITORY" --clobber
@@ -198,7 +206,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             runs_here: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ needs.prepare.outputs.checked_sha }}
 
@@ -214,7 +222,7 @@ jobs:
             exit 1
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: ${{ matrix.target }}
 

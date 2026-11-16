@@ -414,7 +414,7 @@ async fn danger_fixture(cases: &BTreeMap<String, Value>) -> (support::Fixture, S
 }
 
 #[tokio::test]
-async fn danger_filing_refusals_match_handler_byte_for_byte() {
+async fn danger_filing_refusals_preserve_codes_shapes_and_no_side_effects() {
     let cases = cases(DANGER);
     let fixture = support::Fixture::open(None).await;
     fixture.clock.set(1_000_000);
@@ -425,8 +425,20 @@ async fn danger_filing_refusals_match_handler_byte_for_byte() {
     ] {
         let rows = fixture.rows();
         let notices = fixture.payloads();
-        let outcome = danger_call(&fixture, "el_1", &cases[name]).await;
-        assert_danger_case(name, &cases[name], outcome, "el_1");
+        let mut error = danger_call(&fixture, "el_1", &cases[name])
+            .await
+            .unwrap_err();
+        let mut expected = cases[name]["error"].clone();
+        // Published refusal messages are historical text. Keep their codes and
+        // shapes pinned while current safe messages are checked by decoder tests.
+        assert!(error
+            .as_object_mut()
+            .unwrap()
+            .remove("message")
+            .unwrap()
+            .is_string());
+        expected.as_object_mut().unwrap().remove("message");
+        assert_eq!(error, expected, "{name}");
         assert_eq!(fixture.rows(), rows, "{name} wrote records");
         assert_eq!(fixture.payloads(), notices, "{name} notified");
     }

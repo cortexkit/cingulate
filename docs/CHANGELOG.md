@@ -7,10 +7,42 @@
   with and without an expiry. Contract and test data only; no runtime behaviour
   change.
 
-## 0.23.1
+## 0.23.1 (ck-cingulate)
 
 - Add `sealed-text-v1.1` vectors sealed with the card-bound HPKE info and
   document the test-only recipient key; the pinned v1 vectors are unchanged.
+- Refuse unauthorized permission answers before parsing or store access. Audit
+  malformed answers with fixed reason codes and byte lengths, never raw params;
+  retain at most 32 attempts per ask with a dropped count, preserving accepted
+  escalation identity. Migration 14 also atomically scrubs and bounds historical
+  audit rows; malformed stored records fail the migration rather than passing
+  raw bytes through. Ordinary and config-plan answer paths do not audit raw params.
+- Require daemon-stamped agent scopes for AFT ordinary consent, attribute head
+  and worker filings to their stamped agent and refuse retired agents. Keep
+  permission and secret-use admission unchanged. Add scoped `sealed-text-v1.2`
+  served vectors; leave v1 and v1.1 byte-for-byte unchanged.
+- Include config-plan support in conditional pending-list revisions. Retain
+  config-plan watch visibility through pruning so unsupported watchers never
+  receive its card or removal id. **Take a store backup before deploying:** schema
+  14 (`014_config_plan_visibility.sql`) backfills visibility and clears old
+  unclassified watch history. Older cursors receive a reread, not a replay;
+  sequence numbers and card/answer rows are preserved.
+  Add `config-plan-v4` served samples for the revision suffix and fixed refusal
+  text; v3 remains frozen with explicit success/revision and refusal-code checks.
+- Skip diagnostic JSON parsing over the 1,310,720-byte frame limit; bound and
+  sanitize logged method/kind/id tokens and replace content-echoing serde refusal
+  messages with fixed field messages.
+- Enforce option ids at 1–64 characters and labels at 1–200, without controls;
+  align the requester contract.
+- Correct security and README claims: session notices carry private content,
+  timeouts can leave cards pending and sealed-input release is logical deletion,
+  not secure erasure of WAL, backup or snapshot copies.
+- Pin third-party workflow actions to full commit SHAs, retaining the shared
+  org-owned design gate on master. Validate manual release tags and the core floor.
+- Declare and CI-check `requires_core = "0.21.6"`, matching the release-manifest
+  reader and requiring the first core line with operator-app/v1 and registration
+  channels (daemon 0.45.3). Public installs must wait for a public compatible core;
+  the latest public core at release preparation is 0.21.3. Setup refuses older cores.
 
 ## 0.23.0 (ck-cingulate)
 

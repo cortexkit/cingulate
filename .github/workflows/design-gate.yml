@@ -20,4 +20,5 @@ jobs:
       checks: write # publish the design-gate check run
     # The shared gate writes with this job's GITHUB_TOKEN. No GitHub App private key
     # is passed, so no organisation credential reaches a public repository's workflow.
+    # The shared org-owned design gate intentionally tracks master in every public repository.
     uses: cortexkit/subconscious/.github/workflows/design-gate.yml@master

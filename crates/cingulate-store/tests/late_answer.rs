@@ -513,10 +513,16 @@ fn shared_outbox_migration_upgrades_version_four_keeping_rows_and_order() {
     old.migrate(MIGRATION_NAMESPACE, &MIGRATIONS[..4]).unwrap();
     old.with_conn(|conn| {
         for id in ["acc_2", "acc_1"] {
+            let record: cingulate_store::AccessRecord = serde_json::from_value(json!({
+                "elicitation_id":id,
+                "request":{"kind":"tool_permission","call_key":id,"tool":"test","operation":"read","paths":[],"reason":"Test","args_hash":"hash","pattern":"test"},
+                "identity":{"principal":"reserved:aft","asker":{"scope_ref":"head","scope_epoch":1},"scope_kind":"head","harness":"test"},
+                "created_at_ms":1,"state":"settled","surfaces":[],"attempts":[],"unclaimed":false
+            })).unwrap();
             conn.execute(
                 "INSERT INTO access_asks(elicitation_id,principal,owner,state,record_json) \
-                 VALUES (?1,'reserved:aft','{}','settled','{}')",
-                [id],
+                 VALUES (?1,'reserved:aft','{}','settled',?2)",
+                params![id, serde_json::to_string(&record).unwrap()],
             )?;
         }
         // Rows inserted out of id order: delivery order is rowid, not the key.
@@ -569,7 +575,7 @@ fn shared_outbox_migration_upgrades_version_four_keeping_rows_and_order() {
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        13
+        14
     );
     drop(conn);
     // After migration 5 the shared outbox also accepts a late-answer notice

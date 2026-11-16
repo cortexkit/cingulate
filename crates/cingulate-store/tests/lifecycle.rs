@@ -199,7 +199,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7,8,9,10,11,12,13"
+        "1,2,3,4,5,6,7,8,9,10,11,12,13,14"
     );
     let answer_schema: String = conn
         .query_row(
@@ -287,14 +287,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,14,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,15,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 14"));
-    assert!(error.to_string().contains("migration 13"));
+    assert!(error.to_string().contains("version 15"));
+    assert!(error.to_string().contains("migration 14"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }
@@ -1267,6 +1267,7 @@ fn pending_revision_migrates_existing_cards_without_rewriting_them() {
         DROP TRIGGER cingulate_change_card_update;
         DROP TRIGGER cingulate_change_card_delete;
         DROP TABLE config_plan_audit;
+        ALTER TABLE elicitation_records DROP COLUMN config_plan;
         DROP TABLE manifest_binding_requests;
         ALTER TABLE elicitation_records DROP COLUMN manifest_binding;
         DROP TABLE secret_use_requests;
@@ -1357,6 +1358,7 @@ fn access_migration_applies_to_version_three_without_changing_existing_cards() {
     drop(old);
     let mut before = rows(&scratch.sql(), "elicitation_records");
     for row in &mut before {
+        row.push(json!(0));
         row.push(json!(0));
         row.push(json!(0));
     }
@@ -1574,6 +1576,7 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
         row.push(Value::Null);
     }
     for row in &mut before.records {
+        row.push(json!(0));
         row.push(json!(0));
         row.push(json!(0));
     }

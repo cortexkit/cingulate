@@ -237,6 +237,7 @@ fn permission_record() -> AccessRecord {
         state: "pending:head".into(),
         surfaces: vec![],
         attempts: vec![],
+        attempts_dropped: 0,
         escalation_note: None,
         outcome: None,
         note: None,

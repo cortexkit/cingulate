@@ -12,7 +12,8 @@ cingulate-decode = { path = "../cingulate-decode" }
 cortexkit-lease = "=0.1.2"
 cortexkit-store = { version = "=0.2.4", features = ["sqlite"] }
 cortexkit-store-types = "=0.2.2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+tracing = "0.1"

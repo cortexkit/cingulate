@@ -19,9 +19,11 @@ Cingulate is the permission-card module of the CortexKit stack. It runs on the u
 machine as a module supervised by the subc daemon, stores consent cards, shows them to the
 user's answering surfaces, and records the first answer. Its guarantees:
 
-- **Silence never grants.** Every card has a decline default and `on_expiry: deny`. Expiry,
-  withdrawal, an unreachable surface, a timeout or an error settles a card without granting
-  anything, and a card that is already settled keeps its first outcome.
+- **Silence never grants.** Every actionable card has a decline default and `on_expiry: deny`.
+  Expiry and withdrawal never grant. An unreachable surface, a wait timeout or an error can
+  leave a card pending; they are not approval and do not necessarily settle it. Informational
+  macOS cards have no answer options. A settled card keeps its first outcome, except that a
+  config-plan verification failure can reopen the card for a new answer round.
 - **Identity comes from the daemon.** The requester, the subject agent and the answering surface
   are read only from the route stamp the subc daemon attaches to each connection. A requester,
   subject or device named in a request body is never trusted. Each card kind has a fixed list
@@ -32,9 +34,11 @@ user's answering surfaces, and records the first answer. Its guarantees:
   desktop app the daemon recognises as the operator app (its `operator_app` stamp). A
   requester can never answer its own card through its requester route, and a simulator or
   other paired device class cannot answer.
+  Tool-permission asks also allow a verified core relay for the stamped head, within the
+  recorded head policy; that is not authority for arbitrary requester answers.
 - **Signed-statement cards need the phone.** These kinds are visible to, and answerable from,
   only the paired phone advertising the matching client feature. The answer must carry the
-  approval bound to the exact signed statement the card was filed with:
+  approval bound to the exact signed statement the card was filed with for a grant:
   - `secret_use` (a request to use a vault secret) and `flow_install` cards that carry secrets:
     the phone's answer is the vault's signed approval envelope, and Cingulate records the
     SHA-256 of that envelope and refuses late answers after the statement expires;
@@ -44,8 +48,14 @@ user's answering surfaces, and records the first answer. Its guarantees:
     and a failed verification reopens the card rather than granting.
 
   The desktop operator-app stamp and the development feature below never satisfy these kinds.
-- **Pushes carry pointers, not content.** A notification names a card id and an event, never
-  the card's text, facts, statements or signatures.
+- **Phone pushes carry pointers, not content.** The phone notification names a card id and an
+  event, not card text or signatures. Structured `session.notice` deliveries are different:
+  they can carry content such as option labels, tool paths, notes and subject labels. Treat
+  them as private card content, not as content-free notifications.
+- **Permission audit is bounded.** Unprivileged answer routes never write permission audit records.
+  Authorized rejected attempts retain fixed reason codes and, for malformed bodies,
+  byte lengths rather than raw params. Each ask retains at most 32 attempts with
+  a dropped count; upgrades normalize historical records atomically as well.
 
 ## What Cingulate never does
 
@@ -53,13 +63,17 @@ user's answering surfaces, and records the first answer. Its guarantees:
   answering surface encrypts the typed text to that key, and Cingulate stores the ciphertext
   and hands it only to the card's filer. Cingulate has no decryption key and no runtime dependency on
   HPKE (the hybrid public-key encryption scheme the inputs are sealed with).
-- **It never holds or releases secrets.** Secret-use and secret-bearing cards carry the
+  Releasing sealed inputs is **logical deletion** from live SQLite rows, not secure erasure:
+  WAL files, backups and snapshots may retain ciphertext bytes until overwritten.
+- **It never retrieves vault secret values.** Secret-use and secret-bearing cards carry the
   vault's signed statements and approvals; Cingulate does not verify the vault's signatures,
-  call the vault, or see the secret. The vault checks the approval itself.
+  call the vault, or receive the secret value. The vault checks the approval itself.
+  Arbitrary requester-authored card text can still contain sensitive information.
 - **It never holds standing grants.** "Always allow" lives with each provider that enforces
   it. Cingulate lists and revokes those grants through `permissions/v1`, and revoking only
   narrows authority.
-- **It never injects into agent sessions.** Requesters read outcomes and act on them.
+- **It never executes an answer.** Requesters read outcomes and act on them. Cingulate also
+  sends structured lifecycle notices to daemon-stamped sessions; it does not execute their text.
 
 ## What it does not defend against
 

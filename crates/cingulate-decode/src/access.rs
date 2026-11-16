@@ -32,8 +32,8 @@ pub enum AccessRequest {
 
 impl AccessRequest {
     pub fn decode(value: Value) -> Result<Self, Refusal> {
-        let request: Self =
-            serde_json::from_value(value).map_err(|e| Refusal::invalid(e.to_string()))?;
+        let request: Self = serde_json::from_value(value)
+            .map_err(|_| Refusal::invalid("permission request fields are invalid"))?;
         request.validate()?;
         Ok(request)
     }

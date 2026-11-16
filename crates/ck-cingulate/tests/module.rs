@@ -937,7 +937,7 @@ async fn owner_principal_and_operator_refusals_write_nothing() {
             "elicitation_invalid_request"
         )
         .await
-        .contains("unknown field `unknown`"));
+        .contains("consent request fields are invalid"));
     assert_eq!(f.get(&due).await["state"], "expired");
     assert_eq!(f.counts(), (1, 1));
 }
@@ -2534,6 +2534,54 @@ async fn package_lists_page_below_three_mib_and_requester_feeds_keep_bodies() {
         }
         assert!(pages >= 3);
         assert_eq!(seen, ids.iter().cloned().collect());
+    }
+}
+
+#[tokio::test]
+async fn aft_consent_requires_scope_and_attributes_stamped_agents() {
+    let f = Fixture::open(None).await;
+    f.unchanged_error(
+        &stamp("reserved:aft"),
+        "consent.request",
+        body(),
+        "elicitation_requester_refused",
+    )
+    .await;
+    for kind in ["head", "worker"] {
+        let scope = serde_json::from_value(json!({
+            "owner":{"kind":"reserved","module_id":"prefrontal-core"},
+            "ref":format!("{kind}:alf"), "scope_epoch":7,
+            "kind":kind, "attributes":{"agent_id":"agent-alf"}, "owner_authorized":true
+        }))
+        .unwrap();
+        let req = RouteBindRequest::new(
+            RouteHandle::detached(1, 1),
+            RouteTarget::ManagementSurface {
+                module_id: "cingulate".into(),
+            },
+            BindIdentity::new("aft", "ignored"),
+        )
+        .with_principal(Principal::Reserved {
+            module_id: "aft".into(),
+        })
+        .with_scope(scope);
+        let requester = Stamp::from_bind(&req);
+        let id = f.request(&requester, body()).await;
+        let record = ok(
+            &f.handler,
+            &requester,
+            "consent.get",
+            json!({"elicitation_id":id}),
+        )
+        .await;
+        assert_eq!(record["subject"]["agent_id"], "agent-alf");
+        *f.resolver.reply.lock().unwrap() = Some(Ok(Some(ResolvedAgent {
+            name: None,
+            retired: true,
+        })));
+        f.unchanged_error(&requester, "consent.request", body(), "consent_retired")
+            .await;
+        *f.resolver.reply.lock().unwrap() = None;
     }
 }
 

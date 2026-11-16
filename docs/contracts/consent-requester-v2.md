@@ -154,7 +154,7 @@ Generic `consent` params add two optional top-level fields:
 
 | Field | Rule |
 |---|---|
-| `requester_ref` | Opaque string of 1–128 printable ASCII characters (bytes `0x20`–`0x7e`), returned unchanged. If present, null, non-string, empty, overlong, control and non-ASCII values refuse `elicitation_invalid_request` with `requester_ref` in the message. Other kinds cannot carry it. |
+| `requester_ref` | Opaque string of 1–128 printable ASCII characters (bytes `0x20`–`0x7e`), returned unchanged. If present, null, non-string, empty, overlong, control and non-ASCII values refuse `elicitation_invalid_request` with a fixed `requester_ref` field message. Other kinds cannot carry it. |
 | `single_use` | Optional boolean accepted only for `kind: "consent"`; null and every non-boolean value refuse `elicitation_invalid_request` with `single_use` in the message. Absence means false. Providers must check `catalog.list` for `consent-single-use/v1` before sending it. |
 
 The reference correlates an originating call with a later answer; it supplies
@@ -204,7 +204,10 @@ include a desktop answer.
 
 Only `reserved:aft` may request `tool_permission` or `macos_permission`.
 Other requesters refuse `elicitation_requester_refused`, naming the requester.
-AFT cannot request any existing kind. An absent scope or a scope owned by anything
+AFT's ordinary `consent` filings require a daemon-stamped scope and use its stamped agent
+identity, including head resolution for workers; retired agents refuse `consent_retired`.
+The `tool_permission`, `macos_permission` and `secret_use` admission rules are unchanged.
+For permission asks, an absent scope or a scope owned by anything
 other than `reserved:prefrontal-core` refuses `access_not_alfonso`.
 The daemon-stamped scope ref, epoch, kind, agent and route harness are recorded;
 no body field supplies identity. Workers do not need an agent id.
@@ -963,7 +966,13 @@ before a card exists. In particular, `secret_use`, `manifest_binding`,
 `config_plan`, flow-install/package and `tool_permission` cards cannot carry
 inputs: tool permissions can be answered by an agent rather than the person,
 so they cannot collect a person's typed secret.
-AFT is admitted to ordinary consent so it can file the one-time public key.
+AFT is admitted to ordinary consent so it can file the one-time public key, on a
+daemon-stamped agent scope. Served samples for this scoped identity are in
+[`sealed-text-v1.2`](../../test-vectors/sealed-text-v1.2/README.md); v1 and v1.1 remain unchanged.
+
+For all `ConsentRequest` options, `id` is 1–64 Unicode characters and `label` is
+1–200 Unicode characters. Both must be nonblank and contain no control characters
+(U+0000–U+001F or U+007F–U+009F); ids must be unique.
 
 Get, list and watch cards carry the input definitions exactly as filed; nested
 member names stay snake_case on phone and desktop too. `round` is unchanged

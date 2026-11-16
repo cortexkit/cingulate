@@ -156,8 +156,9 @@ impl Handler {
             #[serde(default)]
             params: Value,
         }
-        let request = serde_json::from_slice::<WireRequest>(body).map_err(|error| {
-            Refusal::new("invalid_request", error.to_string()).reason("envelope_invalid")
+        let request = serde_json::from_slice::<WireRequest>(body).map_err(|_| {
+            Refusal::new("invalid_request", "watch envelope fields are invalid")
+                .reason("envelope_invalid")
         })?;
         if request.method != WATCH_PENDING {
             return Err(Refusal::new(
@@ -285,6 +286,12 @@ impl Handler {
             for change in page.changes {
                 // Advance over hidden changes without emitting even a removal id.
                 position = change.version;
+                if change.config_plan
+                    && (stamp.secret_use_phone().is_none()
+                        || !feature_declared(params, "config-plan"))
+                {
+                    continue;
+                }
                 if change.secret_use
                     && (stamp.secret_use_phone().is_none()
                         || !feature_declared(
@@ -349,7 +356,7 @@ impl Handler {
             Err(error) => return Err(error),
         };
         let item = serde_json::to_vec(&item)
-            .map_err(|error| invalid(error.to_string()).reason("projection_invalid"))?;
+            .map_err(|_| invalid("watch projection is invalid").reason("projection_invalid"))?;
         Ok(if item.len() > ITEM_LIMIT_BYTES {
             reread()
         } else {

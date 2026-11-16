@@ -1,0 +1,52 @@
+{
+  "method": "consent.request",
+  "params": {
+    "binding": {
+      "correlation": "fake-correlation"
+    },
+    "config_plan": {
+      "affected_projects": [
+        "example-project"
+      ],
+      "apply": {
+        "modules": [
+          {
+            "deferred_live_fields": [
+              "settings.enabled"
+            ],
+            "explanation": "Restart the module to apply its new settings.",
+            "module_id": "example-module",
+            "transition": "module_restart",
+            "waits_for_daemon_restart": false,
+            "waits_for_next_start": false,
+            "whole_generation": true
+          }
+        ],
+        "operation": "change",
+        "review": {
+          "supervisor_reconcile": true
+        },
+        "rollback_to": null
+      },
+      "base_revision": "42",
+      "changes": [],
+      "launch_manifests": [
+        {
+          "module_id": "example-module",
+          "program_changed_since_active": false,
+          "programs": []
+        }
+      ],
+      "plan_digest": "fake-plan-digest"
+    },
+    "expires_in_ms": 300000,
+    "kind": "config_plan"
+  },
+  "reply": {
+    "error": {
+      "code": "elicitation_invalid_request",
+      "message": "config_plan.launch_manifests.program_changed_since_active must be true when present"
+    }
+  },
+  "tag": "config-plan-v4"
+}

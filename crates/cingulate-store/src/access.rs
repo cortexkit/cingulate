@@ -38,7 +38,7 @@ pub struct AnswerAttempt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub malformed_params: Option<Value>,
+    pub params_bytes: Option<usize>,
     pub surface: String,
     pub principal: String,
     pub at_ms: i64,
@@ -56,6 +56,8 @@ pub struct AccessRecord {
     pub state: String,
     pub surfaces: Vec<Value>,
     pub attempts: Vec<AnswerAttempt>,
+    #[serde(default, skip_serializing_if = "zero_drops")]
+    pub attempts_dropped: u64,
     pub escalation_note: Option<String>,
     pub outcome: Option<String>,
     pub note: Option<String>,
@@ -66,7 +68,29 @@ pub struct AccessRecord {
     pub settled_at_ms: Option<i64>,
     pub unclaimed: bool,
 }
+fn zero_drops(value: &u64) -> bool {
+    *value == 0
+}
 impl AccessRecord {
+    fn push_attempt(&mut self, mut attempt: AnswerAttempt) {
+        if attempt.result != "accepted" {
+            attempt.answer.clear();
+            attempt.note = None;
+            attempt.answered_by = None;
+        }
+        self.attempts.push(attempt);
+        while self.attempts.len() > 32 {
+            // Accepted escalation identifies the head allowed to deny later.
+            // Retain accepted attempts while discarding the oldest rejection.
+            let index = self
+                .attempts
+                .iter()
+                .position(|a| a.result != "accepted")
+                .unwrap_or(0);
+            self.attempts.remove(index);
+            self.attempts_dropped = self.attempts_dropped.saturating_add(1);
+        }
+    }
     pub fn can_withdraw(&self, principal: &str) -> bool {
         principal == self.identity.principal
             || (principal == "reserved:prefrontal-core"
@@ -329,6 +353,15 @@ impl AccessRecord {
     }
 }
 
+pub(super) fn normalize_audit(raw: &str) -> serde_json::Result<String> {
+    let mut record: AccessRecord = serde_json::from_str(raw)?;
+    let attempts = std::mem::take(&mut record.attempts);
+    for attempt in attempts {
+        record.push_attempt(attempt);
+    }
+    serde_json::to_string(&record)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccessAnswer {
     pub via: Option<String>,
@@ -419,7 +452,7 @@ impl ConsentStore {
             };
             if let Some(id) = matched { return Ok(AccessMutation { record: load(tx, &id)?.expect("matched access row"), changed: false, code: None }); }
             let seq: i64 = tx.query_row("UPDATE cingulate_id_seq SET value=value+1 WHERE singleton=1 AND value<9223372036854775807 RETURNING value", [], |r| r.get(0))?;
-            let mut record = AccessRecord { elicitation_id: format!("acc_{seq}"), state: if identity.scope_kind == "worker" && !request.informational() { "pending:head" } else { "pending:user" }.into(), request, identity, created_at_ms: now, surfaces: vec![], attempts: vec![], escalation_note: None, outcome: None, note: None, answered_by: None, withdrawn_by: None, settled_at_ms: None, unclaimed: false };
+            let mut record = AccessRecord { elicitation_id: format!("acc_{seq}"), state: if identity.scope_kind == "worker" && !request.informational() { "pending:head" } else { "pending:user" }.into(), request, identity, created_at_ms: now, surfaces: vec![], attempts: vec![], attempts_dropped: 0, escalation_note: None, outcome: None, note: None, answered_by: None, withdrawn_by: None, settled_at_ms: None, unclaimed: false };
             record.surfaces.push(json!({"surface":if record.state == "pending:head" { "head" } else { "user" },"at_ms":now,"answers":record.answers()}));
             let (folder, program) = match &record.request { AccessRequest::MacosPermission { folder, program, .. } => (Some(folder), Some(program)), _ => (None, None) };
             tx.execute("INSERT INTO access_asks(elicitation_id,principal,owner,call_key,folder,program,state,record_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![record.elicitation_id,record.identity.principal,serde_json::to_string(&record.identity.asker)?,record.request.call_key(),folder,program,record.state,serde_json::to_string(&record)?])?;
@@ -497,7 +530,7 @@ impl ConsentStore {
                     else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None }
                 } else if answer.surface != "user" || (answer.principal != "reserved:callosum" && !operator_authorized) || record.state != "pending:user" { Some("access_wrong_leg") }
                 else if !record.answers().contains(&answer.answer.as_str()) { Some("elicitation_invalid_choice") } else { None };
-            record.attempts.push(AnswerAttempt { via: answer.via, device: device.map(str::to_owned), malformed_params: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
+            record.push_attempt(AnswerAttempt { via: answer.via, device: device.map(str::to_owned), params_bytes: None, surface: answer.surface.clone(), principal: answer.principal, at_ms: now, answer: answer.answer.clone(), note: answer.note.clone(), answered_by: answer.answered_by, result: code.unwrap_or("accepted").into() });
             if code.is_none() {
                 if answer.answer == "escalate" {
                     record.state = "pending:user".into();
@@ -541,7 +574,7 @@ impl ConsentStore {
     pub fn access_rejected_attempt(&self, id: &str, attempt: AnswerAttempt) -> Result<()> {
         self.transaction(|tx| {
             if let Some(mut record) = load(tx, id)? {
-                record.attempts.push(attempt);
+                record.push_attempt(attempt);
                 save(tx, &record)?;
             }
             Ok(())
@@ -665,6 +698,7 @@ mod phone_tests {
             state: "pending:head".into(),
             surfaces: vec![],
             attempts: vec![],
+            attempts_dropped: 0,
             escalation_note: None,
             outcome: None,
             note: None,
@@ -679,6 +713,71 @@ mod phone_tests {
         record(
             json!({"kind":"tool_permission", "call_key":"test", "tool":"test", "operation":operation, "paths":paths, "command":command, "reason":"Test permission", "args_hash":"hash", "pattern":"test", "head_policy":"allow"}),
         )
+    }
+
+    #[test]
+    fn schema14_scrubs_legacy_raw_attempts_atomically_and_counts_drops() {
+        for corrupt in [false, true] {
+            let root = crate::test_support::scratch_root("cingulate-audit-migration");
+            let descriptor = crate::storage_descriptor(None, root.to_str().unwrap());
+            let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+            old.migrate(crate::MIGRATION_NAMESPACE, &crate::MIGRATIONS[..13])
+                .unwrap();
+            let mut legacy = serde_json::to_value(tool("read", json!([]), None)).unwrap();
+            legacy["attempts"] =
+                json!((0..40).map(|_| json!({
+                "surface":"head","principal":"reserved:prefrontal-core","at_ms":1,
+                "answer":"private-choice","note":"private-note","answered_by":null,
+                "result":"elicitation_invalid_request","malformed_params":{"private":"raw-body"}
+            })).collect::<Vec<_>>());
+            legacy.as_object_mut().unwrap().remove("attempts_dropped");
+            let before = legacy.to_string();
+            old.with_conn(|conn| {
+                conn.execute("INSERT INTO access_asks(elicitation_id,principal,owner,state,record_json) VALUES('acc_test','reserved:aft','owner','pending:head',?1)", [&before])?;
+                if corrupt {
+                    conn.execute("INSERT INTO access_asks(elicitation_id,principal,owner,state,record_json) VALUES('acc_bad','reserved:aft','owner','pending:head','{}')", [])?;
+                }
+                Ok(())
+            }).unwrap();
+            drop(old);
+            let result = ConsentStore::open(&descriptor, 1);
+            let crate::StorageBackend::Sqlite { path } = &descriptor.backend else {
+                unreachable!()
+            };
+            let db = Connection::open(path).unwrap();
+            let raw: String = db
+                .query_row(
+                    "SELECT record_json FROM access_asks WHERE elicitation_id='acc_test'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if corrupt {
+                assert!(result.is_err());
+                assert_eq!(raw, before);
+                assert_eq!(db.query_row("SELECT MAX(version) FROM cortexkit_schema_version WHERE namespace='cingulate'", [], |r| r.get::<_, i64>(0)).unwrap(), 13);
+            } else {
+                let (store, _) = result.unwrap();
+                let clean: Value = serde_json::from_str(&raw).unwrap();
+                assert_eq!(clean["attempts"].as_array().unwrap().len(), 32);
+                assert_eq!(clean["attempts_dropped"], 8);
+                assert!(!raw.contains("malformed_params"));
+                assert!(!raw.contains("private-"));
+                drop(store);
+                let reopened = ConsentStore::open(&descriptor, 1).unwrap().0;
+                assert_eq!(
+                    reopened
+                        .access_get("acc_test")
+                        .unwrap()
+                        .unwrap()
+                        .attempts_dropped,
+                    8
+                );
+                drop(reopened);
+            }
+            drop(db);
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

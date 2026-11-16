@@ -1,0 +1,39 @@
+{
+  "notices": [
+    {
+      "elicitation_id": "el_1",
+      "fields": {
+        "card_kind": "config_plan",
+        "expires_at_ms": 310000,
+        "subject": "This computer's settings"
+      },
+      "purpose": "escalated"
+    },
+    {
+      "elicitation_id": "el_1",
+      "fields": {
+        "outcome": "answered"
+      },
+      "purpose": "settled"
+    },
+    {
+      "elicitation_id": "el_1",
+      "fields": {
+        "card_kind": "config_plan",
+        "expires_at_ms": 310000,
+        "subject": "This computer's settings"
+      },
+      "purpose": "escalated",
+      "round": 1
+    },
+    {
+      "elicitation_id": "el_1",
+      "fields": {
+        "outcome": "answered"
+      },
+      "purpose": "settled",
+      "round": 1
+    }
+  ],
+  "tag": "config-plan-v4"
+}

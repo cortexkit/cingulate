@@ -43,9 +43,14 @@ fn accepts_explanations_on_package_and_flow_install() {
 }
 
 fn invalid(body: Value, field: &str) {
+    let shape_error = serde_json::from_value::<ConsentRequest>(body.clone()).is_err();
     let error = ConsentRequest::decode(body).unwrap_err();
     assert_eq!(error.code, "elicitation_invalid_request");
-    assert!(error.message.contains(field), "{}", error.message);
+    if error.message == "consent request fields are invalid" {
+        assert!(shape_error);
+    } else {
+        assert!(error.message.contains(field), "{}", error.message);
+    }
 }
 
 #[test]
@@ -63,7 +68,7 @@ fn explanation_fields_are_only_allowed_on_approval_cards() {
 }
 
 #[test]
-fn permission_ask_decoders_refuse_explanation_fields_by_name() {
+fn permission_ask_decoders_refuse_explanation_fields_with_fixed_messages() {
     for sample in [
         include_str!("../../../test-vectors/tool-permission-v1/user-open-request.json"),
         include_str!("../../../test-vectors/tool-permission-v1/macos-open-request.json"),
@@ -75,7 +80,7 @@ fn permission_ask_decoders_refuse_explanation_fields_by_name() {
             body[field] = json!({"label": "About", "text": "Author text"});
             let error = AccessRequest::decode(body).unwrap_err();
             assert_eq!(error.code, "elicitation_invalid_request");
-            assert!(error.message.contains(field), "{}", error.message);
+            assert_eq!(error.message, "permission request fields are invalid");
         }
     }
 }

@@ -67,7 +67,7 @@ async fn main() {
     for (name, bytes) in &files {
         if check {
             assert_eq!(fs::read(root.join(name)).unwrap(), *bytes, "{name} differs");
-        } else {
+        } else if name != "README.md" {
             fs::write(root.join(name), bytes).unwrap();
         }
     }

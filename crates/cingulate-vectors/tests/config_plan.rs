@@ -18,7 +18,7 @@ fn invalid(body: Value, field: &str) {
     let e = ConsentRequest::decode(body).unwrap_err();
     assert_eq!(e.code, "elicitation_invalid_request");
     assert!(
-        e.message.contains(field) || e.message.starts_with("config_plan filing:"),
+        e.message.contains(field) || e.message == "config_plan filing has invalid fields",
         "{e}"
     );
 }
@@ -209,6 +209,127 @@ async fn config_plan_requester_admission_and_scope_independence() {
                 .unwrap_err()["code"],
             "elicitation_requester_refused"
         );
+    }
+}
+
+#[tokio::test]
+async fn config_plan_revision_tracks_phone_feature_projection() {
+    let f = support::Fixture::open(None).await;
+    let id = f.request(&filer(), body()).await;
+    let hidden = f.ok(&phone(), "consent.list_pending", json!({})).await;
+    let visible = f
+        .ok(
+            &phone(),
+            "consent.list_pending",
+            json!({
+                "clientFeatures":["config-plan"], "if_revision":hidden["revision"]
+            }),
+        )
+        .await;
+    assert_eq!(visible["records"][0]["elicitationId"], id);
+    assert_ne!(hidden["revision"], visible["revision"]);
+    let hidden_again = f
+        .ok(
+            &phone(),
+            "consent.list_pending",
+            json!({"if_revision":visible["revision"]}),
+        )
+        .await;
+    assert_eq!(hidden_again["records"], json!([]));
+}
+
+#[tokio::test]
+async fn config_plan_schema14_migration_invalidates_old_replay_and_hides_new_changes() {
+    use watch_pending::{Watch, INSTANCE};
+    let source = support::Fixture::open(None).await;
+    let id = source.request(&filer(), body()).await;
+    let mut legacy = source.stored_record(&id);
+    legacy.elicitation_id = "el_legacy".into();
+    let raw = serde_json::to_string(&legacy).unwrap();
+    drop(source);
+    let f = support::Fixture::open_seeded(
+        None, cingulate_store::CHANGE_LOG_ROWS, std::sync::Arc::new(support::AlfResolver),
+        |path| {
+            let descriptor = support::descriptor(path);
+            let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+            old.migrate(cingulate_store::MIGRATION_NAMESPACE, &cingulate_store::MIGRATIONS[..13]).unwrap();
+            let db = rusqlite::Connection::open(path).unwrap();
+            db.execute("UPDATE cingulate_change_log SET instance=?1", [INSTANCE]).unwrap();
+            db.execute("INSERT INTO cingulate_changes(elicitation_id) VALUES('el_pruned_config')", []).unwrap();
+            db.execute("INSERT INTO elicitation_records(elicitation_id,owner,record_json,state,expires_at_ms) VALUES('el_legacy','reserved:callosum',?1,'pending',?2)", rusqlite::params![raw,legacy.expires_at_ms]).unwrap();
+            db.execute("UPDATE cingulate_id_seq SET value=10", []).unwrap();
+        },
+    ).await;
+    let prune: i64 = f
+        .sql()
+        .query_row(
+            "SELECT pruned_through FROM cingulate_change_log",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(prune, 2);
+    assert_eq!(
+        f.sql()
+            .query_row(
+                "SELECT config_plan FROM elicitation_records WHERE elicitation_id='el_legacy'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    let mut hidden = Watch::open(
+        &f.handler,
+        &phone(),
+        json!({"cursor":{"instance":INSTANCE,"version":0}}),
+    );
+    assert_eq!(hidden.next_value().await, json!({"type":"reread"}));
+    hidden.quiet().await;
+    let mut next = body();
+    next["config_plan"]["plan_digest"] = json!("new-plan-digest");
+    f.request(&filer(), next).await;
+    hidden.quiet().await;
+    hidden.unsubscribe();
+    hidden.outcome().await;
+}
+
+#[tokio::test]
+async fn config_plan_watch_hides_unsupported_replay_live_and_pruned_removal_ids() {
+    use watch_pending::{Watch, INSTANCE};
+    let f = support::Fixture::open(None).await;
+    f.pin_store_instance(INSTANCE);
+    let id = f.request(&filer(), body()).await;
+    let mut visible = Watch::open(
+        &f.handler,
+        &phone(),
+        json!({
+            "cursor":{"instance":INSTANCE,"version":0},"clientFeatures":["config-plan"]
+        }),
+    );
+    assert_eq!(visible.next_value().await["card"]["elicitationId"], id);
+    let mut hidden = Watch::open(
+        &f.handler,
+        &phone(),
+        json!({"cursor":{"instance":INSTANCE,"version":0}}),
+    );
+    hidden.quiet().await;
+    f.ok(&phone(), "consent.answer", answer(&id, "decline"))
+        .await;
+    assert_eq!(visible.next_value().await["card"]["state"], "answered");
+    f.clock
+        .set(support::NOW + cingulate_store::RETENTION_MS + 1);
+    f.ok(
+        &phone(),
+        "consent.list_pending",
+        json!({"clientFeatures":["config-plan"]}),
+    )
+    .await;
+    assert_eq!(visible.next_value().await["type"], "removed");
+    hidden.quiet().await;
+    for watch in [visible, hidden] {
+        watch.unsubscribe();
+        watch.outcome().await;
     }
 }
 
@@ -881,6 +1002,53 @@ async fn config_plan_expected_round_is_integer_but_other_kinds_ignore_it() {
 }
 
 #[tokio::test]
+async fn config_plan_v3_keeps_revision_only_success_compatibility_and_refusal_codes() {
+    fn remove_revision_suffix(value: &mut Value) {
+        match value {
+            Value::Object(fields) => {
+                for (key, value) in fields {
+                    if key == "revision" {
+                        if let Some(revision) =
+                            value.as_str().and_then(|s| s.strip_suffix(":config-plan"))
+                        {
+                            *value = json!(revision);
+                        }
+                    } else {
+                        remove_revision_suffix(value);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    remove_revision_suffix(item);
+                }
+            }
+            _ => {}
+        }
+    }
+    for (name, bytes) in generate().await {
+        let mut current: Value = serde_json::from_slice(&bytes).unwrap();
+        let mut historical: Value = serde_json::from_slice(
+            &std::fs::read(support::corpus("config-plan-v3").join(&name)).unwrap(),
+        )
+        .unwrap();
+        current["tag"] = json!("config-plan-v3");
+        remove_revision_suffix(&mut current);
+        // Human refusal text is deliberately not a pinned protocol contract.
+        // Codes, request shapes and every non-message field still match v3.
+        for case in [&mut current, &mut historical] {
+            if let Some(error) = case
+                .pointer_mut("/reply/error")
+                .and_then(Value::as_object_mut)
+            {
+                assert!(error.remove("message").unwrap().is_string());
+            }
+        }
+        assert_eq!(current, historical, "{name}");
+    }
+}
+
+#[tokio::test]
 async fn config_plan_served_vectors_and_checksums() {
     let manifest = serde_json::to_value(ck_cingulate::manifest()).unwrap();
     assert!(manifest["capabilities"]["provides"]
@@ -893,7 +1061,7 @@ async fn config_plan_served_vectors_and_checksums() {
             bytes
         );
     }
-    for corpus in ["config-plan-v1", "config-plan-v2", CORPUS] {
+    for corpus in ["config-plan-v1", "config-plan-v2", "config-plan-v3", CORPUS] {
         let sums = std::fs::read_to_string(support::corpus(corpus).join("SHA256SUMS")).unwrap();
         for line in sums.lines() {
             let (hash, name) = line.split_once("  ").unwrap();

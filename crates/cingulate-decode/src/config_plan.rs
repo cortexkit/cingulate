@@ -168,7 +168,7 @@ fn unique<'a>(values: impl Iterator<Item = &'a str>, field: &str) -> Result<(), 
 fn typed_field<T: serde::de::DeserializeOwned>(value: &Value, field: &str) -> Result<(), Refusal> {
     serde_json::from_value::<T>(value.clone())
         .map(|_| ())
-        .map_err(|error| Refusal::invalid(format!("{field}: {error}")))
+        .map_err(|_| Refusal::invalid(format!("{field} has invalid fields")))
 }
 
 fn layer_file_value(value: &Value, field: &str) -> Result<(), Refusal> {
@@ -478,7 +478,7 @@ pub(super) fn normalize(body: Value) -> Result<Value, Refusal> {
         }
     }
     let filing: Filing = serde_json::from_value(body)
-        .map_err(|e| Refusal::invalid(format!("config_plan filing: {e}")))?;
+        .map_err(|_| Refusal::invalid("config_plan filing has invalid fields"))?;
     if !(1..=300_000).contains(&filing.expires_in_ms) {
         return Err(Refusal::invalid(
             "config_plan.expires_in_ms must be 1..=300000",

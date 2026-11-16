@@ -2171,6 +2171,28 @@ async fn notice_other_missing_sessions_do_not_retry_or_settle() {
 }
 
 #[tokio::test]
+async fn unauthorized_access_answers_never_write_audit() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    let unauthorized = Stamp::from_principal(Some(&Principal::Direct));
+    let before = f.audit(&id);
+    for params in [
+        json!({"elicitation_id":id,"answer":"deny","raw":"private body"}),
+        json!({"elicitation_id":id,"answer":"deny"}),
+    ] {
+        let result = f.call(&unauthorized, "consent.answer", params).await;
+        assert_eq!(
+            f.audit(&id),
+            before,
+            "unauthorized answer must not touch audit"
+        );
+        assert_eq!(result.unwrap_err(), "elicitation_operator_required");
+    }
+}
+
+#[tokio::test]
 async fn malformed_attempts_and_audit_survive_retention_sweep() {
     let f = Fixture::new(true).await;
     let id = f
@@ -2194,9 +2216,35 @@ async fn malformed_attempts_and_audit_survive_retention_sweep() {
         audit["attempts"][0]["result"],
         "elicitation_invalid_request"
     );
-    assert!(audit["attempts"][0].get("malformed_params").is_some());
+    assert!(audit["attempts"][0].get("malformed_params").is_none());
+    assert!(audit["attempts"][0]["params_bytes"].as_u64().unwrap() > 0);
     assert_eq!(audit["identity"]["harness"], "test-harness");
     assert_eq!(audit["outcome"], "deny");
+}
+
+#[tokio::test]
+async fn access_audit_is_bounded_and_preserves_escalating_head() {
+    let f = Fixture::new(true).await;
+    let id = f
+        .ask(&stamp("aft", ScopeKind::Worker), request(Some("allow")))
+        .await;
+    f.relay(&id, "escalate").await;
+    for _ in 0..40 {
+        let _ = f
+            .call(
+                &phone(),
+                "consent.answer",
+                json!({"elicitationId":id,"choiceId":"private-invalid-choice"}),
+            )
+            .await;
+    }
+    let audit = f.audit(&id);
+    assert_eq!(audit["attempts"].as_array().unwrap().len(), 32);
+    assert_eq!(audit["attempts_dropped"], 9);
+    assert!(!audit.to_string().contains("private-invalid-choice"));
+    assert_eq!(f.relay(&id, "deny").await["ok"], true);
+    assert_eq!(f.audit(&id)["attempts"].as_array().unwrap().len(), 32);
+    assert_eq!(f.audit(&id)["attempts_dropped"], 10);
 }
 #[tokio::test]
 async fn concurrent_answers_compare_and_set_one_settlement() {

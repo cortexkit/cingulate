@@ -53,11 +53,11 @@ jobs:
           - os: windows
             runner: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           components: clippy, rustfmt
 
@@ -91,11 +91,11 @@ jobs:
     name: Vectors and independence
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
 
       - uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
 
@@ -114,6 +114,11 @@ jobs:
             echo "== $example"
             cargo run -q -p cingulate-vectors --example "$example" --locked -- --check
           done
+
+      - name: Release metadata is present and well formed
+        run: |
+          python3 scripts/release-manifest.py
+          python3 -m unittest discover -s scripts/tests -v
 
       # Cingulate must stay usable without any orchestrator: no prefrontal-*
       # crate may appear among its normal dependencies.

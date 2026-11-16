@@ -97,10 +97,10 @@ fn program_flags_keep_programs_required_and_entry_closed() {
         .as_object_mut()
         .unwrap()
         .remove("programs");
-    invalid(b, "programs");
+    invalid(b, "config_plan filing has invalid fields");
     let mut b = body();
     b["config_plan"]["launch_manifests"][0]["unexpected"] = json!(true);
-    invalid(b, "unexpected");
+    invalid(b, "config_plan filing has invalid fields");
 }
 
 #[test]
@@ -161,12 +161,12 @@ fn rollback_programs_rows_are_closed_and_all_members_required() {
             .as_object_mut()
             .unwrap()
             .remove(field);
-        invalid(b, field);
+        invalid(b, "config_plan filing has invalid fields");
     }
     for field in ["reason", "unexpected"] {
         let mut b = original.clone();
         b["config_plan"]["apply"]["rollback_programs"][0][field] = json!("Not part of the card");
-        invalid(b, field);
+        invalid(b, "config_plan filing has invalid fields");
     }
 }
 

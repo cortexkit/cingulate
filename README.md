@@ -8,7 +8,7 @@ outcome back to the requester.
 
 The name comes from the anterior cingulate cortex, the part of the brain that notices a conflict
 before an action and holds the action until the conflict is resolved. This module does the same
-thing: it holds an action until someone says yes.
+thing: it records the decision while the requester holds the action.
 
 ## How it fits
 
@@ -36,20 +36,26 @@ requesters (agents' tools, modules, the orchestrator)
 
 ## What it does
 
-- **Cards.** A requester files a card: a title, a prompt, two to four options, an optional
-  expiry, and labelled facts. Every card defaults to a decline, so silence, expiry, withdrawal
-  or an error never grants anything. The first answer wins.
+- **Cards.** A requester files a card: a title, a prompt, options, an optional expiry, and
+  labelled facts. Option counts depend on the kind; informational macOS cards have none.
+  Actionable cards default to a decline: silence, expiry, withdrawal or an error never grants.
+  Wait timeouts and delivery errors can leave a card pending. The first answer wins, except
+  that failed config-plan verification reopens the card for a new answer round.
 - **Outcomes.** Requesters wait for a bounded time or read a cursor feed of settled cards. An
   orchestrator that filed a card for one of its agents turns the outcome into a notice for that
-  agent itself; Cingulate never writes into agent sessions.
+  agent itself. Cingulate also sends structured `session.notice` lifecycle deliveries, which
+  can contain option labels, tool paths, notes and subject labels. Phone push notifications,
+  unlike those session notices, carry pointers rather than card content.
 - **Tool-permission asks.** When a worker agent's tool call needs permission, the ask goes
   first to its head (the agent that started the worker and directs it) and reaches the user
   only if the head escalates it.
 - **Permissions.** Standing grants ("always allow") stay with the provider that enforces them.
   Cingulate lists and revokes them across providers through `permissions/v1`.
 
-Cingulate renders nothing, holds no secrets, and never decrypts sealed inputs. See
+Cingulate renders nothing, does not retrieve vault secret values, and never decrypts sealed inputs. See
 [SECURITY.md](SECURITY.md) for exactly what it defends and what it does not.
+Releasing sealed inputs is logical deletion from live rows: SQLite WAL files, backups and
+snapshots may retain the ciphertext bytes until overwritten.
 
 ## Repository layout
 
@@ -97,7 +103,13 @@ sidecar, and are installed with:
 ck setup cingulate
 ```
 
-Each release's notes name the minimum subc-core version it needs. `ck-cingulate` is not
+Version 0.23.1 requires **subc-core 0.21.6 or newer**: it is the first core release carrying
+the daemon line with both `operator-app/v1` and `registration_channel` (daemon 0.45.3).
+Public installation must wait for a public subc-core 0.21.6 or newer; the newest public core
+at this release's preparation is `subc-core-v0.21.3`. `ck setup` checks the release manifest
+and refuses an older core rather than partially installing an incompatible component.
+
+Each release's notes and `release-manifest.json` name the minimum core. `ck-cingulate` is not
 published to crates.io, so `cargo install` does not install it.
 
 ## Contributing and security

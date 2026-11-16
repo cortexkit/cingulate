@@ -17,6 +17,27 @@ fn consent() -> Value {
 }
 
 #[test]
+fn option_text_bounds_are_characters_and_reject_controls() {
+    for (field, max) in [("id", 64), ("label", 200)] {
+        for text in [
+            String::new(),
+            "x".repeat(max + 1),
+            "bad\ntext".into(),
+            "bad\u{009f}text".into(),
+        ] {
+            let mut body = consent();
+            body["options"][0][field] = json!(text);
+            assert_eq!(ConsentRequest::decode(body).unwrap_err().code, INVALID);
+        }
+        for length in [1, max] {
+            let mut body = consent();
+            body["options"][0][field] = json!("é".repeat(length));
+            ConsentRequest::decode(body).unwrap();
+        }
+    }
+}
+
+#[test]
 fn danger_group_rules_preserve_refusal_precedence_and_decline_only_cards() {
     let mut body = consent();
     body["options"][1]["group"] = json!("danger");
@@ -118,17 +139,21 @@ fn invalid(body: Value, message: &str) {
 fn serde_refusal(body: Value, message_contains: &str) {
     let error = ConsentRequest::decode(body.clone()).unwrap_err();
     assert_eq!(error.code, INVALID);
-    assert!(
-        error.message.contains(message_contains),
-        "expected {message_contains:?}, got {:?}",
-        error.message
-    );
     let serde_error = serde_json::from_value::<ConsentRequest>(body).unwrap_err();
-    assert_eq!(error.message, serde_error.to_string());
+    assert!(
+        serde_error.to_string().contains(message_contains),
+        "expected {message_contains:?}, got {serde_error}"
+    );
+    let safe_message = match message_contains {
+        "single_use must be a boolean" => "single_use must be a boolean",
+        "at_console must be nonempty" => "at_console must be nonempty",
+        _ => "consent request fields are invalid",
+    };
+    assert_eq!(error.message, safe_message);
 }
 
 #[test]
-fn serde_errors_precede_flow_rules_and_are_verbatim() {
+fn serde_errors_precede_flow_rules_without_echoing_content() {
     let mut body = flow_decision();
     body["session_ref"] = json!("session");
     body["unknown"] = json!(true);

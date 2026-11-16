@@ -23,7 +23,9 @@ fn invalid(body: Value, message: &str) {
     let error = ConsentRequest::decode(body).unwrap_err();
     assert_eq!(error.code, "elicitation_invalid_request");
     assert!(
-        error.message.contains(message),
+        error.message.contains(message)
+            || (error.message.starts_with("config_plan")
+                && error.message.ends_with(" has invalid fields")),
         "expected {message:?}: {error}"
     );
 }

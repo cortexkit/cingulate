@@ -656,7 +656,7 @@ fn sealed_text_v1_1_approve_opens_with_bound_info() {
         .collect();
     let private = <X25519HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(&private_bytes).unwrap();
     let approve: Value = serde_json::from_slice(
-        &std::fs::read(support::corpus(CORPUS).join("approve-request.json")).unwrap(),
+        &std::fs::read(support::corpus("sealed-text-v1.1").join("approve-request.json")).unwrap(),
     )
     .unwrap();
     let input = &approve["params"]["inputs"][0];

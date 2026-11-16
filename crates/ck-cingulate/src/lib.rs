@@ -558,8 +558,31 @@ pub struct Handler {
 }
 type Reply = Result<Value, Refusal>;
 
+const MAX_FRAME_BYTES: usize = 1_310_720;
+
+fn diagnostic_token(value: &str) -> String {
+    value
+        .chars()
+        .take(64)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':' | '/') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn refusal_context(body: &[u8]) -> Value {
+    if body.len() > MAX_FRAME_BYTES {
+        return Value::Null;
+    }
+    serde_json::from_slice(body).unwrap_or(Value::Null)
+}
+
 fn refusal_outcome(stamp: &Stamp, body: &[u8], error: Refusal) -> HandlerOutcome {
-    let request: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let request = refusal_context(body);
     let method = request
         .get("method")
         .and_then(Value::as_str)
@@ -568,12 +591,14 @@ fn refusal_outcome(stamp: &Stamp, body: &[u8], error: Refusal) -> HandlerOutcome
     let kind = (method == "consent.request")
         .then(|| params.get("kind").and_then(Value::as_str))
         .flatten();
-    let request_ids: Vec<&str> = if kind == Some("secret_use") {
+    let request_ids: Vec<String> = if kind == Some("secret_use") {
         params["secret_use"]["items"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|item| item.get("request_id").and_then(Value::as_str))
+            .take(16)
+            .map(diagnostic_token)
             .collect()
     } else {
         Vec::new()
@@ -598,20 +623,19 @@ fn refusal_outcome(stamp: &Stamp, body: &[u8], error: Refusal) -> HandlerOutcome
         .scope
         .as_ref()
         .map(|scope| serde_json::to_value(scope.kind).expect("scope kind serialization"));
-    // Never log refusal messages, statement bytes or fields other than request_id,
-    // answers, option text, or anything from the stored card's record_json column:
-    // these can contain caller data.
+    // Caller identifiers are bounded tokens, not free-form text. Never log
+    // refusal messages, statements, answers, option text or stored card bodies.
     tracing::info!(
-        method = ?method,
+        method = ?diagnostic_token(method),
         code = error.code,
         reason = ?error.reason,
-        principal = ?stamp.label(),
-        kind = ?kind,
+        principal = ?diagnostic_token(stamp.label()),
+        kind = ?kind.map(diagnostic_token),
         scope_kind = ?scope_kind.as_ref().and_then(|kind| kind.as_str()),
-        scope_ref = ?stamp.scope.as_ref().map(|scope| &scope.scope_ref),
+        scope_ref = ?stamp.scope.as_ref().map(|scope| diagnostic_token(&scope.scope_ref)),
         scope_epoch = ?stamp.scope.as_ref().map(|scope| scope.scope_epoch),
         request_id = ?request_ids,
-        elicitation_id = ?elicitation_id,
+        elicitation_id = ?elicitation_id.map(diagnostic_token),
         "request refused"
     );
     HandlerOutcome::Error {
@@ -1031,7 +1055,10 @@ impl Handler {
                 }
             }
         }
-        let agent_source = if matches!(request.kind.as_str(), "manifest_binding" | "secret_use") {
+        let agent_source = if stamp.label() == "reserved:aft" && request.kind == "consent" {
+            stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
+            SubjectAgent::Carried
+        } else if matches!(request.kind.as_str(), "manifest_binding" | "secret_use") {
             SubjectAgent::FromScope
         } else {
             requester_admission(stamp.label())
@@ -1189,7 +1216,7 @@ impl Handler {
 
     /// In-process envelope entry point, also used by the production adapter.
     pub async fn handle_stamped(&self, stamp: &Stamp, body: &[u8]) -> HandlerOutcome {
-        if body.len() > 1_310_720 {
+        if body.len() > MAX_FRAME_BYTES {
             return refusal_outcome(
                 stamp,
                 body,
@@ -1207,9 +1234,10 @@ impl Handler {
         }
         let reply = match serde_json::from_slice::<WireRequest>(body) {
             Ok(request) => self.dispatch(stamp, &request.method, request.params).await,
-            Err(error) => {
-                Err(Refusal::new("invalid_request", error.to_string()).reason("envelope_invalid"))
-            }
+            Err(_) => Err(
+                Refusal::new("invalid_request", "request envelope fields are invalid")
+                    .reason("envelope_invalid"),
+            ),
         };
         match reply {
             Ok(reply) => HandlerOutcome::Response(
@@ -1395,7 +1423,7 @@ impl Handler {
                 code: String,
             }
             let report: Report = serde_json::from_value(params)
-                .map_err(|e| invalid(format!("report_unverified: {e}")))?;
+                .map_err(|_| invalid("report_unverified fields are invalid"))?;
             let record = self
                 .with_store(|store| {
                     store.report_unverified(
@@ -1663,6 +1691,11 @@ impl Handler {
                         && stamp.secret_use_phone().is_some()
                     {
                         revision.push_str(":manifest-binding");
+                    }
+                    if feature_declared(&params, "config-plan")
+                        && stamp.secret_use_phone().is_some()
+                    {
+                        revision.push_str(":config-plan");
                     }
                     if after.is_none()
                         && params.get("if_revision").and_then(Value::as_str) == Some(&revision)
@@ -1979,6 +2012,32 @@ mod tests {
 
         async fn ended(&self) {
             std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn refusal_diagnostics_bound_identifiers_and_skip_oversized_json() {
+        let token = diagnostic_token(&format!("method\n\u{009f}{}", "x".repeat(1000)));
+        assert_eq!(token.len(), 64);
+        assert!(token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+        let oversized = serde_json::to_vec(&json!({"method":"consent.request","params":{"kind":"consent","private":"x".repeat(MAX_FRAME_BYTES)}})).unwrap();
+        assert!(refusal_context(&oversized).is_null());
+        let handler = Handler::new(Options {
+            sweep_timer: false,
+            ..Options::default()
+        });
+        match handler.handle_stamped(&Stamp::default(), &oversized).await {
+            HandlerOutcome::Error { code, .. } => assert_eq!(code, "elicitation_request_too_large"),
+            other => panic!("expected size refusal, got {other:?}"),
+        }
+        let malformed = br#"{"method":"private-method","params":{},"private-key":"private-value""#;
+        match handler.handle_stamped(&Stamp::default(), malformed).await {
+            HandlerOutcome::Error { message, .. } => {
+                assert_eq!(message, "request envelope fields are invalid")
+            }
+            other => panic!("expected envelope refusal, got {other:?}"),
         }
     }
 

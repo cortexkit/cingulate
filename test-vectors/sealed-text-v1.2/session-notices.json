@@ -1,0 +1,1 @@
+[{"asker":{"scope_epoch":7,"scope_ref":"sc_head_alf"},"elicitation_id":"el_1","fields":{"card_kind":"consent","expires_at_ms":70000,"subject":"ALF"},"purpose":"escalated"},{"asker":{"scope_epoch":7,"scope_ref":"sc_head_alf"},"elicitation_id":"el_1","fields":{"outcome":"answered"},"purpose":"settled"}]

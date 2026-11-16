@@ -3,7 +3,13 @@
 //! SQLite consent card persistence. Identity authorization and notifications
 //! belong to the caller; mutations return events only after their commit.
 
-use std::fmt;
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use cingulate_decode::{ConsentRequest, Refusal};
 use cortexkit_lease::LeaseError;
@@ -39,7 +45,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 13] = [
+pub const MIGRATIONS: [Migration; 14] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -91,6 +97,10 @@ pub const MIGRATIONS: [Migration; 13] = [
     Migration {
         version: 13,
         statements: include_str!("../migrations/013_sealed_text.sql"),
+    },
+    Migration {
+        version: 14,
+        statements: include_str!("../migrations/014_config_plan_visibility.sql"),
     },
 ];
 
@@ -242,6 +252,8 @@ pub struct Change {
     pub secret_use: bool,
     /// Distinguishes the new reader feature from secret-use approval support.
     pub manifest_binding: bool,
+    /// Config-plan feature visibility, retained after payload pruning.
+    pub config_plan: bool,
     pub version: i64,
     pub elicitation_id: String,
 }
@@ -300,7 +312,33 @@ impl ConsentStore {
         now_ms: i64,
     ) -> Result<(Self, Vec<ElicitationRecord>)> {
         let db = open_sqlite(descriptor)?;
+        let rewritten = Arc::new(AtomicU64::new(0));
+        let count = rewritten.clone();
+        // cortexkit-store migrations are SQL-only. A migration-only SQL function
+        // bridges typed audit normalization into migration 14's transaction.
+        db.with_conn(|conn| {
+            conn.create_scalar_function(
+                "cingulate_migration14_normalize_audit",
+                1,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+                move |context| {
+                    let raw = context.get::<String>(0)?;
+                    let clean = access::normalize_audit(&raw)
+                        .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))?;
+                    count.fetch_add(1, Ordering::Relaxed);
+                    Ok(clean)
+                },
+            )
+        })?;
         let outcome = db.migrate(MIGRATION_NAMESPACE, &MIGRATIONS)?;
+        db.with_conn(|conn| conn.remove_function("cingulate_migration14_normalize_audit", 1))?;
+        if outcome.applied > 0 {
+            tracing::info!(
+                records = rewritten.load(Ordering::Relaxed),
+                "normalized stored permission audit records"
+            );
+        }
         if outcome.store_ahead() {
             return Err(Error::Store(StoreError::Migration(format!(
                 "cingulate store version {} is ahead of this binary's migration {}",
@@ -353,7 +391,7 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding) FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding),MAX(config_plan) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
@@ -361,6 +399,7 @@ impl ConsentStore {
                     Ok(Change {
                         secret_use: row.get(2)?,
                         manifest_binding: row.get(3)?,
+                        config_plan: row.get(4)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
                     })
@@ -551,8 +590,8 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding) \
-                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding,config_plan) \
+                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7,?8)",
                 params![
                     record.elicitation_id,
                     identity.owner,
@@ -560,7 +599,8 @@ impl ConsentStore {
                     serde_json::to_string(&record)?,
                     record.expires_at_ms,
                     record.request.is_secret_card(),
-                    record.request.manifest_binding.is_some()
+                    record.request.manifest_binding.is_some(),
+                    record.request.kind == "config_plan"
                 ],
             )?;
             if let Some(body) = &record.request.secret_use {

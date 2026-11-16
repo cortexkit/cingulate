@@ -426,6 +426,12 @@ impl Handler {
                         } else {
                             "unauthorized"
                         };
+                        if surface == "unauthorized" {
+                            return Err(Refusal::new(
+                                "elicitation_operator_required",
+                                "answer requires an operator route or core relay",
+                            ));
+                        }
                         let parsed = (|| -> Result<AccessAnswer, Refusal> {
                             let answer_key = if surface == "head" {
                                 "answer"
@@ -452,7 +458,10 @@ impl Handler {
                                         invalid("answered_by is required").reason("param_type")
                                     })?,
                                 )
-                                .map_err(|e| invalid(e.to_string()).reason("param_type"))?;
+                                .map_err(|_| {
+                                    invalid("answered_by must be a scope identity")
+                                        .reason("param_type")
+                                })?;
                                 if by.agent_id.trim().is_empty() {
                                     return Err(invalid("answered_by.agent_id must be nonblank")
                                         .reason("param_type"));
@@ -486,7 +495,11 @@ impl Handler {
                                                 .as_ref()
                                                 .map(|_| "operator_app".into()),
                                             device: stamp.answering_device().map(str::to_owned),
-                                            malformed_params: Some(params.clone()),
+                                            params_bytes: Some(
+                                                serde_json::to_vec(params)
+                                                    .expect("params serialization")
+                                                    .len(),
+                                            ),
                                             surface: surface.into(),
                                             principal: stamp.label().into(),
                                             at_ms: self.inner.options.clock.now_ms(),
@@ -512,12 +525,6 @@ impl Handler {
                                 )
                             })
                             .await?;
-                        if surface == "unauthorized" {
-                            return Err(Refusal::new(
-                                "elicitation_operator_required",
-                                "answer requires an operator route or core relay",
-                            ));
-                        }
                         let Some(mutation) = mutation else {
                             return Ok(json!({"ok":false,"code":"not_found"}));
                         };

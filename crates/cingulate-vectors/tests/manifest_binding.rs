@@ -70,7 +70,7 @@ fn manifest_binding_filing_is_one_statement_and_no_authored_text_or_expiry() {
         assert!(ConsentRequest::decode(request)
             .unwrap_err()
             .message
-            .contains(field));
+            .contains("manifest_binding filing has invalid fields"));
     }
     let mut request = body();
     request["manifest_binding"] = json!([

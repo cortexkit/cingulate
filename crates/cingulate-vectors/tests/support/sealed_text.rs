@@ -4,12 +4,12 @@ use ck_cingulate::Stamp;
 use serde_json::{json, Value};
 use subc_client_rs::HandlerOutcome;
 
-use crate::support::{app_body, stamp, Fixture};
+use crate::support::{app_body, Fixture};
 
-pub const CORPUS: &str = "sealed-text-v1.1";
+pub const CORPUS: &str = "sealed-text-v1.2";
 
 pub fn filer() -> Stamp {
-    stamp("reserved:aft")
+    crate::support::worker::stamp("aft", subc_protocol::scope::ScopeKind::Head)
 }
 
 pub fn desktop() -> Stamp {

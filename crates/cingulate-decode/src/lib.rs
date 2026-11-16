@@ -406,8 +406,18 @@ impl ConsentRequest {
         } else {
             body
         };
-        let mut request: Self =
-            serde_json::from_value(body).map_err(|error| Refusal::invalid(error.to_string()))?;
+        let mut request: Self = serde_json::from_value(body).map_err(|error| {
+            // Keep only our fixed custom field messages; serde's general shape
+            // errors may quote caller-authored keys or values.
+            Refusal::invalid(match error.to_string().as_str() {
+                "single_use must be a boolean" => "single_use must be a boolean",
+                "at_console must be nonempty" => "at_console must be nonempty",
+                "requester_ref must be a string of 1 to 128 printable ASCII characters" => {
+                    "requester_ref must be a string of 1 to 128 printable ASCII characters"
+                }
+                _ => "consent request fields are invalid",
+            })
+        })?;
         if request.flow_install_secrets()?.is_some() {
             request.on_expiry = "deny".into();
         }
@@ -616,6 +626,13 @@ impl ConsentRequest {
                 return Err(Refusal::invalid(
                     "option ids must be unique and nonempty; labels must be nonempty",
                 ));
+            }
+            if option.id.chars().count() > 64
+                || option.label.chars().count() > 200
+                || option.id.chars().any(char::is_control)
+                || option.label.chars().any(char::is_control)
+            {
+                return Err(Refusal::invalid("option.id must be 1-64 characters and option.label 1-200, without control characters"));
             }
         }
         if let Some(schema) = &self.requested_schema {
