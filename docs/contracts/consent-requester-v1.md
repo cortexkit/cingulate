@@ -74,7 +74,7 @@ except the explicitly spelled `requestedSchema`. No camelCase aliases exist.
 |---|---|---|
 | `kind` | String | Required; exactly `flow_decision`. |
 | `flow_decision` | JSON object | Required; stored verbatim as opaque display data. |
-| `title`, `prompt` | Strings | Required, nonblank. |
+| `title`, `prompt` | Strings | Required, nonblank. `prompt` is the card's headline: the question that tells this card apart from others, such as "Let git push to example.test/org/repo with your saved credentials?". `title` is a short label, such as "Allow browser access". Put explanation in `facts`, not in either field. |
 | `options` | Array | Required; 2–4 objects with string `id`, `label`, `effect`, optional string `detail`. Ids must be unique/nonblank, labels nonblank. Exactly one effect `decline`, all others `choose`. Unknown option keys are refused. |
 | `default` | String | Required; id of the decline option. |
 | `urgency` | String | Required: `low`, `normal`, or `high`. |

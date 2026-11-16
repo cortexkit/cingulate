@@ -76,7 +76,7 @@ nested payload keys are not recursively renamed.
 |---|---|
 | `elicitationId` | String; opaque card id. |
 | `kind` | `package`, `flow_install`, `flow_decision`, or `consent`. |
-| `title`, `prompt` | Strings to display. |
+| `title`, `prompt` | Strings to display. `prompt` is the card's headline question; `title` is a short label. |
 | `options` | Array of `{id: string, label: string, effect: string, detail?: string}`. Send the exact `id` when answering. Package and installation cards have one grant and one decline. Decision cards have one decline and otherwise `choose` effects. Consent effects are strings, not a closed enum enforced by this interface. |
 | `default` | String option id whose effect is `decline`. Do not auto-submit it. |
 | `urgency` | `low`, `normal`, or `high`. |
