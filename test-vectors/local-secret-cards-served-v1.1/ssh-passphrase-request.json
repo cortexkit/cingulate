@@ -1,0 +1,66 @@
+{
+  "kind": "consent",
+  "title": "Type the passphrase for /home/alice/.ssh/fake_ed25519 to log in to alice@example.test?",
+  "prompt": "AFT unlocks the key itself; ssh never sees the passphrase. A login gives the agent a shell on example.test as alice.",
+  "facts": [
+    {
+      "label": "Command",
+      "value": "ssh alice@example.test"
+    },
+    {
+      "label": "Folder",
+      "value": "/work/project"
+    },
+    {
+      "label": "Agent",
+      "value": "Fake agent"
+    },
+    {
+      "label": "The agent says",
+      "value": "Inspect the fake deployment"
+    }
+  ],
+  "options": [
+    {
+      "id": "send",
+      "label": "Send",
+      "effect": "grant"
+    },
+    {
+      "id": "decline",
+      "label": "Decline",
+      "effect": "decline"
+    }
+  ],
+  "default": "decline",
+  "urgency": "normal",
+  "on_expiry": "deny",
+  "material_damage": false,
+  "late_execution": "notify_only",
+  "target": {
+    "kind": "ssh",
+    "label": "alice@example.test"
+  },
+  "expires_in_ms": 600000,
+  "scope": {
+    "owner": {
+      "kind": "reserved",
+      "module_id": "prefrontal-core"
+    },
+    "kind": "worker",
+    "scope_ref": "fake-agent",
+    "scope_epoch": 7
+  },
+  "inputs": [
+    {
+      "kind": "sealed_text",
+      "id": "passphrase",
+      "label": "Passphrase for key /home/alice/.ssh/fake_ed25519",
+      "max_bytes": 4096,
+      "hpke": {
+        "suite": "X25519-HKDF-SHA256/HKDF-SHA256/ChaCha20-Poly1305",
+        "public_key": "0_vt24sUrJtHzJMRhKkuA7CAd628uXGRAeAQWvTGSlw"
+      }
+    }
+  ]
+}

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add the test-only `local-secret-cards-served-v1.1` corpus from AFT's rebuilt
+  requests, with vault cards filed under their statement-matching head stamps.
+  Pin and regenerate both corpora independently; the served v1 corpus and its
+  manifest pin remain unchanged. No runtime, wire-reader or store migration change.
+
 ## 0.16.1 (cingulate-vectors)
 
 - Add byte-pinned local-secret request cards and their served list, get and watch records.

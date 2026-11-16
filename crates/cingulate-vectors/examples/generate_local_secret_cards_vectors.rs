@@ -14,13 +14,15 @@ use std::{collections::BTreeSet, fs};
 #[tokio::main]
 async fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    assert!(
-        args.is_empty() || args == ["--check"],
-        "usage: generate_local_secret_cards_vectors [--check]"
-    );
-    let check = !args.is_empty();
-    let root = support::corpus(local_secret_cards::CORPUS);
-    let files = local_secret_cards::generate().await;
+    let (corpus_name, check) = match args.as_slice() {
+        [] => (local_secret_cards::CORPUS, false),
+        [flag] if flag == "--check" => (local_secret_cards::CORPUS, true),
+        [name] => (name.as_str(), false),
+        [name, flag] if flag == "--check" => (name.as_str(), true),
+        _ => panic!("usage: generate_local_secret_cards_vectors [corpus-name] [--check]"),
+    };
+    let root = support::corpus(corpus_name);
+    let files = local_secret_cards::generate(corpus_name).await;
     if check {
         let actual: BTreeSet<_> = fs::read_dir(&root)
             .unwrap()
@@ -41,7 +43,7 @@ async fn main() {
         }
     }
     println!(
-        "{} {} local-secret card vector files through the consent handlers",
+        "{} {} {corpus_name} vector files through the consent handlers",
         if check { "Checked" } else { "Generated" },
         files.len()
     );

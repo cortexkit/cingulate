@@ -15,7 +15,11 @@ use crate::{
     watch_pending::{Watch, INSTANCE},
 };
 
+#[path = "secret_use.rs"]
+mod secret_use;
+
 pub const CORPUS: &str = "local-secret-cards-served-v1";
+pub const CORPUS_V1_1: &str = "local-secret-cards-served-v1.1";
 pub const CARDS: [&str; 7] = [
     "sudo-typed",
     "sudo-vault",
@@ -100,10 +104,10 @@ async fn served(fixture: &Fixture, surface: &Stamp, method: &str, params: Value)
     }
 }
 
-pub async fn generate() -> BTreeMap<String, Vec<u8>> {
-    let root = corpus(CORPUS);
+pub async fn generate(corpus_name: &str) -> BTreeMap<String, Vec<u8>> {
+    assert!(matches!(corpus_name, CORPUS | CORPUS_V1_1));
+    let root = corpus(corpus_name);
     let mut files = BTreeMap::new();
-    let requester = requester_stamp();
     let desktop = desktop_stamp();
     let phone = phone_stamp();
     let features = json!({"clientFeatures":["secret-use-approval"]});
@@ -112,11 +116,26 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
         let input = fs::read(root.join(&input_name)).unwrap();
         let params: Value = serde_json::from_slice(&input).unwrap();
         let vault = params["kind"] == "secret_use";
-        let fixture = Fixture::open(None).await;
+        // The v1.1 vault statements bind a head scope, not the ordinary worker.
+        // Keep route identity fixed independently of the request body.
+        let requester = match (corpus_name, card) {
+            (CORPUS_V1_1, "sudo-vault") => secret_use::filer("aft", Some("agent-A")),
+            (CORPUS_V1_1, "ssh-vault") => secret_use::filer("aft", None),
+            _ => requester_stamp(),
+        };
+        let fixture = if corpus_name == CORPUS_V1_1 && vault {
+            secret_use::fixture().await
+        } else {
+            Fixture::open(None).await
+        };
         fixture
             .handler
             .set_access_runtime(worker::Runtime::new(Ok(ScopeLife::Live(worker::head()))));
-        fixture.clock.set(FILED_AT_MS);
+        fixture.clock.set(if corpus_name == CORPUS_V1_1 {
+            secret_use::NOW
+        } else {
+            FILED_AT_MS
+        });
         fixture.pin_store_instance(INSTANCE);
 
         let mut desktop_watch =
