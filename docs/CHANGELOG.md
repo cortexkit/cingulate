@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add the test-only `desktop-dev-cards-v1` corpus of local-operator served
+  cards, answers and refusals for the desktop app. Correct the phone contract's
+  description of the development-build exception; release authority is unchanged.
+
 ## 0.25.4 (ck-cingulate), 0.13.4 (cingulate-decode), 0.11.2 (cingulate-store), 0.16.5 (cingulate-vectors)
 
 - Mark escalated notices with `phone_only: true` when only the phone can answer,

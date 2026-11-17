@@ -92,11 +92,11 @@ continues to return a settled card after requester acknowledgment until the
 For development installations, the default-off `dev-local-operator` Cargo
 feature also admits daemon-stamped
 `Principal::Direct` programs as operator surfaces for listing, fetching, answering
-and watching ordinary cards. Local answers have no device fingerprint; permission
+and watching ordinary cards. Ordinary local answers have no device fingerprint; permission
 answer audits retain the real principal `direct`. Secret-use, manifest-binding,
-config-plan, and flow-install cards carrying secrets remain hidden and
-unanswerable from desktop apps and local programs, including declines under the
-existing phone-only visibility rules. Public release builds must omit the
+and secret-bearing flow-install cards have the development exception described
+in [vault secret-use approvals](#vault-secret-use-approvals-0120); config-plan
+cards remain hidden and unanswerable on this route. Public release builds must omit the
 feature; the `DEVELOPMENT_LOCAL_OPERATOR` environment variable has no effect.
 Version output and health detail expose the feature's build-time state.
 
@@ -293,13 +293,12 @@ a `reread`, or the stream ending: those only say what to read again.
 Plexus files a card. Cingulate advertises `manifest-binding-approval/v1`.
 A reader advertises `clientFeatures: ["manifest-binding-approval"]` only once it
 can independently decode the statement and render this kind. The older
-`secret-use-approval` feature is not sufficient. Only a daemon-stamped
+`secret-use-approval` feature is not sufficient. In release builds, only a daemon-stamped
 `reserved:callosum` phone route (`fed-phone:<32 lowercase hex>`, or the equivalent
 daemon-stamped federated phone identity) with this feature may read or answer.
 List/get/watch hide cards and pruned removal ids from unsupported readers and
 other devices. Unsupported get refuses `elicitation_not_found`; unsupported
-answer refuses `elicitation_manifest_binding_approval_required`. The desktop
-development operator switch never grants answering authority, even for decline.
+answer refuses `elicitation_manifest_binding_approval_required`. The [development-build exception](#vault-secret-use-approvals-0120) also applies to manifest-binding cards.
 
 The flat card has `kind: "manifest_binding"` and the read-only payload:
 
@@ -358,14 +357,24 @@ never repository, statement or permissions; fetch the card on the admitted route
 
 ## Vault secret-use approvals (0.12.0)
 
-Cingulate advertises `secret-use-approval/v1`. Only daemon-stamped
+Cingulate advertises `secret-use-approval/v1`. In release builds, only daemon-stamped
 `reserved:callosum` routes with harness `fed-phone:<32 lowercase hex>` and
 `clientFeatures: ["secret-use-approval"]` may read or answer `kind: "secret_use"`.
 List, get and watch hide these cards from older phones and all other devices;
 watch also hides removal ids after payload pruning. Both allow and decline
 require the feature; missing it refuses `elicitation_secret_use_approval_required`.
 Get without the feature refuses `elicitation_not_found`. Agents and computers
-are never answering surfaces for this kind.
+are not answering surfaces for this kind in release builds.
+
+In development builds with `dev-local-operator`, the daemon-stamped local-operator
+`direct` route used by the desktop app may read and answer `secret_use`,
+`manifest_binding`, and secret-bearing `flow_install` cards with the respective
+client feature. Its device fingerprint is `00000000000000000000000000000000`;
+the envelope is the phone's `ck-secret-use-envelope/v1` or manifest-binding
+approval envelope with that fingerprint. Top-level `signature` and
+`signature_b64url` members are refused. Release builds omit this feature and
+retain the phone-only rule. The [desktop development samples](../../test-vectors/desktop-dev-cards-v1/README.md)
+pin the served cards and answers.
 
 The flat phone record carries `secretUse: {items: [{request_id,
 statement_b64url}]}`. Nested fields keep the vault's snake_case spelling. Decode
@@ -419,12 +428,13 @@ statement domain is `ck-secret-flow-statement/v1`, with only `version` offered.
 The [requester contract](consent-requester-v2.md#flow-install-secret-approvals-0130)
 describes the closed shapes and filing refusals.
 
-The same `secret_use` gate applies, with no new phone feature name:
+The same release-build `secret_use` gate applies, with no new phone feature name:
 `reserved:callosum`, harness `fed-phone:<32 lowercase hex>`, and
 `clientFeatures: ["secret-use-approval"]`. Unsupported phones, computers,
 simulators and agents cannot read or answer, even to decline. List/get/watch
 and pruned watch-removal ids are filtered identically. Plain `flow_install`
-cards remain visible and answerable exactly as before.
+cards remain visible and answerable exactly as before. The
+[development-build exception](#vault-secret-use-approvals-0120) applies to secret-bearing cards.
 
 For an install/grant choice, sign one `ck-secret-use-envelope/v1`, submit it to
 the vault with the phone's user-presence check (biometric or device passcode) as for `secret_use`, then answer the card with the same
