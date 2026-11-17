@@ -358,12 +358,24 @@ impl Stamp {
         (self.label() == "reserved:callosum" && cingulate_decode::lowercase_hex(fingerprint, 32))
             .then_some(fingerprint)
     }
+
+    fn secret_approval_device(&self) -> Option<&str> {
+        if DEVELOPMENT_LOCAL_OPERATOR && self.local_operator {
+            Some("00000000000000000000000000000000")
+        } else {
+            self.secret_use_phone()
+        }
+    }
+
     fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
+        if record.request.answer_needs_phone() && self.secret_use_phone().is_none() {
+            return false;
+        }
         if record.request.kind == "config_plan" {
-            return self.secret_use_phone().is_some() && feature_declared(params, "config-plan");
+            return feature_declared(params, "config-plan");
         }
         !record.request.is_secret_card()
-            || (self.secret_use_phone().is_some()
+            || (self.secret_approval_device().is_some()
                 && feature_declared(
                     params,
                     if record.request.kind == "manifest_binding" {
@@ -1778,10 +1790,23 @@ impl Handler {
                     reply
                 }
                 "consent.answer" => {
-                    let config = store
+                    let record = store
                         .get_phone(id.expect("answer id"), now)
-                        .map_err(store_error)?
+                        .map_err(store_error)?;
+                    let config = record
+                        .as_ref()
                         .is_some_and(|r| r.request.kind == "config_plan");
+                    let secret_card = record.as_ref().is_some_and(|r| r.request.is_secret_card());
+                    if secret_card
+                        && DEVELOPMENT_LOCAL_OPERATOR
+                        && stamp.local_operator
+                        && (params.get("signature").is_some()
+                            || params.get("signature_b64url").is_some())
+                    {
+                        return Err(invalid(
+                            "development secret approvals cannot carry signatures",
+                        ));
+                    }
                     let signed_field = |field: &str| {
                         params
                             .get(field)
@@ -1834,7 +1859,11 @@ impl Handler {
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
                             cingulate_store::AnswerProvenance {
-                                device: stamp.answering_device(),
+                                device: if secret_card {
+                                    stamp.secret_approval_device()
+                                } else {
+                                    stamp.answering_device()
+                                },
                                 surface: stamp.operator_app.as_ref().map(|_| "operator_app"),
                             },
                             params

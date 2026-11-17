@@ -1073,7 +1073,7 @@ async fn development_local_operator_keeps_direct_requester_operations() {
 
 #[tokio::test]
 #[cfg(feature = "dev-local-operator")]
-async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_watch() {
+async fn development_local_operator_hides_secret_cards_without_approval_features() {
     let secret: Value = serde_json::from_str(include_str!(
         "../../../test-vectors/secret-use-approval-v1/filer-request.json"
     ))
@@ -1083,7 +1083,8 @@ async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_
     ))
     .unwrap();
     let device = "300c9c9603b92a4b39ed3958bf924011";
-    let features = json!(["secret-use-approval"]);
+    let phone_features = json!(["secret-use-approval"]);
+    let features = json!([]);
     for (module, request, decline) in [
         ("aft", secret["params"].clone(), "decline"),
         ("prefrontal-core", flow["params"].clone(), "decline"),
@@ -1131,7 +1132,7 @@ async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_
             &f.handler,
             &phone,
             "consent.list_pending",
-            json!({"clientFeatures":features}),
+            json!({"clientFeatures":phone_features}),
         )
         .await;
         assert_eq!(
@@ -1193,7 +1194,7 @@ async fn development_local_operator_hides_phone_only_cards_in_reads_answers_and_
         assert_eq!(watch.await.unwrap(), HandlerOutcome::Streamed);
         assert!(
             items.try_recv().is_err(),
-            "phone-only changes must not leak"
+            "secret changes must not leak without approval features"
         );
     }
 }

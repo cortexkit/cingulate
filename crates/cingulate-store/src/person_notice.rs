@@ -30,6 +30,11 @@ enum PersonFields<'a> {
         subject: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         expires_at_ms: Option<i64>,
+        // Presence tells prefrontal the marker is authoritative; absence means an
+        // older Cingulate, so prefrontal must fall back to its phone-only kind list.
+        // True requires a phone push regardless of operator presence because a
+        // desktop answer would be refused.
+        phone_only: bool,
     },
     Settled {
         outcome: &'a str,
@@ -64,6 +69,7 @@ impl ElicitationRecord {
                     card_kind,
                     subject,
                     expires_at_ms: self.expires_at_ms,
+                    phone_only: self.request.answer_needs_phone(),
                 })
             }
             "settled" => Some(PersonFields::Settled {
@@ -194,12 +200,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fully_backfilled_cards_need_no_write_transaction() {
-        let scratch = Scratch(scratch_root("cingulate-backfill"));
-        let descriptor = crate::storage_descriptor(None, scratch.0.to_str().unwrap());
-        let store = ConsentStore::open(&descriptor, 100).unwrap().0;
-        let identity = RequestIdentity {
+    fn identity() -> RequestIdentity {
+        RequestIdentity {
             owner: "attested-owner".into(),
             requester: "reserved:cerebellum".into(),
             subject: Subject {
@@ -216,7 +218,155 @@ mod tests {
                 agent_id: None,
             }),
             head: None,
-        };
+        }
+    }
+
+    fn assert_escalated_body(request: Value, fields: &str) {
+        let scratch = Scratch(scratch_root("cingulate-phone-notice"));
+        let descriptor = crate::storage_descriptor(None, scratch.0.to_str().unwrap());
+        let store = ConsentStore::open(&descriptor, 100).unwrap().0;
+        let record = store
+            .create(&identity(), ConsentRequest::decode(request).unwrap(), 100)
+            .unwrap()
+            .record;
+        let expected = format!(
+            r#"{{"elicitation_id":"{}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"sc_asker"}},"fields":{fields}}}"#,
+            record.elicitation_id
+        );
+        let notices = store.access_notices(100).unwrap();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].body_json, expected);
+
+        // Upgraded stores recreate missing notices through the same builder.
+        store
+            .transaction(|tx| {
+                tx.execute("DELETE FROM access_notices", [])?;
+                Ok(())
+            })
+            .unwrap();
+        store.backfill_person_notices().unwrap();
+        let notices = store.access_notices(100).unwrap();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].body_json, expected);
+
+        let asker = identity().asker;
+        let withdrawn = record.person_notice("withdrawn", asker.as_ref()).unwrap();
+        assert_eq!(
+            serde_json::to_string(&withdrawn).unwrap(),
+            format!(
+                r#"{{"elicitation_id":"{}","purpose":"withdrawn","asker":{{"scope_epoch":3,"scope_ref":"sc_asker"}}}}"#,
+                record.elicitation_id
+            )
+        );
+        let mut settled = record;
+        settled.state = State::Answered;
+        let body = settled.person_notice("settled", asker.as_ref()).unwrap();
+        assert_eq!(
+            serde_json::to_string(&body).unwrap(),
+            format!(
+                r#"{{"elicitation_id":"{}","purpose":"settled","asker":{{"scope_epoch":3,"scope_ref":"sc_asker"}},"fields":{{"outcome":"answered"}}}}"#,
+                settled.elicitation_id
+            )
+        );
+    }
+
+    fn flow_install_request() -> Value {
+        let vector: Value = serde_json::from_str(include_str!(
+            "../../../test-vectors/flow-install-secrets-v2/filing.json"
+        ))
+        .unwrap();
+        vector["params"].clone()
+    }
+
+    #[test]
+    fn escalated_phone_delivery_secret_use() {
+        let vector: Value = serde_json::from_str(include_str!(
+            "../../../test-vectors/secret-use-approval-v2/filer-request.json"
+        ))
+        .unwrap();
+        assert_escalated_body(
+            vector["params"].clone(),
+            if cfg!(feature = "dev-local-operator") {
+                r#"{"card_kind":"secret_use","subject":"ALF","expires_at_ms":1700000600000,"phone_only":false}"#
+            } else {
+                r#"{"card_kind":"secret_use","subject":"ALF","expires_at_ms":1700000600000,"phone_only":true}"#
+            },
+        );
+    }
+
+    #[test]
+    fn escalated_phone_delivery_manifest_binding() {
+        let samples: Value = serde_json::from_str(include_str!(
+            "../../../test-vectors/manifest-binding-v1/vault-samples.json"
+        ))
+        .unwrap();
+        assert_escalated_body(
+            serde_json::json!({"kind":"manifest_binding","manifest_binding":{
+                "statement_b64url":samples["samples"]["statement"]["statement_b64url"]
+            }}),
+            if cfg!(feature = "dev-local-operator") {
+                r#"{"card_kind":"manifest_binding","subject":"ALF","expires_at_ms":1794441700123,"phone_only":false}"#
+            } else {
+                r#"{"card_kind":"manifest_binding","subject":"ALF","expires_at_ms":1794441700123,"phone_only":true}"#
+            },
+        );
+    }
+
+    #[test]
+    fn escalated_phone_delivery_config_plan() {
+        assert_escalated_body(
+            serde_json::json!({"kind":"config_plan","expires_in_ms":300000,"binding":{"correlation":"fake-correlation"},"config_plan":{
+                "plan_digest":"fake-plan-digest","base_revision":"42",
+                "apply":{"operation":"change","rollback_to":null,"modules":[],"review":null},"changes":[{
+                    "module_id":"example-module","project_id":"example-project","path":"settings.enabled",
+                    "old":false,"new":true,"old_source":"default","new_source":"project","apply":"live"
+                }],"other_sections":{}
+            }}),
+            r#"{"card_kind":"config_plan","subject":"ALF","expires_at_ms":300100,"phone_only":true}"#,
+        );
+    }
+
+    #[test]
+    fn escalated_phone_delivery_flow_install_with_secrets() {
+        assert_escalated_body(
+            flow_install_request(),
+            if cfg!(feature = "dev-local-operator") {
+                r#"{"card_kind":"flow_install","subject":"ALF","expires_at_ms":1700000600000,"phone_only":false}"#
+            } else {
+                r#"{"card_kind":"flow_install","subject":"ALF","expires_at_ms":1700000600000,"phone_only":true}"#
+            },
+        );
+    }
+
+    #[test]
+    fn escalated_phone_delivery_consent_has_false_flag() {
+        assert_escalated_body(
+            serde_json::from_str(include_str!(
+                "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
+            ))
+            .unwrap(),
+            r#"{"card_kind":"consent","subject":"ALF","expires_at_ms":60100,"phone_only":false}"#,
+        );
+    }
+
+    #[test]
+    fn escalated_phone_delivery_flow_install_without_secrets_has_false_flag() {
+        let mut request = flow_install_request();
+        let flow = request["flow_install"].as_object_mut().unwrap();
+        flow.remove("secrets");
+        flow.remove("flow_identity");
+        assert_escalated_body(
+            request,
+            r#"{"card_kind":"flow_install","subject":"ALF","phone_only":false}"#,
+        );
+    }
+
+    #[test]
+    fn fully_backfilled_cards_need_no_write_transaction() {
+        let scratch = Scratch(scratch_root("cingulate-backfill"));
+        let descriptor = crate::storage_descriptor(None, scratch.0.to_str().unwrap());
+        let store = ConsentStore::open(&descriptor, 100).unwrap().0;
+        let identity = identity();
         let request = ConsentRequest::decode(
             serde_json::from_str(include_str!(
                 "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"

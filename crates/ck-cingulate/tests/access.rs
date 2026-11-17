@@ -179,7 +179,7 @@ async fn person_consent_filing_enqueues_exact_notice_without_requester_text() {
         .await;
     f.deliver().await;
     let expected = format!(
-        r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"consent","subject":"agent-head","expires_at_ms":61000}}}}"#
+        r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"consent","subject":"agent-head","expires_at_ms":61000,"phone_only":false}}}}"#
     );
     let db = rusqlite::Connection::open(&f.path).unwrap();
     let bodies: Vec<String> = db
@@ -210,7 +210,7 @@ async fn unscoped_person_card_notices_core_without_an_asker() {
     assert_eq!(
         rows[0].2,
         format!(
-            r#"{{"elicitation_id":"{id}","purpose":"escalated","fields":{{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":61000}}}}"#
+            r#"{{"elicitation_id":"{id}","purpose":"escalated","fields":{{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":61000,"phone_only":false}}}}"#
         )
     );
     f.ok(
@@ -471,8 +471,9 @@ async fn person_secret_use_filing_enqueues_only_safe_fields() {
     .unwrap();
     let id = f.ask(&owner, vector["params"].clone()).await;
     f.deliver().await;
+    let phone_only = !cfg!(feature = "dev-local-operator");
     let expected = format!(
-        r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"secret_use","subject":"agent-A","expires_at_ms":1700000600000}}}}"#
+        r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"secret_use","subject":"agent-A","expires_at_ms":1700000600000,"phone_only":{phone_only}}}}}"#
     );
     assert_eq!(f.card_notices(&id)[0].2, expected);
     assert_eq!(
@@ -495,10 +496,11 @@ async fn person_flow_install_with_secrets_enqueues_only_safe_fields() {
         )
         .await;
     f.deliver().await;
+    let phone_only = !cfg!(feature = "dev-local-operator");
     assert_eq!(
         f.card_notices(&id)[0].2,
         format!(
-            r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"flow_install","subject":"agent-head","expires_at_ms":1700000600000}}}}"#
+            r#"{{"elicitation_id":"{id}","purpose":"escalated","asker":{{"scope_epoch":3,"scope_ref":"Head-session"}},"fields":{{"card_kind":"flow_install","subject":"agent-head","expires_at_ms":1700000600000,"phone_only":{phone_only}}}}}"#
         )
     );
 }
@@ -514,7 +516,7 @@ async fn person_package_and_basal_decision_are_consent_notices() {
     let notice: Value = serde_json::from_str(&f.card_notices(&id)[0].2).unwrap();
     assert_eq!(
         notice["fields"],
-        json!({"card_kind":"consent","subject":"operator decision","expires_at_ms":61000})
+        json!({"card_kind":"consent","subject":"operator decision","expires_at_ms":61000,"phone_only":false})
     );
 
     let mut package = consent_card();
@@ -526,7 +528,7 @@ async fn person_package_and_basal_decision_are_consent_notices() {
     let notice: Value = serde_json::from_str(&f.card_notices(&id)[0].2).unwrap();
     assert_eq!(
         notice["fields"],
-        json!({"card_kind":"consent","subject":"agent-head","expires_at_ms":61000})
+        json!({"card_kind":"consent","subject":"agent-head","expires_at_ms":61000,"phone_only":false})
     );
 }
 

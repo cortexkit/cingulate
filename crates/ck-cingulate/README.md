@@ -36,8 +36,8 @@ When Callosum opens a route for a paired device's
 call, it sets that harness to `fed-<class>:<device fingerprint>`, where the class
 (`phone`, `sim`, `mac` or `unknown`) is fixed by the operator at pairing and the
 device cannot choose it. `secret_use`, `manifest_binding`, `config_plan`, and
-`flow_install` cards carrying secrets retain their phone-only rules; desktop
-recognition is not a signed approval.
+`flow_install` cards carrying secrets retain their phone-only rules in default
+builds; desktop recognition alone is not a signed approval.
 The harness only
 narrows Callosum's answer authority; on any other principal it grants nothing. Body identity
 and the bind identity's session are never trusted. Console machine stays empty:
@@ -47,13 +47,22 @@ no attested console source exists, so `at_console` answers still fail closed.
 
 The `dev-local-operator` Cargo feature is off by default. For a development
 installation that needs plain local (`Principal::Direct`) programs to answer
-ordinary cards, build with:
+ordinary and vault-approval cards, build with:
 
 ```sh
 cargo build -p ck-cingulate --release --features dev-local-operator
 ```
 
-The feature does not relax the phone-only rules for signed-statement cards.
+The feature also admits `secret_use`, `manifest_binding` and secret-carrying
+`flow_install` cards on the stamped local-operator route, with the phone's
+approval feature and envelope shape. Development envelopes must name device
+`00000000000000000000000000000000`; top-level `signature` and
+`signature_b64url` members are refused, and envelope objects remain closed.
+The vault's development mode verifies the envelope except for the signature.
+Escalated notices mark these cards with `phone_only: false` in this build. Every
+escalated notice carries the authoritative boolean; an absent marker means an
+older Cingulate and requires the reader's kind-based fallback. Config plans still
+require the phone because the daemon confirms them on the computer itself.
 Setting the `DEVELOPMENT_LOCAL_OPERATOR` environment variable has no effect.
 Public release builds must omit `dev-local-operator`; build them with
 `cargo build -p ck-cingulate --release --no-default-features`.

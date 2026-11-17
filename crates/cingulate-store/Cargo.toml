@@ -1,11 +1,15 @@
 [package]
 name = "cingulate-store"
-version = "0.11.1"
+version = "0.11.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cortexkit/cingulate"
 publish = false
 description = "Durable, orchestrator-independent consent card lifecycle and feeds."
+
+[features]
+default = []
+dev-local-operator = ["cingulate-decode/dev-local-operator"]
 
 [dependencies]
 cingulate-decode = { path = "../cingulate-decode" }

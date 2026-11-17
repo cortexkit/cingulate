@@ -1034,6 +1034,21 @@ async fn config_plan_v3_keeps_revision_only_success_compatibility_and_refusal_co
         .unwrap();
         current["tag"] = json!("config-plan-v3");
         remove_revision_suffix(&mut current);
+        // Current escalations add phone-routing metadata absent from the frozen
+        // v3 notices. Pin that addition before comparing all remaining fields.
+        if name == "person-notices-two-rounds.json" {
+            for notice in current["notices"].as_array_mut().unwrap() {
+                if notice["purpose"] == "escalated" {
+                    assert_eq!(
+                        notice["fields"]
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("phone_only"),
+                        Some(json!(true))
+                    );
+                }
+            }
+        }
         // Human refusal text is deliberately not a pinned protocol contract.
         // Codes, request shapes and every non-message field still match v3.
         for case in [&mut current, &mut historical] {

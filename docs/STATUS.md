@@ -181,17 +181,18 @@ system temp directory.
 
 An operation admitted on a `direct` route proves only that the caller runs as the
 operator's user. With `dev-local-operator`, any local program, including an agent's shell, can approve
-ordinary consent cards without the phone, including a card it filed itself.
+ordinary consent and vault-approval cards without the phone, including a card it filed itself.
 Separate runtime user accounts or a caller program check would close that
 self-approval gap. The development opening is not a guarantee of human approval.
 
 - **Card answers.** The default-off `dev-local-operator` Cargo feature admits daemon-stamped
-  `direct` binds to ordinary operator cards. This deliberately accepts the
+  `direct` binds to ordinary operator cards and vault approvals. This deliberately accepts the
   self-approval gap because, during development, no caller check may block an app
   or module being built. It is not a release guarantee: omit the feature
   from public release builds. The feature-off answer tests prove local operator
-  authority is removed, while
-  phone-only secret and device gates remain enforced with the switch enabled.
+  authority is removed. With the switch enabled, vault approvals still require
+  the phone's client feature and an unsigned envelope bound to the all-zero
+  development device; config plans remain phone-only.
 - **`permissions.revoke`.** The [permissions/v1](contracts/permissions-v1.md)
   contract admits revoke from `direct`, both on providers and on cingulate. The
   same caveat applies: any local process can revoke. The worst case is a local

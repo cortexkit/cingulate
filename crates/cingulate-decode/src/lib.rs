@@ -769,6 +769,17 @@ impl ConsentRequest {
                     .as_ref()
                     .is_some_and(|body| body.contains_key("secrets")))
     }
+
+    /// The single rule for whether only the phone can approve this card.
+    /// Used by `ck-cingulate`'s `Stamp::card_visible` and the store's escalated
+    /// person-notice builder so visibility and phone delivery cannot disagree.
+    /// Development local-operator builds widen secret approvals to the desktop
+    /// with unsigned development envelopes; config plans still need the phone
+    /// because the daemon confirms them on the computer itself.
+    pub fn answer_needs_phone(&self) -> bool {
+        self.kind == "config_plan"
+            || (self.is_secret_card() && !cfg!(feature = "dev-local-operator"))
+    }
 }
 
 fn validate_author_text(field: &str, value: &AuthorText) -> Result<(), Refusal> {

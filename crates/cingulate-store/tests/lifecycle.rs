@@ -1788,7 +1788,7 @@ fn optional_expiry_migration_preserves_all_existing_rows_and_cursors() {
         json!("el_1"),
         json!("escalated"),
         json!(
-            r#"{"elicitation_id":"el_1","purpose":"escalated","fields":{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":60100}}"#
+            r#"{"elicitation_id":"el_1","purpose":"escalated","fields":{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":60100,"phone_only":false}}"#
         ),
         json!("pending"),
         json!(0),

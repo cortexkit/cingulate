@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.25.4 (ck-cingulate), 0.13.4 (cingulate-decode), 0.11.2 (cingulate-store), 0.16.5 (cingulate-vectors)
+
+- Mark escalated notices with `phone_only: true` when only the phone can answer,
+  and explicit `false` otherwise, so prefrontal can treat the marker as
+  authoritative. Absence identifies older Cingulate versions needing a kind-based
+  fallback. Share the phone requirement with card visibility and backfilled
+  notices; keep existing feature checks and non-escalated notice bytes unchanged.
+- Regenerate the current config-plan and sealed-text notice samples and their
+  checksums; keep the historical corpora unchanged.
+- In `dev-local-operator` builds, allow secret-use, manifest-binding and
+  secret-carrying flow-install approvals on the stamped local-operator route
+  with the phone's feature flags and envelope shape. Bind these unsigned
+  development envelopes to the all-zero device fingerprint, refuse signature
+  members, and set `phone_only: false` for these kinds. Config plans remain phone-only;
+  release-build authority and ordinary-answer provenance are unchanged.
+
 ## 0.25.3 (ck-cingulate), 0.13.3 (cingulate-decode), 0.16.4 (cingulate-vectors)
 
 - Accept optional structured warnings, comparisons and capabilities on package
