@@ -427,7 +427,7 @@ and pruned watch-removal ids are filtered identically. Plain `flow_install`
 cards remain visible and answerable exactly as before.
 
 For an install/grant choice, sign one `ck-secret-use-envelope/v1`, submit it to
-the vault with Face ID as for `secret_use`, then answer the card with the same
+the vault with the phone's user-presence check (biometric or device passcode) as for `secret_use`, then answer the card with the same
 `envelope_b64url`. Use the card's grant option id as `choiceId`; it need not be
 `allow`. The envelope must have `decision: "allow"`, `duration: "version"`,
 `grant_expires_at_ms: 0`, and the answering phone's fingerprint. All existing
@@ -571,7 +571,7 @@ and requester get/await, with nested snake_case names preserved.
 Pending list records use the same projection. Phone list/get/answer readbacks
 **never include the requester's opaque `binding`**. The options and default are
 fixed: approve (`choose`) or decline (`decline`, default); expiry is denial.
-Before asking for Face ID or passcode, the phone must check the plan digest of
+Before asking for the user-presence check (biometric or device passcode), the phone must check the plan digest of
 what it rendered, then sign the config-consent statement with its consent key.
 Callosum owns that statement's grammar, key registration and verification.
 Cingulate does not parse or verify it. The following intentionally fake bytes
