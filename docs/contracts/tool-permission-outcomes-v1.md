@@ -2,7 +2,7 @@
 
 This contract lists the terminal outcomes and request refusals for `tool_permission` and `macos_permission` asks. Only `allow_once` and `allow_scope` grant. Every other code listed here, including `deny`, grants nothing and is a terminal refusal that is never retried. A reader that encounters an unknown code treats it the same way: a terminal refusal, never a grant or a reason to retry.
 
-Harness-only means a table row emitted by `thalamus-harness` or `aft`, but not by `cingulate`. Cingulate sends `session.notice` messages to the Prefrontal component (`reserved:prefrontal-core`), which waits for the ask's result and returns it to the requesting agent. A settled notice puts the outcome in `fields.outcome`. These messages never contain harness-only codes. Before adding such a code to them, update every component that reads `session.notice` so it recognizes the code. `access_withdrawn` also covers a cancelled call, provider withdrawal, or route close in the Thalamus harness. For both Cingulate and the Thalamus harness, `elicitation_invalid_request` is used for any request field that breaks the request limits.
+Harness-only means a table row emitted by `thalamus-harness` or `aft`, but not by `cingulate`. Cingulate sends `session.notice` messages to the Prefrontal component (`reserved:prefrontal`), which waits for the ask's result and returns it to the requesting agent. A settled notice puts the outcome in `fields.outcome`. These messages never contain harness-only codes. Before adding such a code to them, update every component that reads `session.notice` so it recognizes the code. `access_withdrawn` also covers a cancelled call, provider withdrawal, or route close in the Thalamus harness. For both Cingulate and the Thalamus harness, `elicitation_invalid_request` is used for any request field that breaks the request limits.
 
 A code that can arise both ways lists both stages. Its vectors are `<code>.json` for the request-time refusal and `<code>.outcome.json` for the `consent.await` outcome; a code with one stage has only `<code>.json`, in that stage's shape.
 
@@ -18,7 +18,7 @@ A code that can arise both ways lists both stages. Its vectors are `<code>.json`
 | `access_withdrawn` | The asker withdrew a pending ask. | `cingulate`, `thalamus-harness` | `outcome` |
 | `access_declined` | The person chose `deny`; this is the wire code for outcome `deny` and may carry the person's note. | `cingulate` | `outcome` |
 | `access_unavailable` | Cingulate cannot tell whether the parent session is available, or AFT cannot reach Cingulate. | `cingulate`, `aft` | `request` |
-| `access_not_alfonso` | The request has no scope identity attached by the subc daemon, or the attached scope does not name `reserved:prefrontal-core` as its owner. | `cingulate` | `request` |
+| `access_not_alfonso` | The request has no scope identity attached by the subc daemon, or the attached scope does not name `reserved:prefrontal` as its owner. | `cingulate` | `request` |
 | `access_macos_only` | A `macos_permission` ask arrived on a non-macOS runtime. | `cingulate` | `request` |
 | `access_informational` | `consent.await` was requested for a `macos_permission` ask, which has no waiting call. | `cingulate` | `outcome` |
 | `access_wrong_leg` | An answer request arrived on a surface other than the ask's pending answer leg. | `cingulate` | `request` |

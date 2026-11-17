@@ -58,7 +58,7 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | Operation | Kind | Who may call (`Handler::dispatch` in `lib.rs`; presence gates in `presence.rs`) |
 |---|---|---|
 | `presence.report` | mutate | Callosum's paired-phone route, verified local operator app, or local `direct` while the development switch is enabled. The route decides who may report and the device kind; only a development-switch `direct` caller names its own app. |
-| `presence.get` | query | Core (`reserved:prefrontal-core`) and local operator-standing callers. |
+| `presence.get` | query | Core (`reserved:prefrontal`) and local operator-standing callers. |
 | `presence.watch` | query/watch | Same readers as get; current summary followed by coalesced changes, including expiry. |
 | `consent.request` | mutate | An allowlisted requester for its card kind (`Stamp::allowed_kind`, `lib.rs:104-113`; checked in `identity`, `lib.rs:495-497`). |
 | `consent.get` | query | The owner (snake_case requester projection), or an operator surface (camelCase surface projection by `elicitationId`). |
@@ -69,7 +69,7 @@ The module `cingulate` (binary `ck-cingulate`, `crates/ck-cingulate`) declares
 | `consent.watch_pending` | query/watch | Operator routes (including local `direct` during development); secret-use cards and flow installs carrying secrets are visible only to `reserved:callosum` routes whose harness is `fed-phone:` plus 32 lowercase hex and whose client advertises `secret-use-approval`. |
 | `consent.answer` | mutate | Operator surfaces only (`operator`, `lib.rs:279-288`). |
 | `consent.list_pending` | query | Operator surfaces only. |
-| `consent.outcomes` | query | `reserved:prefrontal-core` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |
+| `consent.outcomes` | query | `reserved:prefrontal` only; preserves `requester_ref`, includes `single_use` and `late` only when true. Readers use `consent-outcomes-late/v1` to interpret absent `late` (`lib.rs:588-592`). |
 
 Identity comes only from the daemon's route stamp (`Stamp`, `lib.rs:73-123`);
 no request field names a requester or subject. The owner of a card is the pair
@@ -80,7 +80,7 @@ Since 0.13.3, subjects append `in project <name>` using only the filing route's 
 
 ### Package cards and bounded feeds
 
-`reserved:prefrontal-core` may raise `package` cards as well as `flow_install`.
+`reserved:prefrontal` may raise `package` cards as well as `flow_install`.
 Package payloads are typed and closed; an invented sample package request is
 SHA-256 checked in `test-vectors/consent-package-card-v1/`. The consent envelope
 limit is 1,310,720 bytes with `elicitation_request_too_large` on overflow.
@@ -169,7 +169,7 @@ system temp directory.
 
 | Consumer | Operations | Where the code or vectors show it |
 |---|---|---|
-| prefrontal-core | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (the requester operation shapes core uses) |
+| prefrontal | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (the requester operation shapes core uses) |
 | Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `reserved:callosum` and the literal `fed-phone:` harness prefix retain `operator_surface` independently of the local development switch (`Stamp::from_bind`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
 | Plexus | Requester of `consent` cards as a carrier, then owner ops | `allowed_kind` (`lib.rs:106`), carrier check (`lib.rs:498-504`); `test-vectors/elicitation-requester-v1/README.md` names `reserved:plexus` as the requester |
 | Basal | Requester of `flow_decision` cards, then owner ops | `allowed_kind` (`lib.rs:110`) |

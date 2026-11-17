@@ -13,6 +13,9 @@ use subc_protocol::{
 };
 use tokio::sync::watch;
 
+#[path = "access/prefrontal.rs"]
+mod prefrontal;
+
 struct TestClock(watch::Sender<i64>);
 #[async_trait]
 impl Clock for TestClock {

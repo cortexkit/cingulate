@@ -82,7 +82,7 @@ excess bytes are refused as `elicitation_request_too_large`, never truncated.
 `consent.list_pending`, which the phone reads, omits the package `script` and
 `manifest_json` bodies; a full card is returned by `consent.get`. `consent.answers`
 and `consent.outcomes` keep the bodies: their readers (the card's requester and
-prefrontal-core) check an answered card against the one they sent, and one card,
+prefrontal) check an answered card against the one they sent, and one card,
 at most the envelope limit, always fits a page. Core outcomes preserve an opaque
 `requester_ref`, include `single_use` only when true, and include `late: true` only
 when the card settled after a committed detach.

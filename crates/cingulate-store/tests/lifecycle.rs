@@ -18,6 +18,9 @@ use serde_json::{json, Value};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+#[path = "lifecycle/prefrontal.rs"]
+mod prefrontal;
+
 struct Scratch {
     root: PathBuf,
     descriptor: StorageDescriptor,
@@ -110,9 +113,9 @@ fn card_settled_outbox_exact_readers_sequences_and_idempotence() {
             let body: Value = serde_json::from_slice(&row.body()).unwrap();
             assert_eq!(
                 body,
-                json!({"elicitation_id": id, "feed": if row.reader == "prefrontal-core" { "outcomes" } else { "answers" }, "seq": index + 1})
+                json!({"elicitation_id": id, "feed": if row.reader == "prefrontal" { "outcomes" } else { "answers" }, "seq": index + 1})
             );
-            assert!(row.reader == "prefrontal-core" || row.reader == *reader);
+            assert!(row.reader == "prefrontal" || row.reader == *reader);
         }
         assert_eq!(
             store.answers(&owner.owner, 0, 104).unwrap().cursor,
@@ -137,7 +140,7 @@ fn card_settled_outbox_rolls_back_with_failed_settlement() {
         .unwrap()
         .record
         .elicitation_id;
-    scratch.sql().execute_batch("CREATE TRIGGER fail_after_settle BEFORE INSERT ON card_settled_outbox WHEN NEW.reader='prefrontal-core' BEGIN SELECT RAISE(ABORT,'injected rollback'); END;").unwrap();
+    scratch.sql().execute_batch("CREATE TRIGGER fail_after_settle BEFORE INSERT ON card_settled_outbox WHEN NEW.reader='prefrontal' BEGIN SELECT RAISE(ABORT,'injected rollback'); END;").unwrap();
     assert!(store.answer(&id, "allow_once", None, 101).is_err());
     assert_eq!(store.get(&id, 102).unwrap().unwrap().state, State::Pending);
     assert!(
@@ -166,7 +169,7 @@ fn card_settled_outbox_expiry_and_withdrawal_match_feed_visibility() {
     store.withdraw(&owner.owner, &id, 101).unwrap();
     let rows = store.card_settled_pending(64).unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].reader, "prefrontal-core");
+    assert_eq!(rows[0].reader, "prefrontal");
     let mut req = request();
     req.expires_in_ms = Some(10);
     let expired = store
@@ -223,7 +226,7 @@ fn card_settled_outbox_cap_is_per_reader_and_preserves_newest() {
         .sql()
         .execute(
             "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?1) \
-         INSERT INTO card_settled_outbox SELECT 'old-'||x,'prefrontal-core','outcomes',x FROM n",
+         INSERT INTO card_settled_outbox SELECT 'old-'||x,'prefrontal','outcomes',x FROM n",
             [CARD_SETTLED_PENDING_CAP],
         )
         .unwrap();
@@ -264,7 +267,15 @@ fn card_settled_outbox_cap_is_per_reader_and_preserves_newest() {
         .unwrap(),
         0
     );
-    assert_eq!(conn.query_row("SELECT seq FROM card_settled_outbox WHERE elicitation_id=?1 AND reader='prefrontal-core'", [&id], |r| r.get::<_, i64>(0)).unwrap(), CARD_SETTLED_PENDING_CAP + 1);
+    assert_eq!(
+        conn.query_row(
+            "SELECT seq FROM card_settled_outbox WHERE elicitation_id=?1 AND reader='prefrontal'",
+            [&id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        CARD_SETTLED_PENDING_CAP + 1
+    );
     drop(store);
     let (store, _) = scratch.open(102);
     assert_eq!(store.card_settled_counts().unwrap()[4].dropped, 1);
@@ -395,7 +406,7 @@ fn descriptor_path_wal_and_migrations_are_authoritative() {
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
-        "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+        "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16"
     );
     let answer_schema: String = conn
         .query_row(
@@ -483,14 +494,14 @@ fn newer_store_is_refused_before_serving_or_sweeping() {
     scratch
         .sql()
         .execute(
-            "INSERT INTO cortexkit_schema_version VALUES(?1,16,0)",
+            "INSERT INTO cortexkit_schema_version VALUES(?1,17,0)",
             [MIGRATION_NAMESPACE],
         )
         .unwrap();
     let before = snapshot(&scratch);
     let error = ConsentStore::open(&scratch.descriptor, i64::MAX).unwrap_err();
-    assert!(error.to_string().contains("version 16"));
-    assert!(error.to_string().contains("migration 15"));
+    assert!(error.to_string().contains("version 17"));
+    assert!(error.to_string().contains("migration 16"));
     assert!(!error.is_lease_held());
     assert_eq!(snapshot(&scratch), before);
 }

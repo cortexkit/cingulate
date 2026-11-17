@@ -56,7 +56,8 @@ screen locks.
 
 ## `presence.get` (query)
 
-Parameters: `{}`. Readers are `reserved:prefrontal-core` and local
+Parameters: `{}`. Readers are `reserved:prefrontal` (including its historical
+alias `reserved:prefrontal-core`) and local
 operator-standing callers (including verified apps and development `direct`).
 Everyone else, including the phone, gets `presence_read_not_allowed`.
 

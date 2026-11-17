@@ -184,7 +184,7 @@ consent and informational macOS cards are unchanged.
 | Already terminal, even the same choice | `{ok:false, code:"conflict", elicitation:Card}` with the first outcome. |
 | Invalid answer or any answer on an informational card | `{ok:false, code:"elicitation_invalid_choice", elicitation:Card}`. |
 | Unknown id | `{ok:false, code:"not_found"}`. |
-| Non-phone caller | Transport refusal `elicitation_operator_required` (except `reserved:prefrontal-core` relays, whose parent identity and leg are checked separately). |
+| Non-phone caller | Transport refusal `elicitation_operator_required` (except `reserved:prefrontal` relays, whose parent identity and leg are checked separately). |
 
 A terminal phone projection keeps `outcome`, `answeredBy: "user" | "head"` when
 answered, `answeredAtMs`, and optional `note`. Explicit denial adds

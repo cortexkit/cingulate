@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::{ConsentStore, ElicitationRecord, Result, State};
 
-pub const CARD_SETTLED_READERS: [&str; 5] = ["aft", "plexus", "basal", "broca", "prefrontal-core"];
+pub const CARD_SETTLED_READERS: [&str; 5] = ["aft", "plexus", "basal", "broca", "prefrontal"];
 pub const CARD_SETTLED_PENDING_CAP: i64 = 16_384;
 
 /// A feed pointer only: card text and answer contents never enter the bus body.
@@ -55,7 +55,7 @@ pub(crate) fn enqueue(conn: &Connection, record: &ElicitationRecord) -> Result<(
     // or owner (which also includes session coordinates).
     let filer = record.requester.strip_prefix("reserved:");
     for reader in CARD_SETTLED_READERS {
-        let feed = if reader == "prefrontal-core" {
+        let feed = if reader == "prefrontal" {
             "outcomes"
         } else if filer == Some(reader) && record.state != State::Withdrawn {
             "answers"

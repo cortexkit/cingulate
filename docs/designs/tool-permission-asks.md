@@ -43,7 +43,7 @@ AFT never chooses an answerer. Cingulate never decides policy and never reads AF
   walk run, then worker (through the daemon's `scope.describe`), then head; nothing else changes.
   When a run's scope ends (its deadline passes), AFT withdraws the run's open ask.
 - **Which calls ask through Cingulate:** a call whose stamped scope is owned by
-  `reserved:prefrontal-core` with `kind` `head`, `worker` or `ephemeral`. Testing `agent_id` alone
+  `reserved:prefrontal` with `kind` `head`, `worker` or `ephemeral`. Testing `agent_id` alone
   would miss every worker, because worker scopes carry no `agent_id`. A call with no stamp, or a
   scope from any other owner, belongs to AFT alone, and its plugin asks in the host UI as it does
   without Alfonso. That standalone path is untouched by this design: when OpenCode or Pi is used on
@@ -96,7 +96,7 @@ escalated ask, "for this task" included, applies to the worker's scope only, nev
   already has, `work(action="prompt", id="acc_…", prompt="<answer>[: note]")`, where `acc_…` is
   the ask's id from the notice. The work tool already routes prompts by id prefix, so no head's
   tool list or cached prompt changes. Core relays it to Cingulate as `consent.answer` from
-  `reserved:prefrontal-core` with body `{elicitation_id, answer, note?, answered_by: {agent_id,
+  `reserved:prefrontal` with body `{elicitation_id, answer, note?, answered_by: {agent_id,
   scope_ref, scope_epoch}}`. Core fills `answered_by` from the calling head's own verified session,
   never from the prompt text, and refuses locally when that head is not the asking worker's
   parent, so a wrong head gets a clear error at once. Cingulate normally accepts the relay on a
@@ -129,8 +129,8 @@ deny share one store transaction: whichever settles first wins and the loser get
   or at the caller's wait bound. It reads only, so AFT may re-await at any time.
 - **Withdrawing:** when a held call ends without an answer (client cancelled, route closed, a run's
   scope ended, or the asker gone), AFT calls `consent.withdraw {elicitationId}`. The raising
-  principal may withdraw a card, and `reserved:prefrontal-core` may withdraw a `tool_permission`
-  ask whose recorded asker scope it owns. Cingulate checks only that ownership. Prefrontal Core
+  principal may withdraw a card, and `reserved:prefrontal` may withdraw a `tool_permission`
+  ask whose recorded asker scope it owns. Cingulate checks only that ownership. Prefrontal
   withdraws only once a worker run is terminal (delivered, failed or cancelled), never while
   the worker is parked waiting on the ask. The record moves to `access_withdrawn`.
 - **After an AFT restart:** AFT re-sends `consent.request` with the persisted `call_key`; the same

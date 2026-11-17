@@ -38,7 +38,7 @@ and migration 2 seeds the persistent `el_` id counter. Later migrations in
   (`elicitation_not_owner`) from an acknowledged/tombstoned card
   (`elicitation_not_found`). `owner` remains readable until its row is pruned.
 - `answers` is owner-scoped and omits withdrawals. Restrict `outcomes` to
-  `reserved:prefrontal-core` in the module. Both return the global persisted
+  `reserved:prefrontal` in the module. Both return the global persisted
   high-water, even if no matching rows remain. Outcomes omit binding and retain
   the card's `requester_ref`; they include `single_use` and `late` only when true.
   `late` is captured from the stored detach state in the settlement transaction.

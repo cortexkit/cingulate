@@ -46,7 +46,7 @@ use tokio::{
 };
 
 const DEADLINE: Duration = Duration::from_secs(5);
-const OWNER: &str = "prefrontal-core";
+const OWNER: &str = "prefrontal";
 
 struct Task(JoinHandle<()>);
 
@@ -65,6 +65,7 @@ struct Fixture {
     tasks: Vec<Task>,
     consumer: SubcConsumer,
     owner: TcpStream,
+    owner_id: &'static str,
     connection_path: PathBuf,
     store_path: PathBuf,
     _scratch: ScratchDir,
@@ -132,6 +133,10 @@ async fn control(
 
 impl Fixture {
     async fn start() -> Self {
+        Self::start_as(OWNER).await
+    }
+
+    async fn start_as(owner_id: &'static str) -> Self {
         let scratch = ScratchDir::new("cingulate-live-daemon");
         let project = scratch.path().join("project");
         let data = scratch.path().join("data");
@@ -159,12 +164,21 @@ impl Fixture {
         assert!(process_alive(i32::try_from(published.pid).unwrap()));
 
         let supervisor = SupervisorHandle::new();
-        for id in [OWNER, "plexus", "stranger", "callosum", "aft", "occipital"] {
+        for id in [
+            owner_id,
+            "plexus",
+            "stranger",
+            "callosum",
+            "aft",
+            "occipital",
+        ] {
             supervisor.set_spawn_nonce(id, format!("test-launch-{id}"));
         }
-        supervisor.set_reserved_nonce(OWNER, format!("test-launch-{OWNER}"));
+        supervisor.set_reserved_nonce(owner_id, format!("test-launch-{owner_id}"));
         let control_handler = Arc::new(
-            ControlHandler::new(Arc::new(Registry::default())).with_supervisor(supervisor),
+            ControlHandler::new(Arc::new(Registry::default()))
+                .with_scope_authority_owners(vec!["prefrontal-core".into(), "prefrontal".into()])
+                .with_supervisor(supervisor),
         );
         let router = Arc::new(Router::with_control_handler(control_handler));
         let auth = ServerAuth::new(info.key.clone(), info.daemon_id, info.daemon_ver.clone());
@@ -237,10 +251,10 @@ impl Fixture {
             FrameType::Hello,
             1,
             ModuleHelloBody {
-                manifest: ModuleManifest::builder(OWNER, "0.1.0").build(),
+                manifest: ModuleManifest::builder(owner_id, "0.1.0").build(),
                 protocol_ver: PROTOCOL_VERSION,
                 control_ops: None,
-                launch_nonce: Some(format!("test-launch-{OWNER}")),
+                launch_nonce: Some(format!("test-launch-{owner_id}")),
             },
         )
         .await;
@@ -251,6 +265,7 @@ impl Fixture {
             tasks,
             consumer,
             owner,
+            owner_id,
             connection_path,
             store_path: store_path.into(),
             _scratch: scratch,
@@ -313,7 +328,7 @@ impl Fixture {
         bounded(self.consumer.open_route_scoped(
             target(),
             self.identity(harness),
-            ScopeSelector::new(principal(OWNER), "head-session", Some(epoch)),
+            ScopeSelector::new(principal(self.owner_id), "head-session", Some(epoch)),
             call_options(Some("plexus")),
         ))
         .await
@@ -942,4 +957,33 @@ async fn live_daemon_asker_liveness_accepts_workers_and_preserves_epoch_checks()
         ScopeLife::Gone
     ));
     fixture.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_prefrontal_aliases_own_permission_asks() {
+    for owner in ["prefrontal", "prefrontal-core"] {
+        let mut fixture = Fixture::start_as(owner).await;
+        fixture.sync(1, 7).await;
+        let route = bounded(fixture.consumer.open_route_scoped(
+            target(),
+            fixture.identity("aft-permission"),
+            ScopeSelector::new(principal(owner), "head-session", Some(7)),
+            call_options(Some("aft")),
+        ))
+        .await
+        .unwrap();
+        let result = fixture.request(&route, "consent.request", json!({
+            "kind":"tool_permission", "call_key":"alias-ask", "tool":"bash", "operation":"exec",
+            "paths":[], "command":"pwd", "reason":"Inspect folder", "args_hash":"hash",
+            "schema_pin":"schema-1", "pattern":"pwd"
+        })).await.unwrap();
+        let record: cingulate_store::AccessRecord =
+            fixture.stored("access_asks", result["elicitation_id"].as_str().unwrap());
+        assert_eq!(
+            record.identity.scope_owner.as_deref(),
+            Some(format!("reserved:{owner}").as_str())
+        );
+        assert_eq!(record.state, "pending:user");
+        fixture.stop().await;
+    }
 }

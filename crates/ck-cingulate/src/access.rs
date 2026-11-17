@@ -119,7 +119,7 @@ impl DaemonAccessRuntime {
             .module
             .scope_describe(
                 Principal::Reserved {
-                    module_id: "prefrontal-core".into(),
+                    module_id: "prefrontal".into(),
                 },
                 scope.scope_ref.clone(),
             )
@@ -173,7 +173,7 @@ impl AccessRuntime for DaemonAccessRuntime {
         let reply = consumer
             .call(
                 RouteTarget::ManagementSurface {
-                    module_id: "prefrontal-core".into(),
+                    module_id: "prefrontal".into(),
                 },
                 BindIdentity::new("cingulate", "permission-notices"),
                 request.into_bytes(),
@@ -256,20 +256,14 @@ impl Handler {
         let scope = stamp.scope.as_ref().ok_or_else(|| {
             Refusal::new(
                 "access_not_alfonso",
-                "ask requires a daemon-stamped scope owned by reserved:prefrontal-core",
+                "ask requires a daemon-stamped scope owned by reserved:prefrontal",
             )
         })?;
-        if scope.owner
-            != (Principal::Reserved {
-                module_id: "prefrontal-core".into(),
-            })
+        if !matches!(&scope.owner, Principal::Reserved { module_id } if is_prefrontal_module(module_id))
         {
             return Err(Refusal::new(
                 "access_not_alfonso",
-                format!(
-                    "scope owner {:?} is not reserved:prefrontal-core",
-                    scope.owner
-                ),
+                format!("scope owner {:?} is not reserved:prefrontal", scope.owner),
             ));
         }
         let head = if scope.kind == ScopeKind::Worker {
@@ -367,14 +361,11 @@ impl Handler {
                     let scope = stamp.scope.as_ref().ok_or_else(|| {
                         Refusal::new("access_not_alfonso", "ask requires a daemon-stamped scope")
                     })?;
-                    if scope.owner
-                        != (Principal::Reserved {
-                            module_id: "prefrontal-core".into(),
-                        })
+                    if !matches!(&scope.owner, Principal::Reserved { module_id } if is_prefrontal_module(module_id))
                     {
                         return Err(Refusal::new(
                             "access_not_alfonso",
-                            "scope is not owned by reserved:prefrontal-core",
+                            "scope is not owned by reserved:prefrontal",
                         ));
                     }
                     if scope.kind == ScopeKind::Worker && scope.parent.is_none() {
@@ -421,7 +412,7 @@ impl Handler {
                     "consent.answer" => {
                         let surface = if operator_surface {
                             "user"
-                        } else if stamp.label() == "reserved:prefrontal-core" {
+                        } else if is_prefrontal_principal(stamp.label()) {
                             "head"
                         } else {
                             "unauthorized"

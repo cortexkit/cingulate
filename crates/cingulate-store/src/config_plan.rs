@@ -430,8 +430,8 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].seq, 1);
         assert_eq!(rows[1].seq, 2);
-        assert_eq!(rows[0].msg_id(), format!("{id}:prefrontal-core:1"));
-        assert_eq!(rows[1].msg_id(), format!("{id}:prefrontal-core:2"));
+        assert_eq!(rows[0].msg_id(), format!("{id}:prefrontal:1"));
+        assert_eq!(rows[1].msg_id(), format!("{id}:prefrontal:2"));
         f.db().card_settled_published(&first).unwrap();
         assert_eq!(
             f.db().card_settled_pending(64).unwrap(),
@@ -450,7 +450,7 @@ mod tests {
         let third = f.db().card_settled_pending(64).unwrap();
         assert_eq!(third.len(), 1);
         assert_eq!(third[0].seq, 3);
-        assert_eq!(third[0].msg_id(), format!("{id}:prefrontal-core:3"));
+        assert_eq!(third[0].msg_id(), format!("{id}:prefrontal:3"));
     }
 
     #[test]

@@ -557,7 +557,7 @@ mod tests {
             let failing_reader = if self.fail_aft.load(Ordering::Relaxed) {
                 "aft"
             } else {
-                "prefrontal-core"
+                "prefrontal"
             };
             if row.reader == failing_reader && !self.recover.load(Ordering::Relaxed) {
                 if self.timeout.load(Ordering::Relaxed) {
@@ -586,7 +586,7 @@ mod tests {
         let (_dir, handler) = setup().await;
         for _ in 0..65 {
             handler
-                .with_store(|store| settle_store_for(store, "prefrontal-core"))
+                .with_store(|store| settle_store_for(store, "prefrontal"))
                 .await
                 .unwrap();
         }
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(
             calls
                 .iter()
-                .filter(|row| row.reader == "prefrontal-core")
+                .filter(|row| row.reader == "prefrontal")
                 .count(),
             1
         );

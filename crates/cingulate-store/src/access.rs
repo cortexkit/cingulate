@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{ConsentStore, Result};
+use crate::{is_prefrontal_principal, ConsentStore, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScopeIdentity {
@@ -93,8 +93,12 @@ impl AccessRecord {
     }
     pub fn can_withdraw(&self, principal: &str) -> bool {
         principal == self.identity.principal
-            || (principal == "reserved:prefrontal-core"
-                && self.identity.scope_owner.as_deref() == Some(principal)
+            || (is_prefrontal_principal(principal)
+                && self
+                    .identity
+                    .scope_owner
+                    .as_deref()
+                    .is_some_and(is_prefrontal_principal)
                 && matches!(self.request, AccessRequest::ToolPermission { .. }))
     }
     pub fn pending(&self) -> bool {
@@ -110,7 +114,7 @@ impl AccessRecord {
         // A user-leg ask without that identity must not authorize a head answer.
         self.attempts.iter().find_map(|attempt| {
             (attempt.surface == "head"
-                && attempt.principal == "reserved:prefrontal-core"
+                && is_prefrontal_principal(&attempt.principal)
                 && attempt.answer == "escalate"
                 && attempt.result == "accepted")
                 .then_some(attempt.answered_by.as_ref())
@@ -516,7 +520,7 @@ impl ConsentStore {
             let code = if !record.pending() { Some("conflict") }
                 else if record.request.informational() { Some("elicitation_invalid_choice") }
                 else if answer.surface == "head" {
-                    if answer.principal != "reserved:prefrontal-core" { Some("access_wrong_leg") }
+                    if !is_prefrontal_principal(&answer.principal) { Some("access_wrong_leg") }
                     else if record.state == "pending:user" && answer.answer == "deny" && matches!(record.request, AccessRequest::ToolPermission { .. }) {
                         match record.escalating_head() {
                             Some(head) if answer.answered_by.as_ref() == Some(head) => None,

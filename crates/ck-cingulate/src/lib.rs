@@ -15,8 +15,8 @@ use std::{
 use async_trait::async_trait;
 use cingulate_decode::{ConsentRequest, OptionGroup, Refusal};
 use cingulate_store::{
-    storage_descriptor, AnswerOutcome, ConsentStore, ElicitationRecord, RequestIdentity,
-    ScopeIdentity, State, StorageDescriptor, Subject,
+    is_prefrontal_module, is_prefrontal_principal, storage_descriptor, AnswerOutcome, ConsentStore,
+    ElicitationRecord, RequestIdentity, ScopeIdentity, State, StorageDescriptor, Subject,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -145,7 +145,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
         agent: SubjectAgent::Never,
     },
     RequesterAdmission {
-        principal: "reserved:prefrontal-core",
+        principal: "reserved:prefrontal",
         requester_name: Some("Prefrontal"),
         kinds: &["flow_install", "package"],
         agent: SubjectAgent::FromScope,
@@ -164,6 +164,11 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
 ];
 
 fn requester_admission(principal: &str) -> Option<&'static RequesterAdmission> {
+    let principal = if is_prefrontal_principal(principal) {
+        "reserved:prefrontal"
+    } else {
+        principal
+    };
     REQUESTER_ADMISSIONS
         .iter()
         .find(|admission| admission.principal == principal)
@@ -1095,10 +1100,7 @@ impl Handler {
             match &stamp.scope {
                 Some(scope)
                     if scope.kind == subc_protocol::scope::ScopeKind::Worker
-                        && scope.owner
-                            == (Principal::Reserved {
-                                module_id: "prefrontal-core".into(),
-                            }) =>
+                        && matches!(&scope.owner, Principal::Reserved { module_id } if is_prefrontal_module(module_id)) =>
                 {
                     Some(self.worker_head(scope).await?)
                 }
@@ -1328,8 +1330,7 @@ impl Handler {
             "consent.answer" | "consent.list_pending" | "consent.watch_pending" => operator(stamp)?,
             "consent.get" if operator_surface => {}
             "consent.outcomes" => {
-                if stamp.label() != "reserved:prefrontal-core" || federated::facts(stamp)?.is_some()
-                {
+                if !is_prefrontal_principal(stamp.label()) || federated::facts(stamp)?.is_some() {
                     return Err(stamp.refuse());
                 }
             }
@@ -2336,7 +2337,7 @@ mod tests {
                 ("direct", None, vec!["consent"]),
                 ("reserved:basal", Some("Basal"), vec!["flow_decision"]),
                 (
-                    "reserved:prefrontal-core",
+                    "reserved:prefrontal",
                     Some("Prefrontal"),
                     vec!["flow_install", "package"]
                 ),

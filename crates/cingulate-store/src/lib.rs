@@ -26,6 +26,8 @@ pub use card_settled::{
     CardSettled, CardSettledCounts, CARD_SETTLED_PENDING_CAP, CARD_SETTLED_READERS,
 };
 mod person_notice;
+mod principal;
+pub use principal::{is_prefrontal_module, is_prefrontal_principal};
 mod record;
 #[cfg(test)]
 mod test_support;
@@ -49,7 +51,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 15] = [
+pub const MIGRATIONS: [Migration; 16] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -109,6 +111,10 @@ pub const MIGRATIONS: [Migration; 15] = [
     Migration {
         version: 15,
         statements: include_str!("../migrations/015_card_settled_outbox.sql"),
+    },
+    Migration {
+        version: 16,
+        statements: include_str!("../migrations/016_prefrontal_reader.sql"),
     },
 ];
 
@@ -1139,7 +1145,7 @@ impl ConsentStore {
         self.feed(Some(owner), since, now_ms)
     }
 
-    /// Caller restricts this feed to reserved:prefrontal-core. Owner acks do not
+    /// Caller restricts this feed to reserved:prefrontal. Owner acks do not
     /// hide outcomes, but retention deletes acknowledged outcomes after 24 hours.
     pub fn outcomes(&self, since: i64, now_ms: i64) -> Result<Feed> {
         self.feed(None, since, now_ms)
@@ -1186,7 +1192,7 @@ impl ConsentStore {
                     None => json!({"elicitation_id":id,"state":"expired","settled_at":at}),
                 };
                 // Both feeds keep package bodies. Their only readers are the card's
-                // requester (answers) and prefrontal-core (outcomes), which check an answered
+                // requester (answers) and prefrontal (outcomes), which check an answered
                 // card against the one that was sent. One card is at most the 1.25 MiB request
                 // cap, so it always fits a page; only phone-facing lists drop the bodies.
                 let size = serde_json::to_vec(&value)?.len() + 1;

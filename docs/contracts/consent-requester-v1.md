@@ -89,7 +89,7 @@ not the scope reference and epoch. Local ownership is unchanged.
 | Requester principal | Allowed request kinds |
 |---|---|
 | `reserved:basal` | `flow_decision` |
-| `reserved:prefrontal-core` | `flow_install`, `package` |
+| `reserved:prefrontal` | `flow_install`, `package` |
 | `reserved:cerebellum`, `reserved:plexus`, `reserved:entorhinal` | `consent`; must also carry a nonblank daemon-attested subject agent |
 | `direct` | `consent`; displayed as an unverified local process |
 | Anything else, including absent / unverified / `reserved:callosum` | No requests |

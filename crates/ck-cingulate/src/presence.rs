@@ -66,7 +66,7 @@ impl Stamp {
                 "federated routes are not local presence readers",
             ));
         }
-        if self.label() == "reserved:prefrontal-core" || self.presence_local() {
+        if cingulate_store::is_prefrontal_principal(self.label()) || self.presence_local() {
             Ok(())
         } else {
             Err(Refusal::new(

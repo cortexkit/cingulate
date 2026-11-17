@@ -1,5 +1,12 @@
 # Consent requester contract, v2
 
+The orchestrator's current module id is `prefrontal`. Cingulate also accepts
+`prefrontal-core` in daemon-stamped principals and scope owners, and in stored
+answer provenance, so records from before the rename remain usable. These exact
+reserved aliases identify the same module; they do not authorize other owners.
+Outgoing scope descriptions, session notices and card-settled outcomes pointers
+use only `prefrontal`.
+
 Version 2 preserves every v1 operation and body for existing kinds. It adds AFT
 permission asks and the optional generic-consent correlation field described below. Pin the [served corpus](../../test-vectors/tool-permission-v1/README.md)
 and its `SHA256SUMS`; the phone projection is specified in
@@ -105,7 +112,7 @@ except for the worker admission rule below and `manifest_binding` as described
 in its dedicated section.
 
 For `kind: "consent"` from any requester already admitted for that kind, a stamp
-without an agent id may be a `worker` owned by `reserved:prefrontal-core`.
+without an agent id may be a `worker` owned by `reserved:prefrontal`.
 Cingulate resolves its same-owner stamped `parent` through the daemon's
 `scope.describe`, using the permission-ask liveness rules in
 [Admission and stamped identity](#admission-and-stamped-identity). The parent (a
@@ -208,7 +215,7 @@ AFT's ordinary `consent` filings require a daemon-stamped scope and use its stam
 identity, including head resolution for workers; retired agents refuse `consent_retired`.
 The `tool_permission`, `macos_permission` and `secret_use` admission rules are unchanged.
 For permission asks, an absent scope or a scope owned by anything
-other than `reserved:prefrontal-core` refuses `access_not_alfonso`.
+other than `reserved:prefrontal` refuses `access_not_alfonso`.
 The daemon-stamped scope ref, epoch, kind, agent and route harness are recorded;
 no body field supplies identity. Workers do not need an agent id.
 
@@ -291,8 +298,8 @@ is read-only and can be repeated. A returned pending state grants nothing.
 Cancelling/dropping a wait removes its transient registration and changes no row.
 
 `consent.withdraw` accepts the id from the raising principal, or, for `tool_permission`
-asks only, from `reserved:prefrontal-core` when the recorded asker scope is owned by
-`reserved:prefrontal-core`. Cingulate checks only that ownership; it cannot see worker
+asks only, from `reserved:prefrontal` when the recorded asker scope is owned by
+`reserved:prefrontal`. Cingulate checks only that ownership; it cannot see worker
 runs. Prefrontal Core withdraws only once a worker run is terminal (delivered, failed
 or cancelled), never while the worker is parked waiting on the ask. It moves any
 pending state to `refused:access_withdrawn`; a terminal record is returned
@@ -300,7 +307,7 @@ unchanged. Withdrawal, answer and head loss are serialized store transactions.
 
 ## Core relays and first-answer-wins
 
-Core answers from `reserved:prefrontal-core` using
+Core answers from `reserved:prefrontal` using
 `{elicitation_id, answer, note?, answered_by: {agent_id, scope_ref, scope_epoch}}`.
 `answered_by` is closed and must exactly match the worker's stamped parent ref
 and epoch and its daemon-described agent. Normally only `pending:head` tool asks
@@ -645,7 +652,7 @@ the decoded envelope bytes and matches the vault's grant and audit
 ## Flow-install secret approvals (0.13.0)
 
 Cingulate advertises `flow-install-secrets/v1`. Core sends the new fields only
-when that capability is present. Only `reserved:prefrontal-core` may file
+when that capability is present. Only `reserved:prefrontal` may file
 `flow_install`, as before. The existing `flow_install.flow` remains the flow's
 name; the new identity key is **`flow_identity`**, not `flow`.
 

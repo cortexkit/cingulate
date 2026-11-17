@@ -6,7 +6,7 @@ use serde_json::json;
 pub const ACCOUNT: &str = "box_example";
 
 pub fn corpus() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test-vectors/card-settled-v1")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test-vectors/card-settled-v1.1")
 }
 
 pub fn generate() -> BTreeMap<String, Vec<u8>> {

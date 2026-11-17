@@ -108,7 +108,16 @@ fn route_identity_and_admission() {
             "presence_device_not_allowed"
         );
     }
-    assert!(core().presence_reader().is_ok());
+    for module in ["prefrontal", "prefrontal-core"] {
+        let stamp = Stamp::from_principal(Some(&Principal::Reserved {
+            module_id: module.into(),
+        }));
+        assert!(stamp.presence_reader().is_ok());
+        assert_eq!(
+            h.presence_report(&stamp, &report()).unwrap_err().code,
+            "presence_device_not_allowed"
+        );
+    }
     assert_eq!(
         Stamp::default().presence_reader().unwrap_err().code,
         "presence_read_not_allowed"

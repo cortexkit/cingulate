@@ -6,6 +6,25 @@
   cards, answers and refusals for the desktop app. Correct the phone contract's
   description of the development-build exception; release authority is unchanged.
 
+## 0.26.0 (ck-cingulate), 0.12.0 (cingulate-store), 0.17.0 (cingulate-vectors)
+
+- Rename the active orchestrator module to `prefrontal`. Share exact alias checks
+  for `reserved:prefrontal` and `reserved:prefrontal-core` across requester admission,
+  scope ownership, permission relays, stored escalation provenance, withdrawal,
+  presence readers and the outcomes feed. Stored identities are not rewritten;
+  neither alias admits a foreign scope or grants operator authority.
+- Send scope descriptions and session notices to `prefrontal`. The fleet cutover
+  stops prefrontal, restarts the bus with renamed durable subscriptions (the
+  server's saved reader cursors), places this release, then starts the renamed module.
+- Migration 016 rebuilds the card-settled outbox, remaps all pending old-reader
+  pointers to `prefrontal`, and moves publication/drop counters in the same
+  migration transaction. Acknowledged pointers were already deleted, so their
+  historical message ids are not rewritten or republished. The reader CHECK keeps
+  the old spelling so a rollback can still enqueue old-name pointers.
+- Publish outcomes wake-ups on `event.cingulate.card_settled.v1.prefrontal` with
+  message ids `<id>:prefrontal:<seq>`. Add the `card-settled-v1.1` sample tag and
+  retain every file in the published `card-settled-v1` tag unchanged.
+
 ## 0.25.4 (ck-cingulate), 0.13.4 (cingulate-decode), 0.11.2 (cingulate-store), 0.16.5 (cingulate-vectors)
 
 - Mark escalated notices with `phone_only: true` when only the phone can answer,
