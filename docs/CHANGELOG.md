@@ -6,6 +6,11 @@
   cards, answers and refusals for the desktop app. Correct the phone contract's
   description of the development-build exception; release authority is unchanged.
 
+## 0.26.1 (ck-cingulate)
+
+- In development builds, the desktop app now receives pending-card updates when
+  the phone answers secret approvals that the desktop app can list.
+
 ## 0.26.0 (ck-cingulate), 0.12.0 (cingulate-store), 0.17.0 (cingulate-vectors)
 
 - Rename the active orchestrator module to `prefrontal`. Share exact alias checks

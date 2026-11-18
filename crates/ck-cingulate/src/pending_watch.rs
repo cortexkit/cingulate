@@ -1,5 +1,5 @@
-//! `consent.watch_pending`: a live stream of phone-visible card changes,
-//! replacing the phone's polling of `consent.list_pending`.
+//! `consent.watch_pending`: a live stream of changes to cards visible through
+//! `consent.list_pending` on the same route.
 //!
 //! The stream is pulled from the store's change log (one row per committed
 //! change, written by triggers in the same transaction). A watch keeps only its
@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use subc_client_rs::{HandlerOutcome, RequestCtx};
 use tokio::sync::Semaphore;
 
-use crate::{feature_declared, invalid, operator, option_group_declared, Handler, Stamp};
+use crate::{invalid, operator, option_group_declared, Handler, Stamp};
 
 /// The watch operation's name, declared with watch delivery in the manifest.
 pub const WATCH_PENDING: &str = "consent.watch_pending";
@@ -287,23 +287,13 @@ impl Handler {
             for change in page.changes {
                 // Advance over hidden changes without emitting even a removal id.
                 position = change.version;
-                if change.config_plan
-                    && (stamp.secret_use_phone().is_none()
-                        || !feature_declared(params, "config-plan"))
-                {
-                    continue;
-                }
-                if change.secret_use
-                    && (stamp.secret_use_phone().is_none()
-                        || !feature_declared(
-                            params,
-                            if change.manifest_binding {
-                                "manifest-binding-approval"
-                            } else {
-                                "secret-use-approval"
-                            },
-                        ))
-                {
+                // `secret_use` includes all secret cards, not just the secret-use kind.
+                if !stamp.kind_visible(
+                    change.secret_use,
+                    change.manifest_binding,
+                    change.config_plan,
+                    params,
+                ) {
                     continue;
                 }
                 let item = self

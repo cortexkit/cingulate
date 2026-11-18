@@ -770,15 +770,19 @@ impl ConsentRequest {
                     .is_some_and(|body| body.contains_key("secrets")))
     }
 
-    /// The single rule for whether only the phone can approve this card.
-    /// Used by `ck-cingulate`'s `Stamp::card_visible` and the store's escalated
-    /// person-notice builder so visibility and phone delivery cannot disagree.
+    /// Whether only the phone can approve this card.
+    pub fn answer_needs_phone(&self) -> bool {
+        Self::kind_answer_needs_phone(self.is_secret_card(), self.kind == "config_plan")
+    }
+
+    /// Phone-only rule shared by pending-card readers and notices announcing cards
+    /// that need an operator's attention. A watch can check these flags even after
+    /// the card is deleted.
     /// Development local-operator builds widen secret approvals to the desktop
     /// with unsigned development envelopes; config plans still need the phone
     /// because the daemon confirms them on the computer itself.
-    pub fn answer_needs_phone(&self) -> bool {
-        self.kind == "config_plan"
-            || (self.is_secret_card() && !cfg!(feature = "dev-local-operator"))
+    pub fn kind_answer_needs_phone(secret_card: bool, config_plan: bool) -> bool {
+        config_plan || (secret_card && !cfg!(feature = "dev-local-operator"))
     }
 }
 

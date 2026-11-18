@@ -24,6 +24,8 @@ use tokio::sync::{watch, Semaphore};
 
 #[path = "module/federated.rs"]
 mod federated;
+#[path = "module/pending_visibility.rs"]
+mod pending_visibility;
 
 #[test]
 fn hello_manifest_declares_registration_channel() {

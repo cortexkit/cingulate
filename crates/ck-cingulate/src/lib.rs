@@ -373,17 +373,35 @@ impl Stamp {
     }
 
     fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
-        if record.request.answer_needs_phone() && self.secret_use_phone().is_none() {
+        self.kind_visible(
+            record.request.is_secret_card(),
+            record.request.manifest_binding.is_some(),
+            record.request.kind == "config_plan",
+            params,
+        )
+    }
+
+    // The change log retains these same flags even after the card is deleted.
+    fn kind_visible(
+        &self,
+        secret_card: bool,
+        manifest_binding: bool,
+        config_plan: bool,
+        params: &Value,
+    ) -> bool {
+        if ConsentRequest::kind_answer_needs_phone(secret_card, config_plan)
+            && self.secret_use_phone().is_none()
+        {
             return false;
         }
-        if record.request.kind == "config_plan" {
+        if config_plan {
             return feature_declared(params, "config-plan");
         }
-        !record.request.is_secret_card()
+        !secret_card
             || (self.secret_approval_device().is_some()
                 && feature_declared(
                     params,
-                    if record.request.kind == "manifest_binding" {
+                    if manifest_binding {
                         "manifest-binding-approval"
                     } else {
                         "secret-use-approval"
