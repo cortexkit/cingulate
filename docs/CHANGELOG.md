@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.26.2 (ck-cingulate)
 
+- Decode subc-protocol 0.37.4, so a federated route whose stamp carries the newer
+  members (`origin_principal`, `peer_box_id`, `run_id`, a flow's `agent_id`, the `app`
+  peer class) binds instead of being refused as an unknown field.
 - Add the test-only `desktop-dev-cards-v1` corpus of local-operator served
   cards, answers and refusals for the desktop app. Correct the phone contract's
   description of the development-build exception; release authority is unchanged.

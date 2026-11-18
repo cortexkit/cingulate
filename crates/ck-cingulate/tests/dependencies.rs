@@ -26,7 +26,7 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
     ] {
         for pin in [
             "subc-client-rs = \"=0.40.3\"",
-            "subc-protocol = \"=0.37.1\"",
+            "subc-protocol = \"=0.37.4\"",
         ] {
             assert!(
                 manifest.lines().any(|line| line == pin),
@@ -46,7 +46,7 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
         );
     }
     assert_eq!(locked_versions("subc-client-rs"), ["0.40.3"]);
-    assert_eq!(locked_versions("subc-protocol"), ["0.37.1"]);
+    assert_eq!(locked_versions("subc-protocol"), ["0.37.4"]);
     assert_eq!(locked_versions("subc-control"), ["0.40.1"]);
     assert_eq!(locked_versions("subc-daemon"), ["0.47.2"]);
     assert_eq!(locked_versions("subc-transport"), ["0.18.0"]);

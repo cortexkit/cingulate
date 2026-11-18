@@ -1,6 +1,6 @@
 [package]
 name = "ck-cingulate"
-version = "0.26.1"
+version = "0.26.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cortexkit/cingulate"
@@ -25,7 +25,7 @@ serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
 subc-client-rs = "=0.40.3"
-subc-protocol = "=0.37.1"
+subc-protocol = "=0.37.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
