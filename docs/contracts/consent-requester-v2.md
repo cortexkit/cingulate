@@ -8,7 +8,7 @@ Outgoing scope descriptions, session notices and card-settled outcomes pointers
 use only `prefrontal`.
 
 Version 2 preserves every v1 operation and body for existing kinds. It adds AFT
-permission asks and the optional generic-consent correlation field described below. Pin the [served corpus](../../test-vectors/tool-permission-v1/README.md)
+permission asks and the optional generic-consent correlation field described below. Pin the [served corpus](../../test-vectors/tool-permission-v1.1/README.md)
 and its `SHA256SUMS`; the phone projection is specified in
 [consent-phone-v2.md](consent-phone-v2.md). These asks deliberately have no expiry,
 retention tombstone, execution report, acknowledgment or settlement-feed entry:
@@ -424,7 +424,7 @@ including malformed or losing attempts. Its authorization leg remains
 `surface: "user"`, and an accepted desktop answer still settles with
 `answered_by: "user"`. Phone, head and development-local attempts omit `via`;
 older persisted attempts also omit it. The
-[permission samples](../../test-vectors/tool-permission-v1/README.md) include a
+[permission samples](../../test-vectors/tool-permission-v1.1/README.md) include a
 desktop attempt read from the durable audit.
 
 ## Late answers on generic consent cards

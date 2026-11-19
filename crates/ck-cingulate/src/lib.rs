@@ -1515,15 +1515,15 @@ impl Handler {
         } else {
             None
         };
-        let mut access_labels = HashMap::new();
+        let mut access_names = HashMap::new();
         if method == "consent.list_pending" {
             // Resolve display names without holding the store lock, using the
             // same agent resolver as generic worker consent subjects.
             for record in self.with_store(|store| store.access_pending()).await? {
                 if record.state == "pending:user" {
-                    access_labels.insert(
+                    access_names.insert(
                         record.elicitation_id.clone(),
-                        self.access_phone_label(&record).await,
+                        self.access_phone_names(&record).await,
                     );
                 }
             }
@@ -1766,14 +1766,11 @@ impl Handler {
                         if record.state == "pending:user" {
                             // Permission asks share the same creation-order cursor
                             // as generic cards; neither kind needs an expiry to sort.
-                            let mut value =
-                                record.wire(true, blocks.get(&record.elicitation_id).copied());
-                            if let Some(label) = access_labels.get(&record.elicitation_id) {
-                                value["subject"]["label"] = json!(label);
-                            }
-                            if let Some(name) = requester_name(&record.identity.principal) {
-                                value["requesterName"] = json!(name);
-                            }
+                            let value = Self::access_phone_wire(
+                                &record,
+                                blocks.get(&record.elicitation_id).copied(),
+                                access_names.get(&record.elicitation_id),
+                            );
                             cards.push((
                                 (record.created_at_ms, record.elicitation_id.clone()),
                                 value,

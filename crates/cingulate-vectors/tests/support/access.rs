@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 use cingulate_store::{Isolation, ScopeIdentity, StorageBackend, StorageDescriptor};
 use ck_cingulate::{
-    AccessRuntime, Clock, Handler, NoticeResult, Options, Resolver, ScopeLife, Stamp,
-    UnavailableResolver,
+    AccessRuntime, Clock, Handler, NoticeResult, Options, ResolvedAgent, Resolver, ScopeLife, Stamp,
 };
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
@@ -13,7 +12,7 @@ use subc_protocol::{
     BindIdentity, ModuleHelloAckBody, Principal, RouteTarget,
 };
 
-pub const CORPUS: &str = "tool-permission-v1";
+pub const CORPUS: &str = "tool-permission-v1.1";
 pub fn root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../test-vectors")
@@ -106,8 +105,20 @@ async fn capture(
         _ => panic!("unary vector required"),
     }
 }
+const NAMED_AGENT_ID: &str = "agent-example";
+struct VectorNames;
+#[async_trait]
+impl Resolver for VectorNames {
+    async fn resolve(&self, agent_id: &str) -> Result<Option<ResolvedAgent>, String> {
+        Ok((agent_id == NAMED_AGENT_ID).then(|| ResolvedAgent {
+            name: Some("Navigator".into()),
+            retired: false,
+        }))
+    }
+}
+
 pub async fn generate() -> BTreeMap<String, Vec<u8>> {
-    generate_with_resolver(Arc::new(UnavailableResolver)).await
+    generate_with_resolver(Arc::new(VectorNames)).await
 }
 pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<String, Vec<u8>> {
     let dir = tempfile::tempdir().unwrap();
@@ -614,5 +625,37 @@ pub async fn generate_with_resolver(resolver: Arc<dyn Resolver>) -> BTreeMap<Str
     assert_eq!(value["attempts"][0]["via"], "operator_app");
     assert!(value["attempts"][0].get("device").is_none());
     files.insert("operator-app-audit.json".into(), audit.into_bytes());
+
+    let mut named_head = asker(false);
+    named_head.scope.as_mut().unwrap().attributes.agent_id = Some(NAMED_AGENT_ID.into());
+    files.insert(
+        "named-head-bind-stamp.json".into(),
+        serde_json::to_vec(&json!({
+            "principal": named_head.principal,
+            "scope": named_head.scope,
+            "harness": named_head.harness,
+        }))
+        .unwrap(),
+    );
+    let card = capture(
+        &mut files,
+        &handler,
+        &named_head,
+        "named-head-open",
+        "consent.request",
+        json!({"kind":"tool_permission","call_key":"call-named-head","tool":"read",
+            "operation":"read","paths":["/example/notes"],"reason":"Inspect notes",
+            "args_hash":"hash-named-head","pattern":"/example/notes"}),
+    )
+    .await;
+    capture(
+        &mut files,
+        &handler,
+        &phone,
+        "named-head-phone-get",
+        "consent.get",
+        json!({"elicitationId":card["elicitation_id"]}),
+    )
+    .await;
     files
 }

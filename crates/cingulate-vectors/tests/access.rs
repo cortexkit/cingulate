@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs};
 #[tokio::test]
 async fn permission_served_vectors_regenerate_byte_for_byte() {
     let generated = access::generate().await;
-    assert_eq!(generated.len(), 99);
+    assert_eq!(generated.len(), 104);
     for (name, bytes) in generated {
         assert_eq!(
             fs::read(access::root().join(&name)).unwrap(),
@@ -17,12 +17,21 @@ async fn permission_served_vectors_regenerate_byte_for_byte() {
 }
 #[test]
 fn permission_manifest_pins_and_covers_exact_bytes() {
-    let root = access::root();
-    let sums = fs::read(root.join("SHA256SUMS")).unwrap();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&sums)),
-        "b979121e02e2bb6e1dd1b7df8071dc689e8205e11a0b25d71796f007081d06de"
+    check_manifest(
+        &access::root(),
+        "2def3c86dfd013b154ed61a42a840a90cf6a76509873f267868f41fa1119cd07",
+        105,
     );
+    check_manifest(
+        &access::root().with_file_name("tool-permission-v1"),
+        "b979121e02e2bb6e1dd1b7df8071dc689e8205e11a0b25d71796f007081d06de",
+        100,
+    );
+}
+
+fn check_manifest(root: &std::path::Path, digest: &str, count: usize) {
+    let sums = fs::read(root.join("SHA256SUMS")).unwrap();
+    assert_eq!(format!("{:x}", Sha256::digest(&sums)), digest);
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&sums).unwrap().lines() {
         let (hash, name) = line.split_once("  ").unwrap();
@@ -39,7 +48,7 @@ fn permission_manifest_pins_and_covers_exact_bytes() {
         .filter(|name| name != "SHA256SUMS")
         .collect();
     assert_eq!(actual, listed);
-    assert_eq!(listed.len(), 100);
+    assert_eq!(listed.len(), count);
 }
 
 #[tokio::test]
@@ -151,7 +160,7 @@ async fn access_escalated_phone_decodes_and_allow_once_settles() {
         .unwrap();
     for card in [card, listed] {
         decode_phone_card(card).expect("escalated tool permission must decode on shipped phones");
-        assert_eq!(card["prompt"], "An AFT worker wants to read 1 path: /x/y");
+        assert_eq!(card["prompt"], "An agent wants to read 1 path: /x/y");
         assert_eq!(card["title"], "Worker permission");
         // Shipped phones keep only cards whose state is exactly "pending".
         assert_eq!(card["state"], "pending");
@@ -243,12 +252,25 @@ struct NamedResolver;
 #[async_trait::async_trait]
 impl ck_cingulate::Resolver for NamedResolver {
     async fn resolve(&self, agent_id: &str) -> Result<Option<ck_cingulate::ResolvedAgent>, String> {
-        assert_eq!(agent_id, "agent");
-        Ok(Some(ck_cingulate::ResolvedAgent {
+        Ok((agent_id == "agent").then(|| ck_cingulate::ResolvedAgent {
             name: Some("ALF".into()),
             retired: false,
         }))
     }
+}
+
+#[tokio::test]
+async fn access_named_head_sample_shows_the_asking_agent() {
+    let files = access::generate().await;
+    let reply: Value = serde_json::from_slice(&files["named-head-phone-get-reply.json"]).unwrap();
+    let card = &reply["result"];
+    decode_phone_card(card).unwrap();
+    assert_eq!(card["title"], "Agent permission");
+    assert_eq!(
+        card["prompt"],
+        "Navigator wants to read 1 path: /example/notes"
+    );
+    assert_eq!(card["requesterName"], "AFT");
 }
 
 #[tokio::test]

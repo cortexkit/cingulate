@@ -6,7 +6,7 @@ kinds `secret_use` and `manifest_binding` described below. It is a new version r
 than claiming additive compatibility: these kinds have no lifetime
 fields, and late same-choice answers conflict. Clients pinned to v1 must not
 render unknown kinds as ordinary expiring approvals. The shared
-[served vectors](../../test-vectors/tool-permission-v1/README.md) pin both phone
+[served vectors](../../test-vectors/tool-permission-v1.1/README.md) pin both phone
 and requester bytes. The [requester v2 contract](consent-requester-v2.md) specifies
 admission, identity, state machine and core notices.
 
@@ -141,8 +141,12 @@ There is no `request` wrapper. Common permission fields:
 
 Tool cards carry `callKey`, `tool`, `operation`, `paths`, optional `command`,
 `reason`, `argsHash`, optional `schemaPin`, `pattern`, worker-only `headPolicy`.
-Display these as untrusted data. There is no synthetic title, prompt, target or
-expiry. `options` are exactly `allow_once` and `allow_scope` (effect `grant`) and
+Display these as untrusted data. Cingulate sets the short `title` to
+"Worker permission" for a stamped worker scope and "Agent permission" otherwise.
+The `prompt` headline names the asking agent when its display name is available
+and uses "An agent" otherwise. The provider's `requesterName` is not a stand-in
+for the agent's name. Tool cards have no `target` or expiry field.
+`options` are exactly `allow_once` and `allow_scope` (effect `grant`) and
 `deny` (effect `decline`); `default` is `deny`, never auto-submitted. Phone cards
 never offer `escalate`. Grants apply to `asker` only, including an escalated worker.
 

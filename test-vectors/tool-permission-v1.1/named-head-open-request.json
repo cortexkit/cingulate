@@ -1,0 +1,1 @@
+{"method":"consent.request","params":{"args_hash":"hash-named-head","call_key":"call-named-head","kind":"tool_permission","operation":"read","paths":["/example/notes"],"pattern":"/example/notes","reason":"Inspect notes","tool":"read"}}

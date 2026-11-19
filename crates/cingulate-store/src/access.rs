@@ -136,6 +136,19 @@ impl AccessRecord {
         }
     }
     pub fn wire(&self, phone: bool, block: Option<i64>) -> Value {
+        self.wire_with_asker_name(phone, block, None)
+    }
+
+    pub fn phone_wire(&self, block: Option<i64>, asker_name: Option<&str>) -> Value {
+        self.wire_with_asker_name(true, block, asker_name)
+    }
+
+    fn wire_with_asker_name(
+        &self,
+        phone: bool,
+        block: Option<i64>,
+        asker_name: Option<&str>,
+    ) -> Value {
         let mut value = serde_json::to_value(&self.request).expect("access request serialization");
         let object = value.as_object_mut().expect("access request object");
         object.insert("elicitation_id".into(), json!(self.elicitation_id));
@@ -208,7 +221,7 @@ impl AccessRecord {
                 };
                 object.insert("state".into(), json!(state));
             }
-            let (title, prompt, mut facts) = self.phone_description();
+            let (title, prompt, mut facts) = self.phone_description(asker_name);
             if let Some(note) = &self.escalation_note {
                 facts.push(json!({"label": "Lead agent's note", "value": note}));
             }
@@ -248,7 +261,7 @@ impl AccessRecord {
             value
         }
     }
-    fn phone_description(&self) -> (&'static str, String, Vec<Value>) {
+    fn phone_description(&self, asker_name: Option<&str>) -> (&'static str, String, Vec<Value>) {
         match &self.request {
             AccessRequest::ToolPermission {
                 operation,
@@ -258,11 +271,14 @@ impl AccessRecord {
                 pattern,
                 ..
             } => {
-                let actor = if self.identity.scope_kind == "worker" {
-                    "An AFT worker"
+                let title = if self.identity.scope_kind == "worker" {
+                    "Worker permission"
                 } else {
-                    "An AFT agent"
+                    "Agent permission"
                 };
+                let actor = asker_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or("An agent");
                 let prompt = if let Some(command) = command {
                     format!("{actor} wants to run: {command}")
                 } else {
@@ -297,7 +313,7 @@ impl AccessRecord {
                 }
                 facts.push(json!({"label": "Reason", "value": reason}));
                 facts.push(json!({"label": "Pattern", "value": pattern}));
-                ("Worker permission", prompt, facts)
+                (title, prompt, facts)
             }
             AccessRequest::MacosPermission {
                 folder,
@@ -794,7 +810,7 @@ mod phone_tests {
         let phone = record.wire(true, None);
         assert_eq!(
             phone["prompt"],
-            "An AFT worker wants to write 3 paths under /common/prefix"
+            "An agent wants to write 3 paths under /common/prefix"
         );
         assert_eq!(
             phone["facts"][1]["value"],
@@ -807,7 +823,7 @@ mod phone_tests {
         );
         assert_eq!(
             disjoint.wire(true, None)["prompt"],
-            "An AFT worker wants to read 2 paths under /common"
+            "An agent wants to read 2 paths under /common"
         );
     }
 
@@ -816,10 +832,7 @@ mod phone_tests {
         let command = format!("printf {}", "x".repeat(580));
         let record = tool("exec", json!([]), Some(&command));
         let phone = record.wire(true, None);
-        assert_eq!(
-            phone["prompt"],
-            format!("An AFT worker wants to run: {command}")
-        );
+        assert_eq!(phone["prompt"], format!("An agent wants to run: {command}"));
         assert_eq!(
             phone["facts"][1],
             json!({"label":"Command", "value":command})

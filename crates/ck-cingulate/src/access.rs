@@ -32,6 +32,22 @@ pub(super) struct Maintenance {
     retry_at_ms: i64,
     attempts: u32,
 }
+
+pub(super) struct AccessPhoneNames {
+    subject: Option<String>,
+    asker: Option<String>,
+}
+
+fn access_phone_subject_id(record: &AccessRecord) -> &str {
+    record
+        .identity
+        .head
+        .as_ref()
+        .unwrap_or(&record.identity.asker)
+        .agent_id
+        .as_deref()
+        .unwrap_or_default()
+}
 #[derive(Debug, Clone)]
 pub enum NoticeResult {
     Delivered,
@@ -299,13 +315,7 @@ impl Handler {
             head,
         })
     }
-    pub(super) async fn access_phone_label(&self, record: &AccessRecord) -> String {
-        let head = record
-            .identity
-            .head
-            .as_ref()
-            .unwrap_or(&record.identity.asker);
-        let agent_id = head.agent_id.as_deref().unwrap_or_default();
+    async fn access_agent_name(&self, agent_id: &str) -> Option<String> {
         self.inner
             .options
             .resolver
@@ -314,18 +324,58 @@ impl Handler {
             .ok()
             .flatten()
             .and_then(|agent| agent.name)
-            .unwrap_or_else(|| agent_id.to_owned())
     }
 
-    async fn access_wire(&self, record: &AccessRecord, phone: bool, block: Option<i64>) -> Value {
-        let mut value = record.wire(phone, block);
-        if phone {
-            value["subject"]["label"] = json!(self.access_phone_label(record).await);
-            if let Some(name) = requester_name(&record.identity.principal) {
-                value["requesterName"] = json!(name);
+    pub(super) async fn access_phone_names(&self, record: &AccessRecord) -> AccessPhoneNames {
+        let subject_id = access_phone_subject_id(record);
+        let subject = self.access_agent_name(subject_id).await;
+        // Worker cards are grouped under their lead agent, but the headline
+        // names the agent whose stamped scope opened the ask.
+        let asker = if matches!(record.request, AccessRequest::ToolPermission { .. }) {
+            match record
+                .identity
+                .asker
+                .agent_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+            {
+                Some(id) if id == subject_id => subject.clone(),
+                Some(id) => self.access_agent_name(id).await,
+                None => None,
             }
+        } else {
+            None
+        };
+        AccessPhoneNames { subject, asker }
+    }
+
+    pub(super) fn access_phone_wire(
+        record: &AccessRecord,
+        block: Option<i64>,
+        names: Option<&AccessPhoneNames>,
+    ) -> Value {
+        let mut value = record.phone_wire(block, names.and_then(|names| names.asker.as_deref()));
+        if let Some(subject) = names.and_then(|names| names.subject.as_deref()) {
+            value["subject"]["label"] = json!(subject);
+        }
+        if let Some(name) = requester_name(&record.identity.principal) {
+            value["requesterName"] = json!(name);
         }
         value
+    }
+
+    pub(super) async fn access_wire(
+        &self,
+        record: &AccessRecord,
+        phone: bool,
+        block: Option<i64>,
+    ) -> Value {
+        if phone {
+            let names = self.access_phone_names(record).await;
+            Self::access_phone_wire(record, block, Some(&names))
+        } else {
+            record.wire(false, block)
+        }
     }
 
     pub(super) async fn access_dispatch(

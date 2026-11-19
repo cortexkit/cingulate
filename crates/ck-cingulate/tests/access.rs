@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use cingulate_store::{Isolation, ScopeIdentity, StorageBackend, StorageDescriptor};
 use ck_cingulate::{
-    AccessRuntime, AwaitHook, Clock, Handler, NoticeResult, Notifier, Options, ScopeLife, Stamp,
+    AccessRuntime, AwaitHook, Clock, Handler, NoticeResult, Notifier, Options, ResolvedAgent,
+    Resolver, ScopeLife, Stamp,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -158,6 +159,13 @@ fn request(policy: Option<&str>) -> Value {
     value
 }
 
+fn read_request(policy: Option<&str>) -> Value {
+    let mut value = request(policy);
+    value["operation"] = json!("read");
+    value.as_object_mut().unwrap().remove("command");
+    value
+}
+
 fn consent_card() -> Value {
     serde_json::from_str(include_str!(
         "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
@@ -259,6 +267,9 @@ impl Fixture {
             .unwrap()
     }
     async fn new(macos: bool) -> Self {
+        Self::with_options(macos, Options::default()).await
+    }
+    async fn with_options(macos: bool, options: Options) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("store.sqlite");
         let runtime = Arc::new(Runtime {
@@ -279,7 +290,7 @@ impl Fixture {
             notifier: phone_notices.clone(),
             sweep_timer: false,
             data_home: dir.path().to_str().unwrap().into(),
-            ..Default::default()
+            ..options
         });
         handler.set_access_runtime(runtime.clone());
         let descriptor = StorageDescriptor {
@@ -587,6 +598,108 @@ async fn routes_by_stamped_kind_and_parent_not_agent_id() {
         );
     }
 }
+
+#[tokio::test]
+async fn permission_title_uses_the_stamped_scope_kind() {
+    for (kind, title) in [
+        (ScopeKind::Worker, "Worker permission"),
+        (ScopeKind::Head, "Agent permission"),
+        (ScopeKind::Ephemeral, "Agent permission"),
+    ] {
+        let f = Fixture::new(true).await;
+        let worker = kind == ScopeKind::Worker;
+        let id = f
+            .ask(&stamp("aft", kind), read_request(worker.then_some("allow")))
+            .await;
+        if worker {
+            assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+        }
+        let card = f
+            .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+            .await;
+        assert_eq!(card["title"], title, "{kind:?}");
+    }
+}
+
+struct PermissionNames;
+
+#[async_trait]
+impl Resolver for PermissionNames {
+    async fn resolve(&self, agent_id: &str) -> Result<Option<ResolvedAgent>, String> {
+        let name = match agent_id {
+            "agent-head" => "Lead",
+            "agent-worker" => "Scout",
+            _ => return Ok(None),
+        };
+        Ok(Some(ResolvedAgent {
+            name: Some(name.into()),
+            retired: false,
+        }))
+    }
+}
+
+async fn assert_permission_headline(kind: ScopeKind, agent_id: Option<&str>, headline: &str) {
+    let f = Fixture::with_options(
+        true,
+        Options {
+            resolver: Arc::new(PermissionNames),
+            ..Options::default()
+        },
+    )
+    .await;
+    let worker = kind == ScopeKind::Worker;
+    let mut asker = stamp("aft", kind);
+    asker.scope.as_mut().unwrap().attributes.agent_id = agent_id.map(str::to_owned);
+    let id = f.ask(&asker, read_request(worker.then_some("allow"))).await;
+    if worker {
+        assert_eq!(f.relay(&id, "escalate").await["ok"], true);
+    }
+    let card = f
+        .ok(&phone(), "consent.get", json!({"elicitationId":id}))
+        .await;
+    let list = f.ok(&phone(), "consent.list_pending", json!({})).await;
+    let answer = f
+        .ok(
+            &phone(),
+            "consent.answer",
+            json!({"elicitationId":id,"choiceId":"deny"}),
+        )
+        .await;
+    assert_eq!(card["prompt"], headline);
+    assert_eq!(list["records"][0]["prompt"], headline);
+    assert_eq!(answer["elicitation"]["prompt"], headline);
+}
+
+#[tokio::test]
+async fn permission_headline_names_the_asking_worker_not_the_head() {
+    assert_permission_headline(
+        ScopeKind::Worker,
+        Some("agent-worker"),
+        "Scout wants to read 1 path: /tmp/work",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn permission_headline_is_neutral_when_asker_name_is_unresolved() {
+    assert_permission_headline(
+        ScopeKind::Head,
+        Some("agent-unknown"),
+        "An agent wants to read 1 path: /tmp/work",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn permission_headline_is_neutral_when_only_provider_is_known() {
+    assert_permission_headline(
+        ScopeKind::Worker,
+        None,
+        "An agent wants to read 1 path: /tmp/work",
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn orphaned_worker_and_foreign_scope_are_refused() {
     let f = Fixture::new(true).await;

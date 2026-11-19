@@ -1,0 +1,1 @@
+{"method":"consent.request","params":{"args_hash":"hash-phone-withdraw","call_key":"call-phone-withdraw","head_policy":"allow","kind":"tool_permission","operation":"read","paths":["/x/y"],"pattern":"/x/y","reason":"Inspect the requested path","tool":"read"}}

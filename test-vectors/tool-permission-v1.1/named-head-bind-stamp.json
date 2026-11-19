@@ -1,0 +1,1 @@
+{"harness":"test-harness","principal":"reserved:aft","scope":{"attributes":{"agent_id":"agent-example"},"kind":"head","owner":{"kind":"reserved","module_id":"prefrontal-core"},"owner_authorized":true,"ref":"head","scope_epoch":7}}

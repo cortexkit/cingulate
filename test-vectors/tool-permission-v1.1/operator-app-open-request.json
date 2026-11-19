@@ -1,0 +1,1 @@
+{"method":"consent.request","params":{"args_hash":"hash-operator-app","call_key":"call-operator-app","command":"pwd","kind":"tool_permission","operation":"exec","paths":[],"pattern":"pwd","reason":"Inspect directory","tool":"bash"}}

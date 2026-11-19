@@ -201,7 +201,9 @@ impl Fixture {
     async fn assert_labels(&self, expected: &str) {
         assert_eq!(self.identity().await.unwrap().subject.label, expected);
         assert_eq!(
-            self.handler.access_phone_label(&permission_record()).await,
+            self.handler
+                .access_wire(&permission_record(), true, None)
+                .await["subject"]["label"],
             expected
         );
     }
@@ -588,7 +590,10 @@ async fn fleet_sample_unchanged_preserves_display_names() {
     );
     let mut record = permission_record();
     record.identity.head.as_mut().unwrap().agent_id = Some("agent_0000000000000002".into());
-    assert_eq!(handler.access_phone_label(&record).await, "Lin");
+    assert_eq!(
+        handler.access_wire(&record, true, None).await["subject"]["label"],
+        "Lin"
+    );
     clock.advance(60_000);
     assert_eq!(
         handler
@@ -599,7 +604,10 @@ async fn fleet_sample_unchanged_preserves_display_names() {
             .label,
         "Ada"
     );
-    assert_eq!(handler.access_phone_label(&record).await, "Lin");
+    assert_eq!(
+        handler.access_wire(&record, true, None).await["subject"]["label"],
+        "Lin"
+    );
     {
         let requests = runtime.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);

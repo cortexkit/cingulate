@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.26.3 (ck-cingulate), 0.12.1 (cingulate-store), 0.17.1 (cingulate-vectors)
+
+- Label tool permissions as worker requests only for delegated sessions, and
+  name the asking agent instead of the tool provider in the approval headline.
+  No store migration or wire-reader changes are needed. The
+  `tool-permission-v1.1` served samples include the new wording; the published
+  `tool-permission-v1` samples are unchanged.
+
 ## 0.26.2 (ck-cingulate)
 
 - Decode subc-protocol 0.37.4, so a federated route whose stamp carries the newer
