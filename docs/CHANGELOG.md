@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.26.4 (ck-cingulate)
+
+- Use cortexkit-bus-client 0.1.10: replaced connections stop retrying with
+  revoked credentials, reissued credentials trigger prompt reconnection, and
+  JetStream push deliveries with mismatched subjects are dropped.
+
 ## 0.26.3 (ck-cingulate), 0.12.1 (cingulate-store), 0.17.1 (cingulate-vectors)
 
 - Label tool permissions as worker requests only for delegated sessions, and
