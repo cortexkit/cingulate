@@ -9,6 +9,7 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 mod access;
+mod broker_action;
 mod config_plan;
 mod flow_card_structure;
 mod flow_secrets;
@@ -16,6 +17,7 @@ mod manifest_binding;
 mod sealed_text;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
+pub use broker_action::{BrokerAction, BrokerActionAnswer};
 pub use config_plan::{
     config_answer_bytes, ConfigApply, ConfigChange, ConfigLaunchManifest, ConfigModuleApply,
     ConfigOperation, ConfigPlan, ConfigPolicyChange, ConfigPolicyKind, ConfigProgramChange,
@@ -142,6 +144,8 @@ pub struct ConsentRequest {
     pub config_plan: Option<ConfigPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_binding: Option<ManifestBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broker_action: Option<BrokerAction>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_use: Option<SecretUse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -405,6 +409,11 @@ impl ConsentRequest {
     /// Decode the closed serde shape first, then apply ordered semantic rules.
     /// The returned form has no answer schema, including for equality/dedup.
     pub fn decode(body: Value) -> Result<Self, Refusal> {
+        let body = if body.get("kind").and_then(Value::as_str) == Some("broker_action") {
+            broker_action::normalize(&body)?
+        } else {
+            body
+        };
         if body.get("inputs").is_some()
             && body.get("kind").and_then(Value::as_str) != Some("consent")
         {
@@ -481,6 +490,16 @@ impl ConsentRequest {
             }
         }
         self.flow_install_secrets()?;
+        if self.kind == "broker_action" {
+            self.broker_action
+                .as_ref()
+                .ok_or_else(|| Refusal::invalid("missing broker_action.statement_b64url"))?
+                .expires_at_ms()?;
+        } else if self.broker_action.is_some() {
+            return Err(Refusal::invalid(
+                "broker_action body requires broker_action kind",
+            ));
+        }
         if self.kind == "manifest_binding" {
             self.manifest_binding
                 .as_ref()
@@ -603,7 +622,7 @@ impl ConsentRequest {
         }
         if matches!(
             self.kind.as_str(),
-            "flow_install" | "package" | "secret_use" | "manifest_binding"
+            "flow_install" | "package" | "secret_use" | "manifest_binding" | "broker_action"
         ) {
             if self.kind == "flow_install" && self.flow_install.is_none() {
                 return Err(Refusal::invalid("missing flow_install"));
@@ -636,6 +655,7 @@ impl ConsentRequest {
                 | "package"
                 | "secret_use"
                 | "manifest_binding"
+                | "broker_action"
                 | "config_plan"
         ) {
             return Err(Refusal::new(
@@ -762,6 +782,7 @@ impl ConsentRequest {
 
     pub fn is_secret_card(&self) -> bool {
         self.manifest_binding.is_some()
+            || self.broker_action.is_some()
             || self.secret_use.is_some()
             || (self.kind == "flow_install"
                 && self

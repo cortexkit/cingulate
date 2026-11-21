@@ -379,7 +379,7 @@ that sends them is deployed.
 - `escalated.fields` contains only `card_kind`, `subject`, and optional
   `expires_at_ms`, in that order. `card_kind` is `consent` for consent, package
   and flow-decision cards, `secret_use` for secret use, `manifest_binding` for
-  repository bindings, and `flow_install` for
+  repository bindings, `broker_action` for broker actions, and `flow_install` for
   installs (including those carrying secrets). Cards with no expiry omit
   `expires_at_ms`.
 - `settled.fields` contains only `outcome`: `answered` or `expired`. Withdrawal
@@ -592,6 +592,11 @@ include first and repeated filing, phone get and answers, and both requester
 get and await records for allow, decline and expired outcomes. The copied vault
 statement and envelope are pinned to claustrum tag `manifest-binding-vectors-v1`
 at `c2a9ce2eaf99da646160eeb0c73d6b11d9341cbf`.
+
+## Broker-action requester (0.27.0)
+
+See the [broker-action contract](broker-action-v1.md#filing) for scoped filing,
+deduplication, the requester record and the separate `expired` outcome.
 
 ## Vault secret-use requester (0.12.0)
 
@@ -969,7 +974,7 @@ The suite string must match exactly; the public key must be canonical unpadded
 base64url decoding to exactly 32 bytes. The array and its input/HPKE objects
 have closed shapes. Present null, malformed fields, unknown fields, extra
 inputs, and inputs on any other card kind refuse `elicitation_invalid_request`
-before a card exists. In particular, `secret_use`, `manifest_binding`,
+before a card exists. In particular, `secret_use`, `manifest_binding`, `broker_action`,
 `config_plan`, flow-install/package and `tool_permission` cards cannot carry
 inputs: tool permissions can be answered by an agent rather than the person,
 so they cannot collect a person's typed secret.

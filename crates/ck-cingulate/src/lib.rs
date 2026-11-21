@@ -117,7 +117,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
     RequesterAdmission {
         principal: "reserved:plexus",
         requester_name: Some("Plexus"),
-        kinds: &["consent", "manifest_binding"],
+        kinds: &["consent", "manifest_binding", "broker_action"],
         agent: SubjectAgent::Carried,
     },
     RequesterAdmission {
@@ -158,6 +158,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
             "macos_permission",
             "secret_use",
             "consent",
+            "broker_action",
         ],
         agent: SubjectAgent::Never,
     },
@@ -198,6 +199,7 @@ pub fn manifest() -> ModuleManifest {
                 "consent-no-expiry/v1".into(),
                 "secret-use-approval/v1".into(),
                 "manifest-binding-approval/v1".into(),
+                "broker-action-approval/v1".into(),
                 "consent-config-plan/v1".into(),
                 "flow-install-secrets/v1".into(),
                 "scope-workdir/v1".into(),
@@ -377,6 +379,7 @@ impl Stamp {
             record.request.is_secret_card(),
             record.request.manifest_binding.is_some(),
             record.request.kind == "config_plan",
+            record.request.broker_action.is_some(),
             params,
         )
     }
@@ -387,6 +390,7 @@ impl Stamp {
         secret_card: bool,
         manifest_binding: bool,
         config_plan: bool,
+        broker_action: bool,
         params: &Value,
     ) -> bool {
         if ConsentRequest::kind_answer_needs_phone(secret_card, config_plan)
@@ -401,7 +405,9 @@ impl Stamp {
             || (self.secret_approval_device().is_some()
                 && feature_declared(
                     params,
-                    if manifest_binding {
+                    if broker_action {
+                        "broker-action-approval"
+                    } else if manifest_binding {
                         "manifest-binding-approval"
                     } else {
                         "secret-use-approval"
@@ -1100,10 +1106,21 @@ impl Handler {
                 }
             }
         }
+        let broker_action = if let Some(body) = &request.broker_action {
+            let scope = stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
+            if scope.attributes.agent_id.as_deref() != Some(body.agent_id.as_str()) {
+                return Err(stamp.refuse());
+            }
+            true
+        } else {
+            false
+        };
         let agent_source = if stamp.label() == "reserved:aft" && request.kind == "consent" {
             stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
             SubjectAgent::Carried
-        } else if matches!(request.kind.as_str(), "manifest_binding" | "secret_use") {
+        } else if broker_action
+            || matches!(request.kind.as_str(), "manifest_binding" | "secret_use")
+        {
             SubjectAgent::FromScope
         } else {
             requester_admission(stamp.label())
@@ -1111,7 +1128,8 @@ impl Handler {
         };
         let carrier = agent_source == SubjectAgent::Carried;
         let from_scope = agent_source == SubjectAgent::FromScope;
-        let worker_head = if !matches!(request.kind.as_str(), "secret_use" | "manifest_binding")
+        let worker_head = if !broker_action
+            && !matches!(request.kind.as_str(), "secret_use" | "manifest_binding")
             && (request.kind == "consent" || from_scope)
             && stamp.carried_agent_id.trim().is_empty()
         {
@@ -1140,7 +1158,7 @@ impl Handler {
                 .ok_or_else(|| {
                     Refusal::new("access_no_head", "stamped parent head has no agent_id")
                 })?,
-            None if request.kind == "secret_use" => stamped_secret_agent,
+            None if broker_action || request.kind == "secret_use" => stamped_secret_agent,
             None if request.kind == "manifest_binding" && stamp.carried_agent_id.is_empty() => {
                 stamped_secret_agent
             }
@@ -1305,7 +1323,10 @@ impl Handler {
         }
         if method == "consent.request"
             && params.get("inputs").is_some()
-            && params.get("kind").and_then(Value::as_str) != Some("consent")
+            && !matches!(
+                params.get("kind").and_then(Value::as_str),
+                Some("consent" | "broker_action")
+            )
         {
             return Err(Refusal::new(
                 "elicitation_invalid_request",
@@ -1385,6 +1406,11 @@ impl Handler {
             }
             if params.get("kind").and_then(Value::as_str) == Some("secret_use")
                 && (!stamp.admits_kind("secret_use") || stamp.scope.is_none())
+            {
+                return Err(stamp.refuse());
+            }
+            if params.get("kind").and_then(Value::as_str) == Some("broker_action")
+                && (!stamp.admits_kind("broker_action") || stamp.scope.is_none())
             {
                 return Err(stamp.refuse());
             }
@@ -1546,6 +1572,8 @@ impl Handler {
                                 "elicitation_config_plan_required"
                             } else if record.request.kind == "manifest_binding" {
                                 "elicitation_manifest_binding_approval_required"
+                            } else if record.request.kind == "broker_action" {
+                                "elicitation_broker_action_approval_required"
                             } else {
                                 "elicitation_secret_use_approval_required"
                             }
@@ -1557,6 +1585,8 @@ impl Handler {
                                 "config_plan requires a phone with clientFeatures config-plan"
                             } else if record.request.kind == "manifest_binding" {
                                 "manifest binding requires a phone with clientFeatures manifest-binding-approval"
+                            } else if record.request.kind == "broker_action" {
+                                "broker action requires an approving device with clientFeatures broker-action-approval"
                             } else {
                                 "secret use requires a phone with clientFeatures secret-use-approval"
                             }
@@ -1733,6 +1763,11 @@ impl Handler {
                     {
                         revision.push_str(":manifest-binding");
                     }
+                    if feature_declared(&params, "broker-action-approval")
+                        && stamp.secret_approval_device().is_some()
+                    {
+                        revision.push_str(":broker-action");
+                    }
                     if feature_declared(&params, "config-plan")
                         && stamp.secret_use_phone().is_some()
                     {
@@ -1813,6 +1848,22 @@ impl Handler {
                         .as_ref()
                         .is_some_and(|r| r.request.kind == "config_plan");
                     let secret_card = record.as_ref().is_some_and(|r| r.request.is_secret_card());
+                    if let Some(card) = record
+                        .as_ref()
+                        .filter(|r| r.request.broker_action.is_some())
+                    {
+                        if card.expires_at_ms.is_some_and(|expiry| expiry <= now) {
+                            return Err(Refusal::new(
+                                "elicitation_expired",
+                                "broker_action.expires_at_ms has passed",
+                            ));
+                        }
+                        if params.get("signature").is_some()
+                            || params.get("signature_b64url").is_some()
+                        {
+                            return Err(invalid("broker_action answers cannot carry signatures"));
+                        }
+                    }
                     if secret_card
                         && DEVELOPMENT_LOCAL_OPERATOR
                         && stamp.local_operator
@@ -2345,7 +2396,7 @@ mod tests {
                 (
                     "reserved:plexus",
                     Some("Plexus"),
-                    vec!["consent", "manifest_binding"]
+                    vec!["consent", "manifest_binding", "broker_action"]
                 ),
                 ("reserved:broca", Some("Broca"), vec!["consent"]),
                 ("reserved:entorhinal", Some("Entorhinal"), vec!["consent"]),
@@ -2363,7 +2414,8 @@ mod tests {
                         "tool_permission",
                         "macos_permission",
                         "secret_use",
-                        "consent"
+                        "consent",
+                        "broker_action"
                     ]
                 ),
             ]
@@ -2419,13 +2471,14 @@ mod tests {
             let expected: &[&str] = if name == "reserved:cerebellum" {
                 &["consent", "secret_use"]
             } else if name == "reserved:plexus" {
-                &["consent", "manifest_binding"]
+                &["consent", "manifest_binding", "broker_action"]
             } else if name == "reserved:aft" {
                 &[
                     "tool_permission",
                     "macos_permission",
                     "secret_use",
                     "consent",
+                    "broker_action",
                 ]
             } else {
                 &["consent"]

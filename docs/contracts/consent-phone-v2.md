@@ -359,6 +359,12 @@ tag `manifest-binding-vectors-v1`, commit
 Escalate, settle and withdraw pushes carry only Cingulate-vouched metadata,
 never repository, statement or permissions; fetch the card on the admitted route.
 
+## Broker-action approvals (0.27.0)
+
+See the [broker-action contract](broker-action-v1.md#rendering-and-answering)
+for the `broker-action-approval` feature, render and answer rules, and the
+24-hour retention of missed cards.
+
 ## Vault secret-use approvals (0.12.0)
 
 Cingulate advertises `secret-use-approval/v1`. In release builds, only daemon-stamped
@@ -405,7 +411,8 @@ signature:
 
 Malformed or mismatched bindings refuse `elicitation_invalid_request` without
 recording an answer. Envelope params on kinds other than `secret_use`,
-`manifest_binding` or secret-bearing `flow_install` refuse `invalid_params`.
+`manifest_binding`, `broker_action` or secret-bearing `flow_install` refuse
+`invalid_params`.
 Answers at or after expiry refuse `elicitation_expired`, including declines and
 same-choice retries. The vault separately checks its signature, live requests,
 grant expiry arithmetic, pairing and current sealed-secret incarnation.

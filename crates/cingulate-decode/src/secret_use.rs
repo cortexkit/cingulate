@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{lowercase_hex, Refusal};
 
-const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+pub(super) const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 const DURATIONS: [&str; 4] = ["once", "hour", "session", "permanent"];
 
 fn invalid() -> Refusal {
@@ -88,12 +88,25 @@ fn safe_numbers(value: &Value) -> bool {
     }
 }
 
-pub(super) fn canonical<T: DeserializeOwned>(encoded: &str) -> Result<(T, Vec<u8>), Refusal> {
+pub(super) fn decode_json(encoded: &str) -> Result<(Value, Vec<u8>), Refusal> {
     let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| invalid())?;
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-    if !safe_numbers(&value) || serde_jcs::to_vec(&value).map_err(|_| invalid())? != bytes {
+    Ok((value, bytes))
+}
+
+pub(super) fn check_canonical(value: &Value, bytes: &[u8]) -> Result<(), Refusal> {
+    if serde_jcs::to_vec(value).map_err(|_| invalid())? != bytes {
         return Err(invalid());
     }
+    Ok(())
+}
+
+pub(super) fn canonical<T: DeserializeOwned>(encoded: &str) -> Result<(T, Vec<u8>), Refusal> {
+    let (value, bytes) = decode_json(encoded)?;
+    if !safe_numbers(&value) {
+        return Err(invalid());
+    }
+    check_canonical(&value, &bytes)?;
     let parsed = serde_json::from_value(value).map_err(|_| invalid())?;
     Ok((parsed, bytes))
 }

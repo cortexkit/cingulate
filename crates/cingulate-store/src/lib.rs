@@ -51,7 +51,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 16] = [
+pub const MIGRATIONS: [Migration; 17] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -115,6 +115,10 @@ pub const MIGRATIONS: [Migration; 16] = [
     Migration {
         version: 16,
         statements: include_str!("../migrations/016_prefrontal_reader.sql"),
+    },
+    Migration {
+        version: 17,
+        statements: include_str!("../migrations/017_broker_action.sql"),
     },
 ];
 
@@ -268,6 +272,8 @@ pub struct Change {
     pub manifest_binding: bool,
     /// Config-plan feature visibility, retained after payload pruning.
     pub config_plan: bool,
+    /// Broker-action feature visibility, retained after payload pruning.
+    pub broker_action: bool,
     pub version: i64,
     pub elicitation_id: String,
 }
@@ -405,7 +411,7 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding),MAX(config_plan) FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding),MAX(config_plan),MAX(broker_action) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
@@ -413,6 +419,7 @@ impl ConsentStore {
                     Ok(Change {
                         secret_use: row.get(2)?,
                         manifest_binding: row.get(3)?,
+                        broker_action: row.get(5)?,
                         config_plan: row.get(4)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
@@ -458,7 +465,9 @@ impl ConsentStore {
         request.requested_schema = None;
         self.transaction(|tx| {
             let flow_secrets = request.flow_install_secrets().map_err(Error::Refused)?;
-            let secret_expiry = if let Some(body) = &request.manifest_binding {
+            let secret_expiry = if let Some(body) = &request.broker_action {
+                Some(body.expires_at_ms().map_err(Error::Refused)?)
+            } else if let Some(body) = &request.manifest_binding {
                 Some(body.expires_at_ms().map_err(Error::Refused)?)
             } else if let Some(body) = &flow_secrets {
                 Some(body.expires_at_ms().map_err(Error::Refused)?)
@@ -479,7 +488,11 @@ impl ConsentStore {
             if secret_expiry.is_some_and(|expiry| expiry <= now_ms) {
                 return Err(refuse(
                     "elicitation_expired",
-                    if request.manifest_binding.is_some() { "manifest_binding.expires_at_ms has passed" } else { "secret use request has expired" },
+                    match request.kind.as_str() {
+                        "broker_action" => "broker_action.expires_at_ms has passed",
+                        "manifest_binding" => "manifest_binding.expires_at_ms has passed",
+                        _ => "secret use request has expired",
+                    },
                 ));
             }
             if let Some(body) = &request.secret_use {
@@ -523,6 +536,22 @@ impl ConsentStore {
                         }
                     }
                     return Err(refuse("elicitation_request_conflict", "manifest binding statement is already filed under another session"));
+                }
+            }
+            if let Some(body) = &request.broker_action {
+                let existing: Option<String> = tx.query_row(
+                    "SELECT elicitation_id FROM broker_action_requests WHERE statement_sha256=?1",
+                    [&body.statement_sha256], |row| row.get(0),
+                ).optional()?;
+                if let Some(id) = existing {
+                    if check_owner(tx, &identity.owner, &id).is_ok() {
+                        if let Some(old) = load(tx, &id)? {
+                            if old.request.broker_action.as_ref() == Some(body) {
+                                return Ok(CreateResult { record: old, created: false, settlements: vec![] });
+                            }
+                        }
+                    }
+                    return Err(refuse("elicitation_request_conflict", "broker action statement is already filed"));
                 }
             }
             let matched: Option<String> = match &request.dedup_key {
@@ -588,6 +617,7 @@ impl ConsentStore {
                 answered_surface: None,
                 secret_use_answer: None,
                 manifest_binding_answer: None,
+                broker_action_answer: None,
                 input_supplied: false,
                 sealed_inputs: None,
                 statement: None,
@@ -604,8 +634,8 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding,config_plan) \
-                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7,?8)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding,config_plan,broker_action) \
+                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7,?8,?9)",
                 params![
                     record.elicitation_id,
                     identity.owner,
@@ -614,7 +644,8 @@ impl ConsentStore {
                     record.expires_at_ms,
                     record.request.is_secret_card(),
                     record.request.manifest_binding.is_some(),
-                    record.request.kind == "config_plan"
+                    record.request.kind == "config_plan",
+                    record.request.broker_action.is_some(),
                 ],
             )?;
             if let Some(body) = &record.request.secret_use {
@@ -627,6 +658,9 @@ impl ConsentStore {
             }
             if let Some(body) = &record.request.manifest_binding {
                 tx.execute("INSERT INTO manifest_binding_requests(statement_sha256,elicitation_id) VALUES (?1,?2)",params![body.statement_sha256,record.elicitation_id])?;
+            }
+            if let Some(body) = &record.request.broker_action {
+                tx.execute("INSERT INTO broker_action_requests(statement_sha256,elicitation_id) VALUES (?1,?2)",params![body.statement_sha256,record.elicitation_id])?;
             }
             enqueue_person_notice(tx, &record, "escalated")?;
             Ok(CreateResult {
@@ -833,6 +867,11 @@ impl ConsentStore {
                     settlements: vec![],
                 });
             }
+            if record.request.broker_action.is_some()
+                && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
+            {
+                return Err(refuse("elicitation_expired", "broker_action.expires_at_ms has passed"));
+            }
             let sealed_inputs = record.request.answer_inputs(choice, inputs).map_err(Error::Refused)?;
             let fingerprint = cingulate_decode::sealed_answer_fingerprint(choice, &sealed_inputs);
             if record.request.is_secret_card()
@@ -887,6 +926,13 @@ impl ConsentStore {
                 .map(|body| body.answer(choice, device, envelope))
                 .transpose()
                 .map_err(Error::Refused)?;
+            let broker_action_answer = record
+                .request
+                .broker_action
+                .as_ref()
+                .map(|body| body.answer(choice, device, envelope))
+                .transpose()
+                .map_err(Error::Refused)?;
             if !record.request.is_secret_card() && envelope.is_some() {
                 return Err(refuse(
                     "invalid_params",
@@ -905,6 +951,7 @@ impl ConsentStore {
                     && record.answered_choice_id.as_deref() == Some(choice)
                     && record.secret_use_answer == secret_answer
                     && record.manifest_binding_answer == manifest_answer
+                    && record.broker_action_answer == broker_action_answer
                     && tx.query_row(
                         "SELECT sealed_answer_sha256 FROM elicitation_answers WHERE elicitation_id=?1",
                         [id], |row| row.get::<_, Option<String>>(0),
@@ -938,6 +985,7 @@ impl ConsentStore {
                 record.answered_surface = surface.map(str::to_owned);
                 record.secret_use_answer = secret_answer;
                 record.manifest_binding_answer = manifest_answer;
+                record.broker_action_answer = broker_action_answer;
                 record.input_supplied = !sealed_inputs.is_empty();
                 terminal(
                     tx,
@@ -1163,7 +1211,7 @@ impl ConsentStore {
             let mut stmt = tx.prepare(
                 "SELECT r.elicitation_id,a.settled_at_ms,r.record_json,a.cursor \
                  FROM elicitation_answers a JOIN elicitation_records r USING(elicitation_id) \
-                 WHERE a.cursor>?1 AND (?2 IS NULL OR \
+                 WHERE a.cursor>?1 AND ((?2 IS NULL AND r.broker_action=0) OR \
                  (a.owner=?2 AND r.acknowledged=0 AND r.state IN ('answered','expired'))) \
                  ORDER BY a.cursor",
             )?;

@@ -75,6 +75,8 @@ pub struct ElicitationRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_binding_answer: Option<cingulate_decode::ManifestBindingAnswer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broker_action_answer: Option<cingulate_decode::BrokerActionAnswer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub statement: Option<String>,

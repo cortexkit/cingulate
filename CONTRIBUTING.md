@@ -45,7 +45,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --locked --features ck-cingulate/dev-local-operator -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo test --workspace --all-targets --locked --features ck-cingulate/dev-local-operator
-cargo run -q -p cingulate-vectors --example <generator> --locked -- --check   # five generators
+cargo run -q -p cingulate-vectors --example <generator> --locked -- --check   # generators listed in scripts/gate.sh
 cargo tree --workspace --edges normal                                          # no prefrontal-* crate
 ```
 

@@ -54,6 +54,7 @@ impl ElicitationRecord {
             "consent" | "package" | "flow_decision" => "consent",
             "secret_use" => "secret_use",
             "manifest_binding" => "manifest_binding",
+            "broker_action" => "broker_action",
             "config_plan" => "config_plan",
             "flow_install" => "flow_install",
             _ => return None,

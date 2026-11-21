@@ -23,6 +23,7 @@ cargo test --workspace --all-targets --locked --features "$dev_feature"
 step "vector corpora match their generators"
 for example in \
   generate_vectors \
+  generate_broker_action_vectors \
   generate_consent_outcomes_refs_vectors \
   generate_no_expiry_vectors \
   generate_session_ended_vectors \

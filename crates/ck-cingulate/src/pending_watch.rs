@@ -292,6 +292,7 @@ impl Handler {
                     change.secret_use,
                     change.manifest_binding,
                     change.config_plan,
+                    change.broker_action,
                     params,
                 ) {
                     continue;

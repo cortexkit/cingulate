@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.0 (ck-cingulate), 0.14.0 (cingulate-decode), 0.13.0 (cingulate-store), 0.18.0 (cingulate-vectors)
+
+- Advertise `broker-action-approval/v1` and accept `broker_action` cards from
+  scoped requesters. Approving readers opt in with `broker-action-approval`;
+  deploy them before enabling filers. Allow binds the exact statement and
+  device, while a missed card remains readable for 24 hours as `expired`, not
+  a decline. The vault, not Cingulate, verifies approval signatures.
+- Migration 017 adds exact-statement deduplication and retains the kind's
+  visibility flag in the watch log after payload pruning. The new
+  `broker-action-v1` corpus captures the shipped handler contract.
+
 ## 0.26.4 (ck-cingulate)
 
 - Use cortexkit-bus-client 0.1.10: replaced connections stop retrying with
