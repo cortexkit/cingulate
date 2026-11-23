@@ -379,8 +379,9 @@ that sends them is deployed.
 - `escalated.fields` contains only `card_kind`, `subject`, and optional
   `expires_at_ms`, in that order. `card_kind` is `consent` for consent, package
   and flow-decision cards, `secret_use` for secret use, `manifest_binding` for
-  repository bindings, `broker_action` for broker actions, and `flow_install` for
-  installs (including those carrying secrets). Cards with no expiry omit
+  repository bindings, `broker_action` for broker actions, `sandbox_escape` for
+  one command outside a sandbox, and `flow_install` for installs (including
+  those carrying secrets). Cards with no expiry omit
   `expires_at_ms`.
 - `settled.fields` contains only `outcome`: `answered` or `expired`. Withdrawal
   has no `fields` key. No notice contains requester titles, prompts, scope text,
@@ -597,6 +598,50 @@ at `c2a9ce2eaf99da646160eeb0c73d6b11d9341cbf`.
 
 See the [broker-action contract](broker-action-v1.md#filing) for scoped filing,
 deduplication, the requester record and the separate `expired` outcome.
+
+## Sandbox-escape requester (0.28.0)
+
+Cingulate advertises `sandbox-escape-approval/v1`. Only `reserved:aft` may file
+`kind: "sandbox_escape"`, on a route with a daemon-stamped agent scope. A missing
+scope or agent, or another filer, refuses `elicitation_requester_refused`. The
+agent comes from the route stamp. A worker's card names its stamped head agent,
+marks `subject.via_worker: true` and goes straight to the person; the head cannot
+answer it. Only an [approving device](consent-phone-v2.md#sandbox-escape-approvals-0280)
+may answer. An agent or an unsigned surface cannot turn a pending card into an
+approval.
+
+The `consent.request` params are a closed object containing only `kind` and
+`sandbox_escape`. The nested object is also closed and contains all of the
+fields below. Unknown keys (including subject identity, card wording or options)
+and invalid fields refuse `elicitation_invalid_request`.
+
+| `sandbox_escape` field | Rule |
+|---|---|
+| `call_key` | Nonblank string. A valid repeat from the same stamped owner returns the original `elicitation_id` unchanged, even after settlement or restart. It does not refresh the deadline or replace the recorded fields. |
+| `command` | Nonblank string, at most 2,000 Unicode scalar values. Line feeds and tabs are allowed. Other Unicode control characters and bidi formatting characters (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) are refused. |
+| `cwd` | Absolute `/`-rooted folder, no NUL. |
+| `shell` | Absolute `/`-rooted path to the shell program, no NUL. |
+| `escapes_level` | `credentials`, `standard` or `strict`. |
+| `background` | Boolean. |
+| `reason` | One line of text, at most 160 Unicode scalar values. |
+| `expires_in_ms` | Integer from 1 to 600,000 inclusive. |
+
+The requester record preserves the exact fields under `sandbox_escape` and
+reports the deadline in `expires_at_ms`. The answers are `run_once` (effect
+`grant`) and `decline` (effect `decline`); “Don't run” (`decline`) is the default.
+No answer by the deadline (at most ten minutes), decline, or withdrawal all
+mean no run. The card records those outcomes separately; expiry and withdrawal
+have no `answered_choice_id`.
+
+`run_once` covers one run of exactly the recorded command, folder and shell.
+Any change to those fields requires a new card with a fresh `call_key`. AFT runs
+the command from its own record of the request, never from text read back from
+the card. AFT does not file this card for commands carrying secret placeholders
+or running on a build server; those use separate approval paths. After approval,
+AFT records whether the command ran with `consent.report_execution`.
+
+Examples and refusals are in
+[`sandbox-escape-v1`](../../test-vectors/sandbox-escape-v1/README.md).
 
 ## Vault secret-use requester (0.12.0)
 
@@ -974,7 +1019,7 @@ The suite string must match exactly; the public key must be canonical unpadded
 base64url decoding to exactly 32 bytes. The array and its input/HPKE objects
 have closed shapes. Present null, malformed fields, unknown fields, extra
 inputs, and inputs on any other card kind refuse `elicitation_invalid_request`
-before a card exists. In particular, `secret_use`, `manifest_binding`, `broker_action`,
+before a card exists. In particular, `secret_use`, `manifest_binding`, `broker_action`, `sandbox_escape`,
 `config_plan`, flow-install/package and `tool_permission` cards cannot carry
 inputs: tool permissions can be answered by an agent rather than the person,
 so they cannot collect a person's typed secret.

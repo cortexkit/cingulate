@@ -14,6 +14,7 @@ mod config_plan;
 mod flow_card_structure;
 mod flow_secrets;
 mod manifest_binding;
+mod sandbox_escape;
 mod sealed_text;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
@@ -26,6 +27,7 @@ pub use config_plan::{
 pub use flow_card_structure::{Capabilities, CapabilityRow, Comparison, ComparisonRow};
 pub use flow_secrets::{FlowIdentity, FlowInstallSecrets};
 pub use manifest_binding::{ManifestBinding, ManifestBindingAnswer, ManifestBindingStatement};
+pub use sandbox_escape::{SandboxEscape, SandboxLevel};
 pub use sealed_text::{
     sealed_answer_fingerprint, HpkeKey, SealedText, SealedTextAnswer, SEALED_TEXT_SUITE,
 };
@@ -146,6 +148,8 @@ pub struct ConsentRequest {
     pub manifest_binding: Option<ManifestBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_action: Option<BrokerAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_escape: Option<SandboxEscape>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_use: Option<SecretUse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -409,10 +413,10 @@ impl ConsentRequest {
     /// Decode the closed serde shape first, then apply ordered semantic rules.
     /// The returned form has no answer schema, including for equality/dedup.
     pub fn decode(body: Value) -> Result<Self, Refusal> {
-        let body = if body.get("kind").and_then(Value::as_str) == Some("broker_action") {
-            broker_action::normalize(&body)?
-        } else {
-            body
+        let body = match body.get("kind").and_then(Value::as_str) {
+            Some("broker_action") => broker_action::normalize(&body)?,
+            Some("sandbox_escape") => sandbox_escape::normalize(body)?,
+            _ => body,
         };
         if body.get("inputs").is_some()
             && body.get("kind").and_then(Value::as_str) != Some("consent")
@@ -490,6 +494,16 @@ impl ConsentRequest {
             }
         }
         self.flow_install_secrets()?;
+        match (&self.sandbox_escape, self.kind.as_str()) {
+            (Some(body), "sandbox_escape") => body.validate()?,
+            (None, "sandbox_escape") => return Err(Refusal::invalid("missing sandbox_escape")),
+            (Some(_), _) => {
+                return Err(Refusal::invalid(
+                    "sandbox_escape body requires sandbox_escape kind",
+                ))
+            }
+            (None, _) => {}
+        }
         if self.kind == "broker_action" {
             self.broker_action
                 .as_ref()
@@ -656,6 +670,7 @@ impl ConsentRequest {
                 | "secret_use"
                 | "manifest_binding"
                 | "broker_action"
+                | "sandbox_escape"
                 | "config_plan"
         ) {
             return Err(Refusal::new(
@@ -793,7 +808,10 @@ impl ConsentRequest {
 
     /// Whether only the phone can approve this card.
     pub fn answer_needs_phone(&self) -> bool {
-        Self::kind_answer_needs_phone(self.is_secret_card(), self.kind == "config_plan")
+        Self::kind_answer_needs_phone(
+            self.is_secret_card() || self.sandbox_escape.is_some(),
+            self.kind == "config_plan",
+        )
     }
 
     /// Phone-only rule shared by pending-card readers and notices announcing cards

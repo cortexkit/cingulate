@@ -26,6 +26,7 @@ for example in \
   generate_broker_action_vectors \
   generate_consent_outcomes_refs_vectors \
   generate_no_expiry_vectors \
+  generate_sandbox_escape_vectors \
   generate_session_ended_vectors \
   generate_watch_pending_vectors; do
   cargo run -q -p cingulate-vectors --example "$example" --locked -- --check

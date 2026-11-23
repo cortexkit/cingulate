@@ -293,6 +293,7 @@ impl Handler {
                     change.manifest_binding,
                     change.config_plan,
                     change.broker_action,
+                    change.sandbox_escape,
                     params,
                 ) {
                     continue;

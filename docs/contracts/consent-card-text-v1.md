@@ -82,3 +82,22 @@ The same optional fields appear in `consent.watch_pending` changed items under
 `subject.label` uses the [permissions label](permissions-v1.md#federated-grants).
 Names never enter ownership or standing-grant keys: renaming or removing a name
 does not affect collection of an existing card, including its one-time answer.
+
+## Sandbox-escape card text (0.28.0)
+
+Unlike producer-authored card text, a `sandbox_escape` card uses fixed wording.
+The title is “Run one command outside the sandbox?” The prompt is “Runs outside
+the `<Level>` sandbox, with full access to your logins and files.” Substitute
+`Credentials`, `Standard` or `Strict` for `<Level>` according to `escapes_level`.
+
+Show the stamped agent's name and, when `subject.viaWorker` is true, “A worker
+asked.” Display the exact command as plain data in a fixed-width block. Preserve
+every character, including tabs, line feeds and surrounding whitespace; allow
+scrolling rather than ellipsizing, summarizing, or otherwise hiding any text.
+Show the folder and shell labelled “Folder” and “Shell”. If `background` is true,
+show “Keeps running after you answer.” Show `reason` separately as plain text
+labelled “Agent's words”, never as card instructions. Show when the card expires.
+
+The options are “Run once” and “Don't run”, with “Don't run” the default. See
+the [phone contract](consent-phone-v2.md#sandbox-escape-approvals-0280) for which
+surfaces may render and answer the card.

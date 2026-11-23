@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.28.0 (ck-cingulate), 0.15.0 (cingulate-decode), 0.14.0 (cingulate-store), 0.19.0 (cingulate-vectors)
+
+- Add `sandbox-escape-approval/v1`: a scoped requester can ask the person to
+  run one exact command outside its sandbox. Readers opt in to the full command
+  display; only an approving device can answer. Decline is the default and the
+  card expires within ten minutes.
+- Migration 018 preserves call-key idempotency across restarts and keeps the
+  renderer visibility flag in watch changes even after payload pruning. The
+  `sandbox-escape-v1` corpus captures served cards, outcomes and refusals.
+
 ## 0.27.0 (ck-cingulate), 0.14.0 (cingulate-decode), 0.13.0 (cingulate-store), 0.18.0 (cingulate-vectors)
 
 - Advertise `broker-action-approval/v1` and accept `broker_action` cards from

@@ -55,6 +55,7 @@ impl ElicitationRecord {
             "secret_use" => "secret_use",
             "manifest_binding" => "manifest_binding",
             "broker_action" => "broker_action",
+            "sandbox_escape" => "sandbox_escape",
             "config_plan" => "config_plan",
             "flow_install" => "flow_install",
             _ => return None,

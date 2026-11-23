@@ -638,6 +638,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
             "secret-use-approval/v1",
             "manifest-binding-approval/v1",
             "broker-action-approval/v1",
+            "sandbox-escape-approval/v1",
             "consent-config-plan/v1",
             "flow-install-secrets/v1",
             "scope-workdir/v1",

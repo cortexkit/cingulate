@@ -159,6 +159,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
             "secret_use",
             "consent",
             "broker_action",
+            "sandbox_escape",
         ],
         agent: SubjectAgent::Never,
     },
@@ -200,6 +201,7 @@ pub fn manifest() -> ModuleManifest {
                 "secret-use-approval/v1".into(),
                 "manifest-binding-approval/v1".into(),
                 "broker-action-approval/v1".into(),
+                "sandbox-escape-approval/v1".into(),
                 "consent-config-plan/v1".into(),
                 "flow-install-secrets/v1".into(),
                 "scope-workdir/v1".into(),
@@ -374,12 +376,24 @@ impl Stamp {
         }
     }
 
+    fn sandbox_escape_agent(&self) -> Option<(&str, bool)> {
+        use subc_protocol::scope::ScopeKind;
+        let scope = self.scope.as_ref()?;
+        let (agent, worker) = match scope.kind {
+            ScopeKind::Worker => (scope.attributes.on_behalf_of_agent.as_deref()?, true),
+            ScopeKind::Federated => return None,
+            _ => (scope.attributes.agent_id.as_deref()?, false),
+        };
+        (!agent.trim().is_empty()).then_some((agent, worker))
+    }
+
     fn card_visible(&self, record: &ElicitationRecord, params: &Value) -> bool {
         self.kind_visible(
             record.request.is_secret_card(),
             record.request.manifest_binding.is_some(),
             record.request.kind == "config_plan",
             record.request.broker_action.is_some(),
+            record.request.sandbox_escape.is_some(),
             params,
         )
     }
@@ -391,8 +405,13 @@ impl Stamp {
         manifest_binding: bool,
         config_plan: bool,
         broker_action: bool,
+        sandbox_escape: bool,
         params: &Value,
     ) -> bool {
+        if sandbox_escape {
+            // Reading needs a renderer for the full command, not answer authority.
+            return feature_declared(params, "sandbox-escape-approval");
+        }
         if ConsentRequest::kind_answer_needs_phone(secret_card, config_plan)
             && self.secret_use_phone().is_none()
         {
@@ -413,6 +432,11 @@ impl Stamp {
                         "secret-use-approval"
                     },
                 ))
+    }
+
+    fn can_answer_card(&self, record: &ElicitationRecord, params: &Value) -> bool {
+        self.card_visible(record, params)
+            && (record.request.sandbox_escape.is_none() || self.secret_approval_device().is_some())
     }
     fn owner(&self) -> String {
         if self.label() == "reserved:callosum" {
@@ -1115,10 +1139,15 @@ impl Handler {
         } else {
             false
         };
+        let sandbox_escape = request.sandbox_escape.is_some();
+        let sandbox_agent = sandbox_escape
+            .then(|| stamp.sandbox_escape_agent())
+            .flatten();
         let agent_source = if stamp.label() == "reserved:aft" && request.kind == "consent" {
             stamp.scope.as_ref().ok_or_else(|| stamp.refuse())?;
             SubjectAgent::Carried
         } else if broker_action
+            || sandbox_escape
             || matches!(request.kind.as_str(), "manifest_binding" | "secret_use")
         {
             SubjectAgent::FromScope
@@ -1128,15 +1157,18 @@ impl Handler {
         };
         let carrier = agent_source == SubjectAgent::Carried;
         let from_scope = agent_source == SubjectAgent::FromScope;
-        let worker_head = if !broker_action
-            && !matches!(request.kind.as_str(), "secret_use" | "manifest_binding")
-            && (request.kind == "consent" || from_scope)
-            && stamp.carried_agent_id.trim().is_empty()
+        let worker_head = if sandbox_escape && sandbox_agent.is_none()
+            || (!broker_action
+                && !sandbox_escape
+                && !matches!(request.kind.as_str(), "secret_use" | "manifest_binding")
+                && (request.kind == "consent" || from_scope)
+                && stamp.carried_agent_id.trim().is_empty())
         {
             match &stamp.scope {
                 Some(scope)
                     if scope.kind == subc_protocol::scope::ScopeKind::Worker
-                        && matches!(&scope.owner, Principal::Reserved { module_id } if is_prefrontal_module(module_id)) =>
+                        && (sandbox_escape
+                            || matches!(&scope.owner, Principal::Reserved { module_id } if is_prefrontal_module(module_id))) =>
                 {
                     Some(self.worker_head(scope).await?)
                 }
@@ -1150,19 +1182,23 @@ impl Handler {
             .as_ref()
             .and_then(|s| s.attributes.agent_id.as_deref())
             .unwrap_or_default();
-        let agent_id = match &worker_head {
-            Some(head) => head
+        let agent_id = match (&worker_head, sandbox_agent) {
+            (Some(head), _) => head
                 .agent_id
                 .as_deref()
                 .filter(|id| !id.trim().is_empty())
                 .ok_or_else(|| {
                     Refusal::new("access_no_head", "stamped parent head has no agent_id")
                 })?,
-            None if broker_action || request.kind == "secret_use" => stamped_secret_agent,
-            None if request.kind == "manifest_binding" && stamp.carried_agent_id.is_empty() => {
+            (None, Some((agent, _))) => agent,
+            (None, _) if sandbox_escape => return Err(stamp.refuse()),
+            (None, _) if broker_action || request.kind == "secret_use" => stamped_secret_agent,
+            (None, _)
+                if request.kind == "manifest_binding" && stamp.carried_agent_id.is_empty() =>
+            {
                 stamped_secret_agent
             }
-            None => &stamp.carried_agent_id,
+            (None, _) => &stamp.carried_agent_id,
         };
         if carrier && agent_id.trim().is_empty() {
             return Err(stamp.refuse());
@@ -1221,7 +1257,8 @@ impl Handler {
                 agent_id: Some(agent_id.to_owned()),
                 head_agent_id: agent_id.to_owned(),
                 label: resolved_name.clone().unwrap_or_else(|| agent_id.to_owned()),
-                via_worker: worker_head.is_some(),
+                via_worker: worker_head.is_some()
+                    || sandbox_agent.is_some_and(|(_, worker)| worker),
             }
         } else {
             Subject {
@@ -1414,23 +1451,53 @@ impl Handler {
             {
                 return Err(stamp.refuse());
             }
+            if params.get("kind").and_then(Value::as_str) == Some("sandbox_escape")
+                && (!stamp.admits_kind("sandbox_escape") || stamp.scope.is_none())
+            {
+                return Err(stamp.refuse());
+            }
             let mut request = ConsentRequest::decode(params)?;
             if let Some(facts) = federated::facts(stamp)? {
                 federated::prepare(facts, &mut request)?;
             }
+            // A replay must not refresh the deadline or depend on a later agent
+            // name lookup. The original card may already have been pruned.
+            if let Some(body) = request
+                .sandbox_escape
+                .as_ref()
+                .filter(|_| stamp.sandbox_escape_agent().is_some())
+            {
+                if let Some(id) = self
+                    .with_store(|store| store.sandbox_escape_id(&stamp.owner(), &body.call_key))
+                    .await?
+                {
+                    return Ok(json!({"elicitation_id": id}));
+                }
+            }
             let identity = self.identity(stamp, &request).await?;
-            let result = self
+            let (id, result) = self
                 .with_store(|store| {
-                    store.create(&identity, request, self.inner.options.clock.now_ms())
+                    if let Some(body) = &request.sandbox_escape {
+                        if let Some(id) =
+                            store.sandbox_escape_id(&identity.owner, &body.call_key)?
+                        {
+                            return Ok((id, None));
+                        }
+                    }
+                    let result =
+                        store.create(&identity, request, self.inner.options.clock.now_ms())?;
+                    Ok((result.record.elicitation_id.clone(), Some(result)))
                 })
                 .await?;
-            self.settlements(&result.settlements).await;
-            self.wake(&result.record.elicitation_id);
-            if result.created {
-                self.pointer(&result.record, false).await;
-                self.spawn_pending_notices().await;
+            if let Some(result) = result {
+                self.settlements(&result.settlements).await;
+                self.wake(&id);
+                if result.created {
+                    self.pointer(&result.record, false).await;
+                    self.spawn_pending_notices().await;
+                }
             }
-            return Ok(json!({"elicitation_id": result.record.elicitation_id}));
+            return Ok(json!({"elicitation_id": id}));
         }
         let id = match method {
             "consent.get" if operator_surface => Some(text(&params, "elicitationId")?),
@@ -1565,7 +1632,12 @@ impl Handler {
                 .get_phone(id.expect("phone id"), now)
                 .map_err(store_error)?
             {
-                if !stamp.card_visible(&record, &params) {
+                let admitted = if method == "consent.answer" {
+                    stamp.can_answer_card(&record, &params)
+                } else {
+                    stamp.card_visible(&record, &params)
+                };
+                if !admitted {
                     return Err(Refusal::new(
                         if method == "consent.answer" {
                             if record.request.kind == "config_plan" {
@@ -1574,6 +1646,8 @@ impl Handler {
                                 "elicitation_manifest_binding_approval_required"
                             } else if record.request.kind == "broker_action" {
                                 "elicitation_broker_action_approval_required"
+                            } else if record.request.kind == "sandbox_escape" {
+                                "elicitation_sandbox_escape_approval_required"
                             } else {
                                 "elicitation_secret_use_approval_required"
                             }
@@ -1587,6 +1661,8 @@ impl Handler {
                                 "manifest binding requires a phone with clientFeatures manifest-binding-approval"
                             } else if record.request.kind == "broker_action" {
                                 "broker action requires an approving device with clientFeatures broker-action-approval"
+                            } else if record.request.kind == "sandbox_escape" {
+                                "sandbox escape requires an approving device with clientFeatures sandbox-escape-approval"
                             } else {
                                 "secret use requires a phone with clientFeatures secret-use-approval"
                             }
@@ -1768,6 +1844,9 @@ impl Handler {
                     {
                         revision.push_str(":broker-action");
                     }
+                    if feature_declared(&params, "sandbox-escape-approval") {
+                        revision.push_str(":sandbox-escape");
+                    }
                     if feature_declared(&params, "config-plan")
                         && stamp.secret_use_phone().is_some()
                     {
@@ -1848,6 +1927,9 @@ impl Handler {
                         .as_ref()
                         .is_some_and(|r| r.request.kind == "config_plan");
                     let secret_card = record.as_ref().is_some_and(|r| r.request.is_secret_card());
+                    let sandbox_escape = record
+                        .as_ref()
+                        .is_some_and(|r| r.request.sandbox_escape.is_some());
                     if let Some(card) = record
                         .as_ref()
                         .filter(|r| r.request.broker_action.is_some())
@@ -1926,7 +2008,7 @@ impl Handler {
                             choice.expect("choice"),
                             stamp.console_machine_id.as_deref(),
                             cingulate_store::AnswerProvenance {
-                                device: if secret_card {
+                                device: if secret_card || sandbox_escape {
                                     stamp.secret_approval_device()
                                 } else {
                                     stamp.answering_device()
@@ -2415,7 +2497,8 @@ mod tests {
                         "macos_permission",
                         "secret_use",
                         "consent",
-                        "broker_action"
+                        "broker_action",
+                        "sandbox_escape",
                     ]
                 ),
             ]
@@ -2479,6 +2562,7 @@ mod tests {
                     "secret_use",
                     "consent",
                     "broker_action",
+                    "sandbox_escape",
                 ]
             } else {
                 &["consent"]

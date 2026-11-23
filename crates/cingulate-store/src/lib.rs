@@ -51,7 +51,7 @@ pub const MIGRATION_NAMESPACE: &str = "cingulate";
 /// How many change-log rows the store keeps for consent.watch_pending. A watch
 /// cursor older than the retained rows cannot be replayed and gets a reread.
 pub const CHANGE_LOG_ROWS: i64 = 4096;
-pub const MIGRATIONS: [Migration; 17] = [
+pub const MIGRATIONS: [Migration; 18] = [
     Migration {
         version: 1,
         statements: include_str!("../migrations/001_elicitation.sql"),
@@ -119,6 +119,10 @@ pub const MIGRATIONS: [Migration; 17] = [
     Migration {
         version: 17,
         statements: include_str!("../migrations/017_broker_action.sql"),
+    },
+    Migration {
+        version: 18,
+        statements: include_str!("../migrations/018_sandbox_escape.sql"),
     },
 ];
 
@@ -274,6 +278,8 @@ pub struct Change {
     pub config_plan: bool,
     /// Broker-action feature visibility, retained after payload pruning.
     pub broker_action: bool,
+    /// Sandbox-escape renderer visibility, retained after payload pruning.
+    pub sandbox_escape: bool,
     pub version: i64,
     pub elicitation_id: String,
 }
@@ -411,7 +417,7 @@ impl ConsentStore {
                 |row| row.get(0),
             )?;
             let mut stmt = tx.prepare(
-                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding),MAX(config_plan),MAX(broker_action) FROM cingulate_changes WHERE version>?1 \
+                "SELECT MAX(version),elicitation_id,MAX(secret_use),MAX(manifest_binding),MAX(config_plan),MAX(broker_action),MAX(sandbox_escape) FROM cingulate_changes WHERE version>?1 \
                  GROUP BY elicitation_id ORDER BY 1 LIMIT ?2",
             )?;
             let changes = stmt
@@ -420,6 +426,7 @@ impl ConsentStore {
                         secret_use: row.get(2)?,
                         manifest_binding: row.get(3)?,
                         broker_action: row.get(5)?,
+                        sandbox_escape: row.get(6)?,
                         config_plan: row.get(4)?,
                         version: row.get(0)?,
                         elicitation_id: row.get(1)?,
@@ -451,6 +458,16 @@ impl ConsentStore {
         })
     }
 
+    pub fn sandbox_escape_id(&self, owner: &str, call_key: &str) -> Result<Option<String>> {
+        self.read(|conn| {
+            Ok(conn.query_row(
+                "SELECT elicitation_id FROM sandbox_escape_requests WHERE owner=?1 AND call_key=?2",
+                params![owner, call_key],
+                |row| row.get(0),
+            ).optional()?)
+        })
+    }
+
     /// Insert or refresh one already-accepted request. A due dedup match is
     /// expired, and changed content withdraws the old card; replacement and id
     /// minting share that settlement's transaction and roll back together.
@@ -479,7 +496,12 @@ impl ConsentStore {
                     .transpose()
                     .map_err(Error::Refused)?
             };
-            let filed_expiry = request.expires_in_ms.map(|ttl| now_ms.saturating_add(ttl));
+            let filed_expiry = request
+                .sandbox_escape
+                .as_ref()
+                .map(|body| body.expires_in_ms)
+                .or(request.expires_in_ms)
+                .map(|ttl| now_ms.saturating_add(ttl));
             let deadline = if flow_secrets.is_some() {
                 secret_expiry.map(|expiry| filed_expiry.map_or(expiry, |filed| filed.min(expiry)))
             } else {
@@ -634,8 +656,8 @@ impl ConsentStore {
             };
             tx.execute(
                 "INSERT INTO elicitation_records \
-                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding,config_plan,broker_action) \
-                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7,?8,?9)",
+                 (elicitation_id,owner,dedup_key,record_json,state,expires_at_ms,secret_use,manifest_binding,config_plan,broker_action,sandbox_escape) \
+                 VALUES (?1,?2,?3,?4,'pending',?5,?6,?7,?8,?9,?10)",
                 params![
                     record.elicitation_id,
                     identity.owner,
@@ -646,6 +668,7 @@ impl ConsentStore {
                     record.request.manifest_binding.is_some(),
                     record.request.kind == "config_plan",
                     record.request.broker_action.is_some(),
+                    record.request.sandbox_escape.is_some(),
                 ],
             )?;
             if let Some(body) = &record.request.secret_use {
@@ -661,6 +684,9 @@ impl ConsentStore {
             }
             if let Some(body) = &record.request.broker_action {
                 tx.execute("INSERT INTO broker_action_requests(statement_sha256,elicitation_id) VALUES (?1,?2)",params![body.statement_sha256,record.elicitation_id])?;
+            }
+            if let Some(body) = &record.request.sandbox_escape {
+                tx.execute("INSERT INTO sandbox_escape_requests(owner,call_key,elicitation_id) VALUES (?1,?2,?3)",params![identity.owner,body.call_key,record.elicitation_id])?;
             }
             enqueue_person_notice(tx, &record, "escalated")?;
             Ok(CreateResult {
@@ -871,6 +897,11 @@ impl ConsentStore {
                 && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
             {
                 return Err(refuse("elicitation_expired", "broker_action.expires_at_ms has passed"));
+            }
+            if record.request.sandbox_escape.is_some()
+                && record.expires_at_ms.is_some_and(|expiry| expiry <= now_ms)
+            {
+                return Err(refuse("elicitation_expired", "sandbox_escape deadline has passed"));
             }
             let sealed_inputs = record.request.answer_inputs(choice, inputs).map_err(Error::Refused)?;
             let fingerprint = cingulate_decode::sealed_answer_fingerprint(choice, &sealed_inputs);
@@ -1091,6 +1122,8 @@ impl ConsentStore {
                 return Err(refuse("elicitation_invalid_execution", "reason requires approved_not_executed and a lowercase snake_case code of 1 to 64 bytes"));
             }
             if record.request.kind == "flow_decision"
+                || (record.request.sandbox_escape.is_some()
+                    && record.answered_choice_id.as_deref() != Some("run_once"))
                 || !matches!(
                     execution,
                     "executed" | "approved_not_executed" | "outcome_unknown"
@@ -1211,7 +1244,7 @@ impl ConsentStore {
             let mut stmt = tx.prepare(
                 "SELECT r.elicitation_id,a.settled_at_ms,r.record_json,a.cursor \
                  FROM elicitation_answers a JOIN elicitation_records r USING(elicitation_id) \
-                 WHERE a.cursor>?1 AND ((?2 IS NULL AND r.broker_action=0) OR \
+                 WHERE a.cursor>?1 AND ((?2 IS NULL AND r.broker_action=0 AND r.sandbox_escape=0) OR \
                  (a.owner=?2 AND r.acknowledged=0 AND r.state IN ('answered','expired'))) \
                  ORDER BY a.cursor",
             )?;

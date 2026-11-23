@@ -365,6 +365,33 @@ See the [broker-action contract](broker-action-v1.md#rendering-and-answering)
 for the `broker-action-approval` feature, render and answer rules, and the
 24-hour retention of missed cards.
 
+## Sandbox-escape approvals (0.28.0)
+
+Declare `clientFeatures: ["sandbox-escape-approval"]` (alongside any other
+supported features) on `consent.list_pending`, `consent.get`,
+`consent.watch_pending` and `consent.answer`. A reader that does not declare the
+feature does not receive the card, including its removal on a watch. An
+operator surface that can render the card can read it while pending but must
+not offer to answer it unless it is an approving device.
+
+Operator readbacks carry `sandboxEscape` with the
+[request fields](consent-requester-v2.md#sandbox-escape-requester-0280), using
+their original nested snake_case names. Render the complete `command` as plain
+data in a fixed-width block, never shortened, and follow the
+[fixed card text](consent-card-text-v1.md#sandbox-escape-card-text-0280) for the
+subject, warning, folder, shell, background line, reason and deadline.
+
+The same device rule as vault secret use applies: the paired phone can answer;
+a desktop can do so today only on a local operator route in a build with the
+default-off `dev-local-operator` Cargo feature.
+A feature declaration by itself is not approval authority. Use `choiceId` of
+`run_once` or `decline`; no envelope or typed input is used. `decline` is the
+default. An answer from an operator surface without device authority or without
+the renderer feature refuses `elicitation_sandbox_escape_approval_required`.
+An answer at or after the deadline refuses `elicitation_expired`. A missed card
+is `expired`, not an answer. Notices carry only card metadata, never the command,
+folder, shell or reason.
+
 ## Vault secret-use approvals (0.12.0)
 
 Cingulate advertises `secret-use-approval/v1`. In release builds, only daemon-stamped

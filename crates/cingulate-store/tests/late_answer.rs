@@ -576,7 +576,7 @@ fn shared_outbox_migration_upgrades_version_four_keeping_rows_and_order() {
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        17
+        18
     );
     drop(conn);
     // After migration 5 the shared outbox also accepts a late-answer notice
