@@ -354,7 +354,7 @@ to at most 200 Unicode characters, including a trailing `…` when shortened.
 The exact stored JSON has this stable key order (optional keys are omitted):
 
 ```json
-{"elicitation_id":"el_1","purpose":"escalated","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"},"fields":{"card_kind":"secret_use","subject":"ALF in project Example","expires_at_ms":1700000600000}}
+{"elicitation_id":"el_1","purpose":"escalated","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"},"fields":{"card_kind":"secret_use","subject":"ALF in project Example","expires_at_ms":1700000600000,"phone_only":true,"via_worker":true}}
 {"elicitation_id":"el_1","purpose":"settled","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"},"fields":{"outcome":"answered"}}
 {"elicitation_id":"el_1","purpose":"withdrawn","asker":{"scope_epoch":3,"scope_ref":"worker"},"head":{"scope_epoch":7,"scope_ref":"head"}}
 ```
@@ -364,7 +364,7 @@ files itself, or a local app's card) queues the same notices with `asker` and
 `head` omitted, so the person is still told; core pushes it with no agent label:
 
 ```json
-{"elicitation_id":"el_1","purpose":"escalated","fields":{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":1700000600000}}
+{"elicitation_id":"el_1","purpose":"escalated","fields":{"card_kind":"consent","subject":"an unverified local process","expires_at_ms":1700000600000,"phone_only":false}}
 {"elicitation_id":"el_1","purpose":"settled","fields":{"outcome":"answered"}}
 ```
 
@@ -376,13 +376,15 @@ that sends them is deployed.
   worker's `head` requires a same-owner parent with daemon-confirmed `Linked`
   state; otherwise attribution stays with its asker. Older cards without a saved
   parent omit `head`; no body-supplied session is used.
-- `escalated.fields` contains only `card_kind`, `subject`, and optional
-  `expires_at_ms`, in that order. `card_kind` is `consent` for consent, package
+- `escalated.fields` contains `card_kind`, `subject`, optional `expires_at_ms`,
+  `phone_only`, and optional `via_worker`, in that order. Readers must ignore
+  members they do not know. `via_worker` is present only when true, indicating
+  that a worker asked for the card. `card_kind` is `consent` for consent, package
   and flow-decision cards, `secret_use` for secret use, `manifest_binding` for
   repository bindings, `broker_action` for broker actions, `sandbox_escape` for
-  one command outside a sandbox, and `flow_install` for installs (including
-  those carrying secrets). Cards with no expiry omit
-  `expires_at_ms`.
+  one command outside a sandbox, `config_plan` for configuration plans, and
+  `flow_install` for installs (including those carrying secrets). Cards with no
+  expiry omit `expires_at_ms`.
 - `settled.fields` contains only `outcome`: `answered` or `expired`. Withdrawal
   has no `fields` key. No notice contains requester titles, prompts, scope text,
   statements, vault bytes or choice details.

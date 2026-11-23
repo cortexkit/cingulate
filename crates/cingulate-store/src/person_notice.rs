@@ -35,6 +35,8 @@ enum PersonFields<'a> {
         // True requires a phone push regardless of operator presence because a
         // desktop answer would be refused.
         phone_only: bool,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        via_worker: bool,
     },
     Settled {
         outcome: &'a str,
@@ -72,6 +74,7 @@ impl ElicitationRecord {
                     subject,
                     expires_at_ms: self.expires_at_ms,
                     phone_only: self.request.answer_needs_phone(),
+                    via_worker: self.subject.via_worker,
                 })
             }
             "settled" => Some(PersonFields::Settled {
@@ -224,11 +227,15 @@ mod tests {
     }
 
     fn assert_escalated_body(request: Value, fields: &str) {
+        assert_escalated_body_for(identity(), request, fields);
+    }
+
+    fn assert_escalated_body_for(identity: RequestIdentity, request: Value, fields: &str) {
         let scratch = Scratch(scratch_root("cingulate-phone-notice"));
         let descriptor = crate::storage_descriptor(None, scratch.0.to_str().unwrap());
         let store = ConsentStore::open(&descriptor, 100).unwrap().0;
         let record = store
-            .create(&identity(), ConsentRequest::decode(request).unwrap(), 100)
+            .create(&identity, ConsentRequest::decode(request).unwrap(), 100)
             .unwrap()
             .record;
         let expected = format!(
@@ -251,7 +258,7 @@ mod tests {
         assert_eq!(notices.len(), 1);
         assert_eq!(notices[0].body_json, expected);
 
-        let asker = identity().asker;
+        let asker = identity.asker;
         let withdrawn = record.person_notice("withdrawn", asker.as_ref()).unwrap();
         assert_eq!(
             serde_json::to_string(&withdrawn).unwrap(),
@@ -348,6 +355,35 @@ mod tests {
             ))
             .unwrap(),
             r#"{"card_kind":"consent","subject":"ALF","expires_at_ms":60100,"phone_only":false}"#,
+        );
+    }
+
+    #[test]
+    fn escalated_worker_consent_includes_via_worker() {
+        let mut identity = identity();
+        identity.subject.via_worker = true;
+        assert_escalated_body_for(
+            identity,
+            serde_json::from_str(include_str!(
+                "../../../test-vectors/elicitation-request-v1/valid/app-grant-once.json"
+            ))
+            .unwrap(),
+            r#"{"card_kind":"consent","subject":"ALF","expires_at_ms":60100,"phone_only":false,"via_worker":true}"#,
+        );
+    }
+
+    #[test]
+    fn escalated_worker_sandbox_escape_includes_via_worker() {
+        let mut identity = identity();
+        identity.subject.via_worker = true;
+        assert_escalated_body_for(
+            identity,
+            serde_json::json!({"kind":"sandbox_escape", "sandbox_escape":{
+                "call_key":"example", "command":"printf example", "cwd":"/example",
+                "shell":"/bin/sh", "escapes_level":"standard", "background":true,
+                "reason":"Show the example.", "expires_in_ms":600000
+            }}),
+            r#"{"card_kind":"sandbox_escape","subject":"ALF","expires_at_ms":600100,"phone_only":true,"via_worker":true}"#,
         );
     }
 

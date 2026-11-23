@@ -537,7 +537,7 @@ async fn notices_keep_the_approving_device_marker_and_never_include_command_data
     assert_eq!(notice["purpose"], "escalated");
     assert_eq!(
         notice["fields"],
-        json!({"card_kind":"sandbox_escape","subject":"Lark","expires_at_ms":EXPIRY,"phone_only":!DEVELOPMENT_LOCAL_OPERATOR})
+        json!({"card_kind":"sandbox_escape","subject":"Lark","expires_at_ms":EXPIRY,"phone_only":!DEVELOPMENT_LOCAL_OPERATOR,"via_worker":true})
     );
     assert_eq!(f.payloads().len(), 1);
     let pointer = f.payloads().pop().unwrap();

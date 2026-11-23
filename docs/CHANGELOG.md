@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.1 (ck-cingulate), 0.14.1 (cingulate-store)
+
+- Include `via_worker: true` in escalated person notices when a worker asked for
+  the card, so the approving device can identify worker requests.
+
 ## 0.28.0 (ck-cingulate), 0.15.0 (cingulate-decode), 0.14.0 (cingulate-store), 0.19.0 (cingulate-vectors)
 
 - Add `sandbox-escape-approval/v1`: a scoped requester can ask the person to
