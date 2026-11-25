@@ -22,7 +22,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
-subc-client-rs = "=0.40.3"
+subc-client-rs = "=0.41.0"
 subc-protocol = "=0.37.4"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

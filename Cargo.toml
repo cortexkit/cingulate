@@ -3,6 +3,5 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.metadata.release]
-# operator-app/v1 and registration_channel require daemon 0.45.x, first shipped
-# together in subc-core 0.21.6 (daemon 0.45.3).
-requires_core = "0.21.6"
+# peer-build/v1 requires daemon 0.49.0, first shipped in subc-core 0.21.16.
+requires_core = "0.21.16"

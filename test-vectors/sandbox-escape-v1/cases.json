@@ -635,6 +635,22 @@
       }
     }
   },
+  "unverified-run-once-refused": {
+    "method": "consent.answer",
+    "params": {
+      "choiceId": "run_once",
+      "clientFeatures": [
+        "sandbox-escape-approval"
+      ],
+      "elicitationId": "el_1"
+    },
+    "reply": {
+      "error": {
+        "code": "peer_build_not_production",
+        "message": "run_once requires a verified production phone connection"
+      }
+    }
+  },
   "withdraw": {
     "method": "consent.withdraw",
     "params": {

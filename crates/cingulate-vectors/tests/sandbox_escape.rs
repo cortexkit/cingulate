@@ -333,7 +333,11 @@ async fn one_approval_cannot_refresh_or_replace_the_command_even_after_restart()
     f.clock.set(NOW + 1);
     assert_eq!(f.request(&aft, changed.clone()).await, id);
     let approved = f
-        .ok(&phone(), "consent.answer", answer(&id, "run_once"))
+        .ok(
+            &production_phone(),
+            "consent.answer",
+            answer(&id, "run_once"),
+        )
         .await;
     assert_eq!(approved["alreadyAnswered"], false);
     assert_eq!(approved["elicitation"]["answeredDevice"], DEVICE);
@@ -342,8 +346,12 @@ async fn one_approval_cannot_refresh_or_replace_the_command_even_after_restart()
         original["sandbox_escape"]
     );
     assert_eq!(
-        f.ok(&phone(), "consent.answer", answer(&id, "run_once"))
-            .await["alreadyAnswered"],
+        f.ok(
+            &production_phone(),
+            "consent.answer",
+            answer(&id, "run_once")
+        )
+        .await["alreadyAnswered"],
         true
     );
     let executed = f
@@ -428,7 +436,11 @@ async fn decline_withdrawal_and_expiry_do_not_grant() {
     assert_eq!(record["state"], "withdrawn");
     assert!(record.get("answered_choice_id").is_none());
     let answer_after_withdrawal = f
-        .ok(&phone(), "consent.answer", answer(&withdrawn, "run_once"))
+        .ok(
+            &production_phone(),
+            "consent.answer",
+            answer(&withdrawn, "run_once"),
+        )
         .await;
     assert_eq!(answer_after_withdrawal["ok"], false);
     assert_eq!(answer_after_withdrawal["elicitation"]["state"], "withdrawn");
@@ -445,9 +457,13 @@ async fn decline_withdrawal_and_expiry_do_not_grant() {
     assert_eq!(get_pending["state"], "pending");
     f.clock.set(EXPIRY);
     assert_eq!(
-        f.call(&phone(), "consent.answer", answer(&expired, "run_once"))
-            .await
-            .expect_err("answers at the deadline must refuse")["code"],
+        f.call(
+            &production_phone(),
+            "consent.answer",
+            answer(&expired, "run_once")
+        )
+        .await
+        .expect_err("answers at the deadline must refuse")["code"],
         "elicitation_expired"
     );
     let record = f

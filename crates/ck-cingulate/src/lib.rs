@@ -192,6 +192,7 @@ pub fn manifest() -> ModuleManifest {
             provides: vec![
                 "presence/v1".into(),
                 subc_protocol::peer::OPERATOR_APP_CAPABILITY.into(),
+                subc_protocol::peer::PEER_BUILD_CAPABILITY.into(),
                 // Cingulate takes a project only from a session scope's stamp,
                 // never from the connection, so the daemon needn't fill one.
                 subc_protocol::scope::BIND_NO_PROJECT_CAPABILITY.into(),
@@ -263,6 +264,8 @@ pub struct Stamp {
     pub local_operator: bool,
     /// Verified local app identifier supplied only by the daemon's peer stamp.
     pub operator_app: Option<String>,
+    /// Whether the daemon marked this connection as a verified production build.
+    pub production_peer_build: bool,
     pub sim_surface: bool,
     pub console_machine_id: Option<String>,
 }
@@ -290,6 +293,8 @@ impl Stamp {
         stamp.scope = req.scope.clone();
         stamp.harness = req.identity.harness.clone();
         stamp.operator_app = req.peer.operator_app.as_ref().map(|app| app.app.clone());
+        stamp.production_peer_build =
+            req.peer_build() == Some(subc_protocol::BUILD_CLASS_PRODUCTION);
         if let Some(scope) = &req.scope {
             // A scope reference can be reused for a new session. Including its
             // owner and epoch prevents that session from reading the previous session's cards.
@@ -1674,6 +1679,16 @@ impl Handler {
                         } else {
                             "elicitation not found"
                         },
+                    ));
+                }
+                if choice == Some("run_once")
+                    && record.request.sandbox_escape.is_some()
+                    && stamp.secret_use_phone().is_some()
+                    && !stamp.production_peer_build
+                {
+                    return Err(Refusal::new(
+                        "peer_build_not_production",
+                        "run_once requires a verified production phone connection",
                     ));
                 }
             }

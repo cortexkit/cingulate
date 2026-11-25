@@ -10,8 +10,9 @@ and the [rendering rules](../../docs/contracts/consent-phone-v2.md#sandbox-escap
 | --- | --- |
 | `cases.json`: `file-worker`, `phone-get` | A worker asks the person directly; the card names its lead agent and preserves a multiline command verbatim. |
 | `desktop-get`, `desktop-answer-refused`, `head-answer-refused`, `unsupported-get` | A surface that declares the renderer feature but is not an approving device can read, but cannot answer. The head agent cannot answer. Readers without the feature do not see the card. |
-| `run-once`, `replay`, `report-execution` | The phone grants one run. The same call key returns the same card after that answer. The filer records what happened. |
-| `decline`, `withdraw`, `answer-at-expiry`, `requester-expired` | No run on decline, withdrawal or expiry. |
+| `unverified-run-once-refused`, `run-once` | A phone route without `peer_build` cannot grant a run. The card stays open, and the same answer on a route stamped `peer_build: "production"` grants one run. |
+| `replay`, `report-execution` | Filing again with the same call key, the filer's identifier for one request, returns the same card after approval. The filer records what happened. |
+| `decline`, `withdraw`, `answer-at-expiry`, `requester-expired` | A phone can decline without build verification. No run on decline, withdrawal or expiry. |
 | `unknown-key`, `long-command`, `control-character`, `text-direction`, `relative-cwd`, `long-expiry`, `wrong-filer`, `missing-agent-stamp` | Refusals for malformed or unauthorized filings. |
 | `development.json`: `desktop-get`, `desktop-run-once` | Development builds allow the local operator to answer. |
 

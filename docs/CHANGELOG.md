@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.3 (ck-cingulate)
+
+- Only a phone running a verified official app can choose **Run once** on a
+  sandbox escape card. A refused answer leaves the card open. Declines and
+  local desktop approvals work as before.
+- Requires Core 0.21.16 or later so the daemon can pass phone build verification
+  to Cingulate.
+
 ## 0.28.2 (ck-cingulate)
 
 - List Cingulate as **Approval cards** in Settings and declare an empty settings

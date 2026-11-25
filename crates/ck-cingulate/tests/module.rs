@@ -584,6 +584,7 @@ async fn manifest_envelope_health_and_unknown_ops() {
         [
             "presence/v1",
             "operator-app/v1",
+            "peer-build/v1",
             "bind-no-project/v1",
             "consent/v1",
             "agent-run-scopes/v1",
@@ -766,6 +767,7 @@ fn route_bind_decodes_flow_attribute_without_declaring_flow_capability() {
         [
             "presence/v1",
             "operator-app/v1",
+            "peer-build/v1",
             "bind-no-project/v1",
             "consent/v1",
             "agent-run-scopes/v1",

@@ -68,11 +68,21 @@ fn bind(harness: &str, principal: Principal) -> RouteBindRequest {
     .with_principal(principal)
 }
 
-pub fn phone() -> Stamp {
-    Stamp::from_bind(&bind(
+fn phone_bind() -> RouteBindRequest {
+    bind(
         &format!("fed-phone:{DEVICE}"),
         worker::principal("callosum"),
-    ))
+    )
+}
+
+pub fn phone() -> Stamp {
+    Stamp::from_bind(&phone_bind())
+}
+
+pub fn production_phone() -> Stamp {
+    Stamp::from_bind(
+        &phone_bind().with_peer(RouteBindPeer::new().with_peer_build(Some("production".into()))),
+    )
 }
 
 pub fn local_operator() -> Stamp {
@@ -153,8 +163,18 @@ pub async fn cases() -> Value {
         capture(&f, &phone, "consent.get", json!({"elicitationId":id})).await,
     );
     cases.insert(
-        "run-once",
+        "unverified-run-once-refused",
         capture(&f, &phone, "consent.answer", answer(id, "run_once")).await,
+    );
+    cases.insert(
+        "run-once",
+        capture(
+            &f,
+            &production_phone(),
+            "consent.answer",
+            answer(id, "run_once"),
+        )
+        .await,
     );
     cases.insert(
         "replay",
@@ -226,7 +246,13 @@ pub async fn cases() -> Value {
     f.clock.set(EXPIRY);
     cases.insert(
         "answer-at-expiry",
-        capture(&f, &phone, "consent.answer", answer(&expired, "run_once")).await,
+        capture(
+            &f,
+            &production_phone(),
+            "consent.answer",
+            answer(&expired, "run_once"),
+        )
+        .await,
     );
     cases.insert(
         "requester-expired",

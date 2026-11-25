@@ -609,8 +609,9 @@ scope or agent, or another filer, refuses `elicitation_requester_refused`. The
 agent comes from the route stamp. A worker's card names its stamped head agent,
 marks `subject.via_worker: true` and goes straight to the person; the head cannot
 answer it. Only an [approving device](consent-phone-v2.md#sandbox-escape-approvals-0280)
-may answer. An agent or an unsigned surface cannot turn a pending card into an
-approval.
+may answer. A paired phone needs a verified official app connection to approve
+`run_once`; a refused attempt leaves the card pending. The local desktop
+operator path is unchanged. An agent or an unsigned surface cannot approve.
 
 The `consent.request` params are a closed object containing only `kind` and
 `sandbox_escape`. The nested object is also closed and contains all of the

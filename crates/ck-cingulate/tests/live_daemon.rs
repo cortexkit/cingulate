@@ -137,6 +137,10 @@ impl Fixture {
     }
 
     async fn start_as(owner_id: &'static str) -> Self {
+        Self::start_with_manifest(owner_id, ck_cingulate::manifest()).await
+    }
+
+    async fn start_with_manifest(owner_id: &'static str, manifest: ModuleManifest) -> Self {
         let scratch = ScratchDir::new("cingulate-live-daemon");
         let project = scratch.path().join("project");
         let data = scratch.path().join("data");
@@ -210,7 +214,7 @@ impl Fixture {
         });
         let (module, serve) = bounded(serve_with_handle(
             &connection_path,
-            ck_cingulate::manifest(),
+            manifest,
             handler.clone(),
         ))
         .await
@@ -626,6 +630,7 @@ async fn live_daemon_catalog_contains_consent_manifest() {
         [
             "presence/v1",
             "operator-app/v1",
+            "peer-build/v1",
             "bind-no-project/v1",
             "consent/v1",
             "agent-run-scopes/v1",
@@ -813,6 +818,91 @@ async fn live_daemon_forwards_project_stamp_to_consent_subject() {
         fixture.stored("elicitation_records", id.as_str().unwrap());
     assert_eq!(stored.subject.label, "agent-live in project pj-live");
     fixture.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_daemon_sandbox_run_once_requires_production_on_each_phone_route() {
+    const PHONE: &str = "fed-phone:48ec112eb467c1045fbd00e05cc64f67";
+    for opted_in in [true, false] {
+        let mut manifest = ck_cingulate::manifest();
+        if !opted_in {
+            manifest
+                .capabilities
+                .as_mut()
+                .unwrap()
+                .provides
+                .retain(|cap| cap != "peer-build/v1");
+        }
+        let mut fixture = Fixture::start_with_manifest(OWNER, manifest).await;
+        fixture.sync(1, 1).await;
+        let aft = bounded(fixture.consumer.open_route_scoped(
+            target(),
+            fixture.identity("aft"),
+            ScopeSelector::new(principal(OWNER), "head-session", Some(1)),
+            call_options(Some("aft")),
+        ))
+        .await
+        .unwrap();
+        let filed = fixture
+            .request(
+                &aft,
+                "consent.request",
+                json!({"kind": "sandbox_escape", "sandbox_escape": {
+                    "call_key": "sandbox-test", "command": "printf example", "cwd": "/example",
+                    "shell": "/bin/sh", "escapes_level": "standard", "background": false,
+                    "reason": "Test approval record", "expires_in_ms": 600_000
+                }}),
+            )
+            .await
+            .unwrap();
+        let id = filed["elicitation_id"].as_str().unwrap();
+        let answer = json!({"elicitationId": id, "choiceId": "run_once", "clientFeatures": ["sandbox-escape-approval"]});
+
+        let unverified = fixture.open(Some("callosum"), PHONE).await;
+        refused(
+            fixture
+                .request(&unverified, "consent.answer", answer.clone())
+                .await,
+            "peer_build_not_production",
+        );
+        let open = fixture
+            .request(&aft, "consent.get", json!({"elicitation_id": id}))
+            .await
+            .unwrap();
+        assert_eq!(open["state"], "pending");
+        assert!(open.get("answered_choice_id").is_none());
+        let mut identity = BindIdentity::new(PHONE, "production-session");
+        identity.build_class = Some("production".into());
+        let claiming = bounded(fixture.consumer.open_route(
+            target(),
+            identity,
+            call_options(Some("callosum")),
+        ))
+        .await
+        .unwrap();
+        let reply = fixture
+            .request(&claiming, "consent.answer", answer.clone())
+            .await;
+        if opted_in {
+            let reply = reply.unwrap();
+            assert_eq!(reply["alreadyAnswered"], false);
+            assert_eq!(reply["elicitation"]["answeredChoiceId"], "run_once");
+            refused(
+                fixture.request(&unverified, "consent.answer", answer).await,
+                "peer_build_not_production",
+            );
+        } else {
+            // The same production claim does not reach a target that hasn't opted in.
+            refused(reply, "peer_build_not_production");
+            let open = fixture
+                .request(&aft, "consent.get", json!({"elicitation_id": id}))
+                .await
+                .unwrap();
+            assert_eq!(open["state"], "pending");
+            assert!(open.get("answered_choice_id").is_none());
+        }
+        fixture.stop().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

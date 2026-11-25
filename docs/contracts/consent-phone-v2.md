@@ -381,16 +381,22 @@ data in a fixed-width block, never shortened, and follow the
 [fixed card text](consent-card-text-v1.md#sandbox-escape-card-text-0280) for the
 subject, warning, folder, shell, background line, reason and deadline.
 
-The same device rule as vault secret use applies: the paired phone can answer;
-a desktop can do so today only on a local operator route in a build with the
-default-off `dev-local-operator` Cargo feature.
-A feature declaration by itself is not approval authority. Use `choiceId` of
-`run_once` or `decline`; no envelope or typed input is used. `decline` is the
-default. An answer from an operator surface without device authority or without
-the renderer feature refuses `elicitation_sandbox_escape_approval_required`.
-An answer at or after the deadline refuses `elicitation_expired`. A missed card
-is `expired`, not an answer. Notices carry only card metadata, never the command,
-folder, shell or reason.
+Use `choiceId` of `run_once` or `decline`; no envelope or typed input is used.
+`decline` is the default. A paired phone with the renderer feature can decline
+without build verification. As of 0.28.3, `run_once` from a paired phone also
+requires `peer_build: "production"` on the daemon's stamp for that answer's
+route (`peer-build/v1`). This verifies the current connection, not just the
+device's roster entry. Without that mark, `run_once` refuses
+`peer_build_not_production` and leaves the card open and unanswered.
+
+A desktop can still answer only on a local operator route in a build with the
+default-off `dev-local-operator` Cargo feature. The renderer feature by itself
+is not approval authority. An answer from an operator surface without device
+authority or without the renderer feature refuses
+`elicitation_sandbox_escape_approval_required`.
+An otherwise authorized answer at or after the deadline refuses
+`elicitation_expired`. A missed card is `expired`, not an answer. Notices carry
+only card metadata, never the command, folder, shell or reason.
 
 ## Vault secret-use approvals (0.12.0)
 

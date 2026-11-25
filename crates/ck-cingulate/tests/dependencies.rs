@@ -25,7 +25,7 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
         include_str!("../../cingulate-vectors/Cargo.toml"),
     ] {
         for pin in [
-            "subc-client-rs = \"=0.40.3\"",
+            "subc-client-rs = \"=0.41.0\"",
             "subc-protocol = \"=0.37.4\"",
         ] {
             assert!(
@@ -36,7 +36,7 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
     }
     let manifest = include_str!("../Cargo.toml");
     for pin in [
-        "subc-daemon = { version = \"=0.47.2\", features = [\"test-support\"] }",
+        "subc-daemon = { version = \"=0.49.0\", features = [\"test-support\"] }",
         "subc-transport = \"=0.18.0\"",
         "cortexkit-test-support = \"=0.1.3\"",
     ] {
@@ -45,10 +45,10 @@ fn current_subc_releases_are_exactly_pinned_and_locked() {
             "missing exact pin {pin}"
         );
     }
-    assert_eq!(locked_versions("subc-client-rs"), ["0.40.3"]);
+    assert_eq!(locked_versions("subc-client-rs"), ["0.41.0"]);
     assert_eq!(locked_versions("subc-protocol"), ["0.37.4"]);
-    assert_eq!(locked_versions("subc-control"), ["0.40.1"]);
-    assert_eq!(locked_versions("subc-daemon"), ["0.47.2"]);
+    assert_eq!(locked_versions("subc-control"), ["0.41.0"]);
+    assert_eq!(locked_versions("subc-daemon"), ["0.49.0"]);
     assert_eq!(locked_versions("subc-transport"), ["0.18.0"]);
     assert_eq!(locked_versions("cortexkit-test-support"), ["0.1.3"]);
 }
