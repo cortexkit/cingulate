@@ -12,7 +12,12 @@ use ck_cingulate::WatchSink;
 use ck_cingulate::{AwaitHook, Clock, Handler, Notifier, Options, ResolvedAgent, Resolver, Stamp};
 use rusqlite::{types::Value as SqlValue, Connection};
 use serde_json::{json, Value};
-use subc_client_rs::{HandlerOutcome, RouteBindRequest, RouteHandle};
+use subc_client_rs::{
+    config::{
+        ConfigLayer, ConfigLayerSnapshot, ConfigReviewRequest, ConfigStatus, ConfigView, Schema,
+    },
+    HandlerOutcome, ModuleHandler, RouteBindRequest, RouteHandle,
+};
 use subc_protocol::{
     manifest::{Concurrency, ManagementOperationKind, ProviderRole},
     session::HealthStatus,
@@ -31,6 +36,64 @@ mod pending_visibility;
 fn hello_manifest_declares_registration_channel() {
     let manifest = serde_json::to_value(ck_cingulate::manifest()).unwrap();
     assert_eq!(manifest["registration_channel"], json!(true));
+}
+
+#[test]
+fn declares_a_valid_empty_settings_schema() {
+    let fixture = Fixture::unopened();
+    let declaration = fixture
+        .handler
+        .config_declaration()
+        .expect("settings must be declared to the daemon");
+    Schema::new(declaration.schema.clone()).expect("daemon accepts the settings schema");
+    assert_eq!(declaration.schema["title"], "Approval cards");
+    assert_eq!(declaration.schema["type"], "object");
+    assert_eq!(declaration.schema["properties"], json!({}));
+    assert_eq!(declaration.schema["additionalProperties"], false);
+    assert!(declaration.project_dirs.is_empty());
+    assert_eq!(
+        ck_cingulate::manifest().display_name.as_deref(),
+        Some("Approval cards")
+    );
+}
+
+#[tokio::test]
+async fn settings_hooks_accept_only_empty_configuration() {
+    let fixture = Fixture::unopened();
+    for (bytes, accepted) in [
+        (None, true),
+        (Some(b"{ /* no settings */ }".as_slice()), true),
+        (Some(b"{\"unexpected\": true}".as_slice()), false),
+        (Some(b"[]".as_slice()), false),
+        (Some(b"{".as_slice()), false),
+    ] {
+        let layer = ConfigLayerSnapshot::file(
+            "cingulate",
+            ConfigLayer::User,
+            "cingulate.jsonc",
+            bytes.map(<[u8]>::to_vec),
+        );
+        let reply = fixture
+            .handler
+            .config_review(ConfigReviewRequest::new(0, vec![layer], None))
+            .await;
+        assert!(reply.fields.is_empty());
+        assert_eq!(
+            reply.refusals.is_empty(),
+            accepted,
+            "layer bytes: {bytes:?}"
+        );
+    }
+    for (effective, accepted) in [(json!({}), true), (json!({"unexpected": true}), false)] {
+        let view = ConfigView::new(
+            0,
+            effective,
+            Default::default(),
+            vec![],
+            ConfigStatus::Active,
+        );
+        assert_eq!(fixture.handler.config_apply(view).await.is_ok(), accepted);
+    }
 }
 
 struct TestClock {

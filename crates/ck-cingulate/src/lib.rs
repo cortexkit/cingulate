@@ -5,6 +5,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, AtomicU8, Ordering},
         Arc, Mutex as StdMutex,
@@ -22,8 +23,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use subc_client_rs::{
-    BindDecision, ConnectionEnd, HandlerOutcome, ModuleHandler, RequestCtx, RouteBindRequest,
-    RouteCloseReason, RouteHandle,
+    config, BindDecision, ConnectionEnd, HandlerOutcome, ModuleHandler, RequestCtx,
+    RouteBindRequest, RouteCloseReason, RouteHandle,
 };
 use subc_protocol::{
     manifest::{
@@ -54,6 +55,8 @@ pub use pending_watch::{WatchSink, ITEM_LIMIT_BYTES, MAX_BACKLOG, MAX_WATCHES, W
 /// The module id the subc daemon registers. The backup catalog records the same
 /// id, so Engram backs up the store of the module that actually wrote it.
 pub const MODULE_ID: &str = "cingulate";
+const DISPLAY_NAME: &str = "Approval cards";
+const EMPTY_SETTINGS_REQUIRED: &str = "Cingulate accepts only an empty settings object";
 
 pub const OPERATIONS: [(&str, ManagementOperationKind); 19] = [
     ("presence.report", ManagementOperationKind::Mutate),
@@ -182,6 +185,8 @@ fn requester_name(principal: &str) -> Option<&'static str> {
 
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder(MODULE_ID, env!("CARGO_PKG_VERSION"))
+        .display_name(Some(DISPLAY_NAME.into()))
+        .expect("valid display name")
         .registration_channel(true)
         .capabilities(Some(CapabilityDeclarations {
             provides: vec![
@@ -2113,8 +2118,70 @@ impl Handler {
     }
 }
 
+fn is_empty_settings(value: &Value) -> bool {
+    value.as_object().is_some_and(serde_json::Map::is_empty)
+}
+
 #[async_trait]
 impl ModuleHandler for Handler {
+    fn config_declaration(&self) -> Option<config::ConfigDeclareRequest> {
+        // The daemon requires the canonical user path even for an empty schema.
+        // The file normally does not exist: the daemon uses the empty defaults,
+        // and Cingulate never opens the file or uses settings to change behavior.
+        let user_file = PathBuf::from(cortexkit_store_types::resolve_config_home())
+            .join("cortexkit")
+            .join("cingulate.jsonc");
+        Some(config::ConfigDeclareRequest::new(
+            json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": DISPLAY_NAME,
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "unevaluatedProperties": false
+            }),
+            user_file.to_string_lossy(),
+            vec![],
+        ))
+    }
+
+    async fn config_review(
+        &self,
+        request: config::ConfigReviewRequest,
+    ) -> config::ConfigReviewReply {
+        let empty_base = request
+            .base
+            .is_none_or(|base| is_empty_settings(&base.effective));
+        let empty_layers = request.layers.iter().all(|layer| {
+            layer.layer == config::ConfigLayer::User
+                && layer.bytes.as_deref().is_none_or(|bytes| {
+                    std::str::from_utf8(bytes)
+                        .ok()
+                        .and_then(|text| subc_jsonc::jsonc_to_json(text).ok())
+                        .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+                        .is_some_and(|value| is_empty_settings(&value))
+                })
+        });
+        let refusals = if empty_base && empty_layers {
+            vec![]
+        } else {
+            vec![config::ConfigReviewRefusal::new(
+                "value_invalid",
+                vec![String::new()],
+                vec![EMPTY_SETTINGS_REQUIRED.into()],
+            )]
+        };
+        config::ConfigReviewReply::new(vec![], refusals)
+    }
+
+    async fn config_apply(&self, view: config::ConfigView) -> Result<(), Vec<String>> {
+        if is_empty_settings(&view.effective) {
+            Ok(())
+        } else {
+            Err(vec![EMPTY_SETTINGS_REQUIRED.into()])
+        }
+    }
+
     async fn handle(&self, ctx: RequestCtx, body: Vec<u8>) -> HandlerOutcome {
         let stamp = self
             .inner

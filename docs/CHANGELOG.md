@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.28.2 (ck-cingulate)
+
+- List Cingulate as **Approval cards** in Settings and declare an empty settings
+  schema to the daemon. There are no settings to edit and no settings file to
+  create. The consent database needs no migration, approval-card consumers need
+  no changes, and the published wire examples are unchanged.
+
 ## 0.28.1 (ck-cingulate), 0.14.1 (cingulate-store)
 
 - Include `via_worker: true` in escalated person notices when a worker asked for

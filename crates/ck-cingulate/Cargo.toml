@@ -1,6 +1,6 @@
 [package]
 name = "ck-cingulate"
-version = "0.28.1"
+version = "0.28.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cortexkit/cingulate"
@@ -20,11 +20,13 @@ cingulate-store = { path = "../cingulate-store" }
 cortexkit-agent-identity = "=0.1.1"
 cortexkit-lease = "=0.1.2"
 cortexkit-project-identity = "=0.1.4"
+cortexkit-store-types = "=0.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
 subc-client-rs = "=0.40.3"
+subc-jsonc = "=0.1.2"
 subc-protocol = "=0.37.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"

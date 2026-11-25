@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.28.1"
+version = "0.28.2"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -445,6 +445,7 @@ dependencies = [
  "cortexkit-lease",
  "cortexkit-presence",
  "cortexkit-project-identity",
+ "cortexkit-store-types",
  "cortexkit-test-support",
  "rusqlite",
  "serde",
@@ -453,6 +454,7 @@ dependencies = [
  "sha2",
  "subc-client-rs",
  "subc-daemon",
+ "subc-jsonc",
  "subc-protocol",
  "subc-transport",
  "tempfile",
