@@ -1,2 +1,5 @@
 # Vectors are byte-compared by their SHA256SUMS, so no checkout may rewrite their line endings.
 test-vectors/** -text
+# Generator inputs and test fixtures are compared byte for byte too.
+crates/*/tests/inputs/** -text
+crates/*/tests/fixtures/** -text
