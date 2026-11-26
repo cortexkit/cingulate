@@ -80,7 +80,8 @@ Since 0.13.3, subjects append `in project <name>` using only the filing route's 
 
 ### Package cards and bounded feeds
 
-`reserved:prefrontal` may raise `package` cards as well as `flow_install`.
+`reserved:basal` and `reserved:prefrontal` may raise `package` and `flow_install`
+cards.
 Package payloads are typed and closed; an invented sample package request is
 SHA-256 checked in `test-vectors/consent-package-card-v1/`. The consent envelope
 limit is 1,310,720 bytes with `elicitation_request_too_large` on overflow.
@@ -172,7 +173,7 @@ system temp directory.
 | prefrontal | Requester of `flow_install` and `package` cards; the only reader of `consent.outcomes`, from which it delivers notices to its heads; the client whose `elicitation.*` relays cut over | `allowed_kind` (`lib.rs:109`); `consent.outcomes` admission (`lib.rs:588-592`); `test-vectors/elicitation-requester-v1/README.md` (the requester operation shapes core uses) |
 | Callosum and the phone | `consent.list_pending`, surface `consent.get`, `consent.answer` | `reserved:callosum` and the literal `fed-phone:` harness prefix retain `operator_surface` independently of the local development switch (`Stamp::from_bind`); `test-vectors/elicitation-records-v1/` and `consent-records-v1/` pin the phone projections |
 | Plexus | Requester of `consent` cards as a carrier, then owner ops | `allowed_kind` (`lib.rs:106`), carrier check (`lib.rs:498-504`); `test-vectors/elicitation-requester-v1/README.md` names `reserved:plexus` as the requester |
-| Basal | Requester of `flow_decision` cards, then owner ops | `allowed_kind` (`lib.rs:110`) |
+| Basal | Requester of `flow_decision`, `flow_install`, and `package` cards, then the owner of those cards (reads their answers with `consent.answers`, reports with `consent.report_execution`) | `REQUESTER_ADMISSIONS` in `crates/ck-cingulate/src/lib.rs` |
 | Cerebellum, Entorhinal | Requesters of `consent` cards as carriers | `allowed_kind` (`lib.rs:106`) |
 | Verified desktop apps | Ordinary operator cards | Daemon `operator_app` bind stamp in `Stamp::from_bind` |
 | Local `direct` callers | Requester of `consent` cards, labelled "an unverified local process"; ordinary operator cards only with the development feature | `allowed_kind`, label, and `dev-local-operator` in `Stamp::from_bind` |

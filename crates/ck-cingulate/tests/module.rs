@@ -1297,27 +1297,202 @@ async fn retired_rich_ui_approval_is_refused_like_any_unknown_kind_without_write
     }
 }
 
+fn flow_card_requester(module: &str, scoped: bool) -> Stamp {
+    let mut bind = RouteBindRequest::new(
+        RouteHandle::detached(1, 1),
+        RouteTarget::ManagementSurface {
+            module_id: "cingulate".into(),
+        },
+        BindIdentity::new("local", "untrusted-session"),
+    )
+    .with_principal(Principal::Reserved {
+        module_id: module.into(),
+    });
+    if scoped {
+        bind = bind.with_scope(
+            serde_json::from_value(json!({
+                "owner":{"kind":"reserved","module_id":module},
+                "ref":"head:alf", "scope_epoch":7, "kind":"head",
+                "attributes":{"agent_id":"agent-alf"}, "owner_authorized":true
+            }))
+            .unwrap(),
+        );
+    }
+    Stamp::from_bind(&bind)
+}
+
+async fn requester_card(f: &Fixture, requester: &Stamp, id: &str) -> Value {
+    ok(
+        &f.handler,
+        requester,
+        "consent.get",
+        json!({"elicitation_id":id}),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn flow_card_admission_basal_install_uses_scope_agent() {
+    let f = Fixture::open(None).await;
+    let basal = flow_card_requester("basal", true);
+    let id = f.request(&basal, kind_body("flow_install")).await;
+    let card = requester_card(&f, &basal, &id).await;
+    assert_eq!(card["subject"]["agent_id"], "agent-alf");
+    assert_eq!(card["subject"]["head_agent_id"], "agent-alf");
+    assert_eq!(card["subject"]["label"], "agent-alf");
+}
+
+#[tokio::test]
+async fn flow_card_admission_basal_install_without_scope_is_its_own() {
+    let mut f = Fixture::open(None).await;
+    let basal = flow_card_requester("basal", false);
+    let id = f.request(&basal, kind_body("flow_install")).await;
+    let card = requester_card(&f, &basal, &id).await;
+    assert!(card["subject"].get("agent_id").is_none());
+    assert!(card["subject"].get("head_agent_id").is_none());
+    assert_eq!(card["subject"]["label"], "reserved:basal");
+    let phone = ok(
+        &f.handler,
+        &operator(),
+        "consent.get",
+        json!({"elicitationId":id}),
+    )
+    .await;
+    assert_eq!(phone["requesterName"], "Basal");
+    assert_eq!(phone["requesterLabel"], "reserved:basal");
+
+    assert_eq!(f.answer(&id, "allow_once").await["ok"], true);
+    f.reopen(None).await;
+    let basal = flow_card_requester("basal", false);
+    let feed = ok(&f.handler, &basal, "consent.answers", json!({"since":0})).await;
+    let records = feed["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["elicitation_id"], id);
+    assert_eq!(records[0]["answered_choice_id"], "allow_once");
+}
+
+#[tokio::test]
+async fn flow_card_admission_basal_package_uses_scope_agent() {
+    let f = Fixture::open(None).await;
+    let basal = flow_card_requester("basal", true);
+    let body = package_body();
+    let id = f.request(&basal, body.clone()).await;
+    let card = requester_card(&f, &basal, &id).await;
+    assert_eq!(card["package"], body["package"]);
+    assert_eq!(card["subject"]["agent_id"], "agent-alf");
+}
+
+#[tokio::test]
+async fn flow_card_admission_basal_install_preserves_author_text_at_byte_limit() {
+    let f = Fixture::open(None).await;
+    let basal = flow_card_requester("basal", false);
+    let explanation = "é".repeat(4_096);
+    let changes = "界".repeat(400);
+    assert_eq!(explanation.len(), 8_192);
+    assert_eq!(changes.len(), 1_200);
+    let mut request = kind_body("flow_install");
+    request["explanation"] = json!({"label":"Why","text":explanation});
+    request["changes"] = json!({"label":"Changes","text":changes});
+    let id = f.request(&basal, request.clone()).await;
+    let stored: String = f
+        .db()
+        .query_row(
+            "SELECT record_json FROM elicitation_records WHERE elicitation_id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let stored: Value = serde_json::from_str(&stored).unwrap();
+    let requester = requester_card(&f, &basal, &id).await;
+    let phone = ok(
+        &f.handler,
+        &operator(),
+        "consent.get",
+        json!({"elicitationId":id}),
+    )
+    .await;
+    for card in [&stored["request"], &requester, &phone] {
+        assert_eq!(
+            card["explanation"]["text"].as_str().unwrap().as_bytes(),
+            explanation.as_bytes()
+        );
+        assert_eq!(
+            card["changes"]["text"].as_str().unwrap().as_bytes(),
+            changes.as_bytes()
+        );
+    }
+
+    request["explanation"]["text"] = json!(explanation + "!");
+    assert!(f
+        .unchanged_error(
+            &basal,
+            "consent.request",
+            request,
+            "elicitation_invalid_request",
+        )
+        .await
+        .contains("explanation.text"));
+}
+
+#[tokio::test]
+async fn flow_card_admission_basal_decision_ignores_scope_agent() {
+    let f = Fixture::open(None).await;
+    let basal = flow_card_requester("basal", true);
+    let id = f.request(&basal, kind_body("flow_decision")).await;
+    let card = requester_card(&f, &basal, &id).await;
+    assert!(card["subject"].get("agent_id").is_none());
+    assert!(card["subject"].get("head_agent_id").is_none());
+    assert_eq!(card["subject"]["label"], "operator decision");
+}
+
+#[tokio::test]
+async fn flow_card_admission_prefrontal_install_still_uses_scope_agent() {
+    let f = Fixture::open(None).await;
+    let prefrontal = flow_card_requester("prefrontal", true);
+    let id = f.request(&prefrontal, kind_body("flow_install")).await;
+    let card = requester_card(&f, &prefrontal, &id).await;
+    assert_eq!(card["subject"]["agent_id"], "agent-alf");
+}
+
+#[tokio::test]
+async fn flow_card_admission_plexus_install_still_refused() {
+    let f = Fixture::open(None).await;
+    let plexus = flow_card_requester("plexus", true);
+    f.unchanged_error(
+        &plexus,
+        "consent.request",
+        kind_body("flow_install"),
+        "elicitation_requester_refused",
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn allowlist_table_identity_and_order() {
     let f = Fixture::open(None).await;
     for (label, allowed, carried, expected_label) in [
-        ("direct", Some("consent"), "", "an unverified local process"),
+        (
+            "direct",
+            &["consent"][..],
+            "",
+            "an unverified local process",
+        ),
         (
             "reserved:cerebellum",
-            Some("consent"),
+            &["consent"],
             "agent-alf",
             "agent-alf",
         ),
-        ("reserved:plexus", Some("consent"), "agent-alf", "agent-alf"),
+        ("reserved:plexus", &["consent"], "agent-alf", "agent-alf"),
         (
             "reserved:entorhinal",
-            Some("consent"),
+            &["consent"],
             "agent-alf",
             "agent-alf",
         ),
         (
             "reserved:prefrontal-core",
-            Some("flow_install"),
+            &["flow_install"],
             "",
             "reserved:prefrontal-core",
         ),
@@ -1325,26 +1500,26 @@ async fn allowlist_table_identity_and_order() {
         // the agent's, not Prefrontal's.
         (
             "reserved:prefrontal-core",
-            Some("flow_install"),
+            &["flow_install"],
             "agent-alf",
             "agent-alf",
         ),
         (
             "reserved:basal",
-            Some("flow_decision"),
+            &["flow_decision", "flow_install"],
             "",
-            "operator decision",
+            "reserved:basal",
         ),
-        ("unverified", None, "", ""),
-        ("reserved:other", None, "", ""),
-        ("reserved:occipital", None, "", ""),
+        ("unverified", &[], "", ""),
+        ("reserved:other", &[], "", ""),
+        ("reserved:occipital", &[], "", ""),
     ] {
         let stamp = Stamp {
             carried_agent_id: carried.into(),
             ..stamp(label)
         };
         for kind in ["consent", "flow_install", "flow_decision"] {
-            if allowed != Some(kind) {
+            if !allowed.contains(&kind) {
                 assert!(f
                     .unchanged_error(
                         &stamp,
@@ -1364,7 +1539,14 @@ async fn allowlist_table_identity_and_order() {
                 )
                 .await;
                 assert!(owner.get("requesterName").is_none());
-                assert_eq!(owner["subject"]["label"], expected_label);
+                assert_eq!(
+                    owner["subject"]["label"],
+                    if kind == "flow_decision" {
+                        "operator decision"
+                    } else {
+                        expected_label
+                    }
+                );
                 if carried.is_empty() {
                     assert!(owner["subject"].get("agent_id").is_none());
                     assert!(owner["subject"].get("head_agent_id").is_none());
@@ -2443,14 +2625,13 @@ fn package_body() -> Value {
 }
 
 #[tokio::test]
-async fn package_request_is_restricted_to_prefrontal_core() {
+async fn package_request_is_restricted_to_basal_and_prefrontal() {
     let f = Fixture::open(None).await;
     for label in [
         "direct",
         "reserved:plexus",
         "reserved:cerebellum",
         "reserved:entorhinal",
-        "reserved:basal",
         "reserved:callosum",
         "reserved:unknown",
     ] {
@@ -2466,7 +2647,8 @@ async fn package_request_is_restricted_to_prefrontal_core() {
     }
     f.request(&stamp("reserved:prefrontal-core"), package_body())
         .await;
-    assert_eq!(f.counts(), (1, 0));
+    f.request(&stamp("reserved:basal"), package_body()).await;
+    assert_eq!(f.counts(), (2, 0));
     f.unchanged_error(
         &stamp("reserved:prefrontal-core"),
         "consent.request",

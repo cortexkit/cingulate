@@ -144,7 +144,7 @@ const REQUESTER_ADMISSIONS: &[RequesterAdmission] = &[
     RequesterAdmission {
         principal: "reserved:basal",
         requester_name: Some("Basal"),
-        kinds: &["flow_decision"],
+        kinds: &["flow_decision", "flow_install", "package"],
         agent: SubjectAgent::Never,
     },
     RequesterAdmission {
@@ -1159,6 +1159,8 @@ impl Handler {
         } else if broker_action
             || sandbox_escape
             || matches!(request.kind.as_str(), "manifest_binding" | "secret_use")
+            || (stamp.label() == "reserved:basal"
+                && matches!(request.kind.as_str(), "flow_install" | "package"))
         {
             SubjectAgent::FromScope
         } else {
@@ -1278,7 +1280,7 @@ impl Handler {
                 via_worker: false,
                 label: match stamp.label() {
                     "direct" => "an unverified local process",
-                    "reserved:basal" => "operator decision",
+                    "reserved:basal" if request.kind == "flow_decision" => "operator decision",
                     label => label,
                 }
                 .into(),
@@ -2565,7 +2567,11 @@ mod tests {
                 ("reserved:broca", Some("Broca"), vec!["consent"]),
                 ("reserved:entorhinal", Some("Entorhinal"), vec!["consent"]),
                 ("direct", None, vec!["consent"]),
-                ("reserved:basal", Some("Basal"), vec!["flow_decision"]),
+                (
+                    "reserved:basal",
+                    Some("Basal"),
+                    vec!["flow_decision", "flow_install", "package"]
+                ),
                 (
                     "reserved:prefrontal",
                     Some("Prefrontal"),

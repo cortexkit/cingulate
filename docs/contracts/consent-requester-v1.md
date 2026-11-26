@@ -88,7 +88,7 @@ not the scope reference and epoch. Local ownership is unchanged.
 
 | Requester principal | Allowed request kinds |
 |---|---|
-| `reserved:basal` | `flow_decision` |
+| `reserved:basal` | `flow_decision`, `flow_install`, `package` |
 | `reserved:prefrontal` | `flow_install`, `package` |
 | `reserved:cerebellum`, `reserved:plexus`, `reserved:entorhinal` | `consent`; must also carry a nonblank daemon-attested subject agent |
 | `direct` | `consent`; displayed as an unverified local process |
@@ -96,6 +96,17 @@ not the scope reference and epoch. Local ownership is unchanged.
 
 The dedicated `secret_use` and `manifest_binding` filing rules are in
 [requester v2](consent-requester-v2.md), not the generic-consent admission above.
+
+Since 0.28.4, Basal and Prefrontal can both file `flow_install` and `package`
+with the same request bodies. Those cards use the agent ID stamped by the daemon
+on the filing route's scope. A worker scope (a sub-agent's scope that Prefrontal
+owns) carries no agent ID of its own; its card uses the agent of the parent head
+scope stamped on it, after Cingulate confirms that head with the scope owner.
+Without a scope the card is the requester's own.
+Basal's `flow_decision` cards still have no subject agent and use the subject
+label `operator decision`. Only Prefrontal can read the global
+`consent.outcomes` feed; Basal recovers answers to its own cards through
+`consent.answers` on the same stamped owner identity.
 
 Disallowed principals or principal/kind combinations refuse
 `elicitation_requester_refused`. Requesters need an admitted daemon route but

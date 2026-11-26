@@ -704,10 +704,11 @@ the decoded envelope bytes and matches the vault's grant and audit
 
 ## Flow-install secret approvals (0.13.0)
 
-Cingulate advertises `flow-install-secrets/v1`. Core sends the new fields only
-when that capability is present. Only `reserved:prefrontal` may file
-`flow_install`, as before. The existing `flow_install.flow` remains the flow's
-name; the new identity key is **`flow_identity`**, not `flow`.
+Cingulate advertises `flow-install-secrets/v1`. Requesters send these fields only
+when that capability is present. Both `reserved:prefrontal` and, since 0.28.4,
+`reserved:basal` may file `flow_install` cards with or without secrets; the same
+answer rules apply to both requesters. The existing `flow_install.flow` remains
+the flow's name; the identity key is **`flow_identity`**, not `flow`.
 
 Inside the otherwise opaque `flow_install` object, supply both new keys or
 neither:

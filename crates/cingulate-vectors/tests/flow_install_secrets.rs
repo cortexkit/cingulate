@@ -432,14 +432,50 @@ async fn flow_install_secrets_only_supported_phone_routes_see_or_answer() {
 }
 
 #[tokio::test]
-async fn flow_install_secrets_capability_and_core_only_filing() {
+async fn basal_flow_install_secrets_require_the_approving_device() {
+    let f = fixture().await;
+    let id = f.request(&filer("basal", None), body()).await;
+    let params = answer(&id, &envelope(&body()));
+    let before = f.rows();
+    let mut no_feature = params.clone();
+    no_feature.as_object_mut().unwrap().remove("clientFeatures");
+    assert_eq!(
+        f.call(&phone(DEVICE), "consent.answer", no_feature)
+            .await
+            .unwrap_err()["code"],
+        "elicitation_secret_use_approval_required"
+    );
+    for stamp in [
+        support::operator(),
+        phone("22222222222222222222222222222222"),
+    ] {
+        assert!(f
+            .call(&stamp, "consent.answer", params.clone())
+            .await
+            .is_err());
+    }
+    assert_eq!(f.rows(), before);
+    assert_eq!(f.stored_record(&id).state, State::Pending);
+
+    assert_eq!(
+        f.ok(&phone(DEVICE), "consent.answer", params).await["ok"],
+        true
+    );
+    assert_eq!(
+        f.stored_record(&id).answered_device.as_deref(),
+        Some(DEVICE)
+    );
+}
+
+#[tokio::test]
+async fn flow_install_secrets_capability_and_filing_allowlist() {
     let manifest = serde_json::to_value(ck_cingulate::manifest()).unwrap();
     assert!(manifest["capabilities"]["provides"]
         .as_array()
         .unwrap()
         .contains(&json!("flow-install-secrets/v1")));
     let f = fixture().await;
-    for module in ["basal", "aft", "cerebellum", "callosum"] {
+    for module in ["aft", "cerebellum", "callosum"] {
         assert!(f
             .call(&filer(module, None), "consent.request", body())
             .await

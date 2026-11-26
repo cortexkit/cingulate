@@ -77,9 +77,10 @@ reject artifacts with development authority.
 
 ## Package cards and paging
 
-Prefrontal core may submit `flow_install` and `package` approval requests. A package payload
-is a closed object under `package`: string `package`, integer `version`, lowercase
-64-hex BLAKE3 `code_hash`, string `script`, and JSON-encoded string `manifest_json`.
+Basal and Prefrontal may submit `flow_install` and `package` approval requests.
+A package payload is a closed object under `package`: string `package`, integer
+`version`, lowercase 64-hex BLAKE3 `code_hash`, string `script`, and JSON-encoded
+string `manifest_json`.
 It has exactly one grant and one decline option and a decline default.
 All consent envelopes are limited to 1,310,720 bytes, including JSON framing;
 excess bytes are refused as `elicitation_request_too_large`, never truncated.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.4 (ck-cingulate)
+
+- Admit Basal to file flow-install and package approval cards without
+  Prefrontal. Prefrontal remains admitted. Both attribute cards to the agent ID
+  stamped by the daemon on the filing route, and secret-bearing installs keep
+  the same approving-device rules. Basal's flow decisions and the wire format
+  are unchanged.
+
 ## 0.28.3 (ck-cingulate)
 
 - Only a phone running a verified official app can choose **Run once** on a

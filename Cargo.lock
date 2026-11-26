@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "ck-cingulate"
-version = "0.28.3"
+version = "0.28.4"
 dependencies = [
  "async-nats",
  "async-trait",
