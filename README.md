@@ -1,5 +1,10 @@
 # cingulate
 
+> [!WARNING]
+> **Alpha.** Cingulate is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Cingulate is the permission-card module of the [CortexKit](https://github.com/cortexkit) stack.
 When an agent or a module wants to do something that needs a person's approval, it files a
 consent card with Cingulate. Cingulate stores the card, shows it on the surfaces where the user

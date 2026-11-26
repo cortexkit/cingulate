@@ -1,5 +1,10 @@
 # ck-cingulate
 
+> [!WARNING]
+> **Alpha.** ck-cingulate is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Supervised subc consent module, id `cingulate`, providing `consent/v1` and `presence/v1` without
 requiring an orchestrator, identity, presence or notification provider. Run the
 `ck-cingulate` binary under subc. Its management manifest declares seventeen
