@@ -1971,8 +1971,25 @@ async fn invalid_params_do_not_sweep_and_extra_nonrequest_keys_are_accepted() {
     assert_eq!(f.counts(), (1, 1));
 }
 
-#[tokio::test]
-async fn dedup_refresh_restart_expiry_and_resolver_labels() {
+#[test]
+fn dedup_refresh_restart_expiry_and_resolver_labels() {
+    // The single future for this stateful scenario exceeds the Windows test
+    // harness's default stack. Keep the scenario intact and give it more room.
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(dedup_refresh_restart_expiry_and_resolver_labels_body());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+async fn dedup_refresh_restart_expiry_and_resolver_labels_body() {
     let mut f = Fixture::open(None).await;
     let mut request: Value = serde_json::from_str(include_str!(
         "../../../test-vectors/elicitation-request-v1/valid/app-grant-always.json"

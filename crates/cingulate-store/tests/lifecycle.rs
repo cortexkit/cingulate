@@ -443,12 +443,10 @@ fn fallback_uses_supplied_scratch_data_home_and_never_overrides_errors() {
     assert_eq!(
         fallback.backend,
         StorageBackend::Sqlite {
-            path: scratch
-                .root
-                .join("cortexkit/ck-cingulate/store.db")
-                .to_str()
-                .unwrap()
-                .into()
+            path: format!(
+                "{}/cortexkit/ck-cingulate/store.db",
+                scratch.root.to_str().unwrap()
+            )
         }
     );
     let (store, _) = ConsentStore::open(&fallback, 1).unwrap();

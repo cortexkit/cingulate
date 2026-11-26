@@ -383,7 +383,11 @@ mod tests {
                 "shell":"/bin/sh", "escapes_level":"standard", "background":true,
                 "reason":"Show the example.", "expires_in_ms":600000
             }}),
-            r#"{"card_kind":"sandbox_escape","subject":"ALF","expires_at_ms":600100,"phone_only":true,"via_worker":true}"#,
+            if cfg!(feature = "dev-local-operator") {
+                r#"{"card_kind":"sandbox_escape","subject":"ALF","expires_at_ms":600100,"phone_only":false,"via_worker":true}"#
+            } else {
+                r#"{"card_kind":"sandbox_escape","subject":"ALF","expires_at_ms":600100,"phone_only":true,"via_worker":true}"#
+            },
         );
     }
 

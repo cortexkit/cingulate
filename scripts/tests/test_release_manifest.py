@@ -12,7 +12,7 @@ SPEC.loader.exec_module(MANIFEST)
 
 class ReleaseManifestTests(unittest.TestCase):
     def test_repository_declares_compatible_core(self):
-        self.assertEqual(MANIFEST.read_required_core(ROOT / "Cargo.toml"), "0.21.6")
+        self.assertEqual(MANIFEST.read_required_core(ROOT / "Cargo.toml"), "0.21.16")
 
     def test_missing_and_malformed_floors_refuse(self):
         for declaration in ["", 'requires_core = "v0.21.6"', 'requires_core = "0.21"',

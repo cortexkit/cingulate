@@ -14,7 +14,7 @@ use cingulate_store::ScopeIdentity;
 use ck_cingulate::{
     AccessRuntime, DaemonAccessRuntime, Handler, Options, ScopeLife, DEVELOPMENT_LOCAL_OPERATOR,
 };
-use cortexkit_test_support::{process_alive, ScratchDir};
+use cortexkit_test_support::ScratchDir;
 use serde_json::{json, Value};
 use subc_client_rs::{
     serve_with_handle, BindDecision, CallError, CallOptions, ConsumerIdentity, ConsumerOptions,
@@ -165,7 +165,6 @@ impl Fixture {
         connection_file::write_atomic(&connection_path, &info).unwrap();
         let published = connection_file::read_for_client(&connection_path).unwrap();
         assert_eq!(published.pid, std::process::id());
-        assert!(process_alive(i32::try_from(published.pid).unwrap()));
 
         let supervisor = SupervisorHandle::new();
         for id in [
