@@ -1,10 +1,9 @@
 # Flow runner served approval cards, v1.1
 
-This version uses the flow runner's v1.4 filing samples. Compared with
-[served v1](../basal-flow-install-cards-served-v1/), only the `flow-secrets`
-statements changed: both are now local v1 statements from the same vault, each
-with a flat `use` object for a single literal host. The other six filings are
-byte-identical.
+This version uses the flow runner's v1.5 filing samples. Compared with
+[served v1](../basal-flow-install-cards-served-v1/), the `flow-secrets`
+statements are two local v1 statements from the same vault, each with a flat
+`use` object for a single literal host, and agent authors are shown by name.
 
 The seven `*-request.json` files in
 `test-vectors/basal-flow-install-cards-served-v1.1/` are the flow runner module's filing samples,

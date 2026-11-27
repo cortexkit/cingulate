@@ -2,6 +2,8 @@
 
 ## 0.19.2 (cingulate-vectors)
 
+- Regenerate served v1.1 from filing samples v1.5, showing agent authors by name.
+
 - Add `basal-flow-install-cards-served-v1.1` with two local v1 secret
   approval statements from the same vault. The original served samples are unchanged.
 

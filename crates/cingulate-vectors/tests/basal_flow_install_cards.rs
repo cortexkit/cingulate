@@ -75,7 +75,7 @@ fn basal_flow_install_cards_served_manifest_is_pinned_and_covers_exact_bytes() {
 fn basal_flow_install_cards_served_v1_1_manifest_is_pinned_and_covers_exact_bytes() {
     assert_served_manifest(
         &corpus(SERVED_V1_1),
-        "52b330168f9a90c0f289e4c0443c74028e5392f8fe0fde493798fc6c88ba11ac",
+        "25060e1900620ecb1dc7f793ecbbcee749fd584e97b0025725aacb751c70e1fa",
     );
 }
 
@@ -113,7 +113,7 @@ fn basal_flow_install_cards_inputs_match_filing_samples_manifest() {
 fn basal_flow_install_cards_v1_1_inputs_match_filing_samples_manifest() {
     assert_filing_manifest(
         &corpus(SERVED_V1_1),
-        "b866d60940240f08a85d2e32bf66ebd8441942cc22a7f4e5b5596839669559b9",
+        "7991cfdb1b99feafe843dba5e0b763b1e9b03ace6a62d941ad930ced5de3e725",
     );
 }
 
