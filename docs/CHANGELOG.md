@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.1 (cingulate-vectors)
+
+- Add `basal-flow-install-cards-served-v1` with phone and desktop approval
+  samples captured from the flow runner module's filed cards.
+
 ## 0.28.4 (ck-cingulate)
 
 - Admit Basal to file flow-install and package approval cards without

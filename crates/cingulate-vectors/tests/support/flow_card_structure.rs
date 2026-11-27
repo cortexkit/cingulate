@@ -34,7 +34,7 @@ impl Resolver for SampleResolver {
     }
 }
 
-fn bind(session: &str) -> RouteBindRequest {
+pub fn bind(session: &str) -> RouteBindRequest {
     RouteBindRequest::new(
         RouteHandle::detached(1, 1),
         RouteTarget::ManagementSurface {
@@ -102,7 +102,7 @@ pub fn input(card: &str) -> Value {
         .unwrap()
 }
 
-async fn served(fixture: &Fixture, stamp: &Stamp, method: &str, params: Value) -> Vec<u8> {
+pub async fn served(fixture: &Fixture, stamp: &Stamp, method: &str, params: Value) -> Vec<u8> {
     let request = serde_json::to_vec(&json!({"method":method,"params":params})).unwrap();
     match tokio::time::timeout(
         Duration::from_secs(1),
