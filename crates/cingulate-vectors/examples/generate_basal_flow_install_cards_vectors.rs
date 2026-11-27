@@ -12,7 +12,9 @@ mod support;
 #[path = "../tests/support/watch_pending.rs"]
 mod watch_pending;
 
-use std::{collections::BTreeSet, fs};
+use std::{collections::BTreeSet, fs, path::Path};
+
+use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, SERVED_V1};
 
 #[tokio::main]
 async fn main() {
@@ -24,15 +26,22 @@ async fn main() {
         );
     }
     let args: Vec<_> = std::env::args().skip(1).collect();
-    let check = match args.as_slice() {
-        [] => false,
-        [flag] if flag == "--check" => true,
-        _ => panic!("usage: generate_basal_flow_install_cards_vectors [--check]"),
+    let (check, paths) = match args.as_slice() {
+        [flag, paths @ ..] if flag == "--check" => (true, paths),
+        paths => (false, paths),
     };
-    let root = support::corpus(basal_flow_install_cards::CORPUS);
-    let files = basal_flow_install_cards::generate().await;
+    let v1 = support::corpus(SERVED_V1);
+    let (input_dir, output_dir, input_suffix) = match paths {
+        [] => (v1.as_path(), v1.as_path(), ARCHIVED_REQUEST_SUFFIX),
+        [served] => (Path::new(served), Path::new(served), ARCHIVED_REQUEST_SUFFIX),
+        [filings, served] => (Path::new(filings), Path::new(served), ".json"),
+        _ => panic!(
+            "usage: generate_basal_flow_install_cards_vectors [--check] [[filing-samples-dir] served-dir]"
+        ),
+    };
+    let files = basal_flow_install_cards::generate(input_dir, output_dir, input_suffix).await;
     if check {
-        let actual: BTreeSet<_> = fs::read_dir(&root)
+        let actual: BTreeSet<_> = fs::read_dir(output_dir)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
@@ -43,7 +52,7 @@ async fn main() {
         );
     }
     for (name, bytes) in &files {
-        let path = root.join(name);
+        let path = output_dir.join(name);
         if check {
             assert_eq!(fs::read(path).unwrap(), *bytes, "{name} differs");
         } else if !fs::read(&path).is_ok_and(|existing| existing == *bytes) {
@@ -51,9 +60,9 @@ async fn main() {
         }
     }
     println!(
-        "{} {} {} files through the consent handlers",
+        "{} {} files in {} through the consent handlers",
         if check { "Checked" } else { "Generated" },
         files.len(),
-        basal_flow_install_cards::CORPUS,
+        output_dir.display(),
     );
 }

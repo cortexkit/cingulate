@@ -1,0 +1,107 @@
+{
+  "method": "consent.request",
+  "params": {
+    "args_digest": "cd9394726a4a2b98a5a6c7746e9f7925bbeed6d1de9b74bb8e713e5e3210b32d",
+    "binding": {
+      "attempt": 1,
+      "code_hash": "cd9394726a4a2b98a5a6c7746e9f7925bbeed6d1de9b74bb8e713e5e3210b32d",
+      "package": "sample-template",
+      "version": 1
+    },
+    "capabilities": {
+      "rows": [
+        {
+          "label": "Runs",
+          "value": "Every $params.interval"
+        },
+        {
+          "label": "Can read",
+          "value": "Nothing"
+        },
+        {
+          "label": "Can change",
+          "value": "Nothing"
+        },
+        {
+          "label": "Notifies",
+          "value": "Nothing"
+        }
+      ]
+    },
+    "dedup_key": "package:sample-template:1:cd9394726a4a2b98a5a6c7746e9f7925bbeed6d1de9b74bb8e713e5e3210b32d",
+    "default": "deny",
+    "explanation": {
+      "label": "What it does",
+      "text": "Registers a reusable queue watcher."
+    },
+    "facts": [
+      {
+        "label": "Code hash",
+        "value": "cd9394726a4a2b98a5a6c7746e9f7925bbeed6d1de9b74bb8e713e5e3210b32d"
+      },
+      {
+        "label": "Package",
+        "value": "sample-template"
+      },
+      {
+        "label": "Version",
+        "value": "1"
+      },
+      {
+        "label": "Parameter interval",
+        "value": "A duration from 30 minutes to 1 day"
+      },
+      {
+        "label": "Instances per agent",
+        "value": "At most 5"
+      },
+      {
+        "label": "Instance lifetime",
+        "value": "Up to 30 days"
+      },
+      {
+        "label": "Set per instance",
+        "value": "interval sets how often it runs"
+      },
+      {
+        "label": "Runs as",
+        "value": "This flow runs as each agent whose persona lists it. Agent-scoped grants apply to this agent's own data only."
+      }
+    ],
+    "kind": "package",
+    "late_execution": "notify_only",
+    "material_damage": true,
+    "on_expiry": "deny",
+    "options": [
+      {
+        "effect": "grant",
+        "id": "allow",
+        "label": "Approve"
+      },
+      {
+        "effect": "decline",
+        "id": "deny",
+        "label": "Decline"
+      }
+    ],
+    "package": {
+      "code_hash": "cd9394726a4a2b98a5a6c7746e9f7925bbeed6d1de9b74bb8e713e5e3210b32d",
+      "manifest_json": "{\"explanation\":\"Registers a reusable queue watcher.\",\"id\":\"sample-template\",\"params\":{\"interval\":{\"max\":\"1d\",\"min\":\"30m\",\"type\":\"duration\"}},\"purpose\":\"Queue watcher\",\"template\":{\"max_lifetime\":\"30d\",\"max_per_agent\":5},\"trigger\":{\"schedule\":{\"interval\":\"$params.interval\"}},\"version\":1}",
+      "package": "sample-template",
+      "script": "return 1;",
+      "version": 1
+    },
+    "prompt": "Install sample template?",
+    "source": {
+      "language": "javascript",
+      "text": "return 1;"
+    },
+    "target": {
+      "kind": "package",
+      "label": "sample-template v1"
+    },
+    "title": "New flow",
+    "urgency": "normal"
+  },
+  "provider": "cingulate"
+}

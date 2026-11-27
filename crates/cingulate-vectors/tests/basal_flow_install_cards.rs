@@ -11,19 +11,33 @@ mod support;
 #[path = "support/watch_pending.rs"]
 mod watch_pending;
 
-use std::{collections::BTreeSet, fs};
+use std::{collections::BTreeSet, fs, path::Path};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use basal_flow_install_cards::{CARDS, CORPUS};
+use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, CARDS, SERVED_V1};
 use support::corpus;
+
+const SERVED_V1_1: &str = "basal-flow-install-cards-served-v1.1";
 
 #[tokio::test]
 async fn basal_flow_install_cards_served_vectors_regenerate_byte_for_byte() {
-    let root = corpus(CORPUS);
-    let mut files = basal_flow_install_cards::generate().await;
-    let mut actual: BTreeSet<_> = fs::read_dir(&root)
+    let root = corpus(SERVED_V1);
+    assert_regenerates(&root, &root).await;
+}
+
+#[tokio::test]
+async fn basal_flow_install_cards_served_v1_1_regenerates_byte_for_byte() {
+    let root = corpus(SERVED_V1_1);
+    assert_regenerates(&root, &root).await;
+}
+
+async fn assert_regenerates(input_dir: &Path, output_dir: &Path) {
+    let mut files =
+        basal_flow_install_cards::generate(input_dir, output_dir, ARCHIVED_REQUEST_SUFFIX).await;
+    let mut actual: BTreeSet<_> = fs::read_dir(output_dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .collect();
@@ -41,18 +55,33 @@ async fn basal_flow_install_cards_served_vectors_regenerate_byte_for_byte() {
         "corpus file coverage"
     );
     for (name, bytes) in files {
-        assert_eq!(fs::read(root.join(&name)).unwrap(), bytes, "{name} differs");
+        assert_eq!(
+            fs::read(output_dir.join(&name)).unwrap(),
+            bytes,
+            "{name} differs"
+        );
     }
 }
 
 #[test]
 fn basal_flow_install_cards_served_manifest_is_pinned_and_covers_exact_bytes() {
-    let root = corpus(CORPUS);
-    let manifest = fs::read(root.join("SHA256SUMS")).unwrap();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&manifest)),
-        "2753305ec614b7ed8c0ea08022bdbdc5bddde26cf0e683eb706d38ed5a97d8c5"
+    assert_served_manifest(
+        &corpus(SERVED_V1),
+        "2753305ec614b7ed8c0ea08022bdbdc5bddde26cf0e683eb706d38ed5a97d8c5",
     );
+}
+
+#[test]
+fn basal_flow_install_cards_served_v1_1_manifest_is_pinned_and_covers_exact_bytes() {
+    assert_served_manifest(
+        &corpus(SERVED_V1_1),
+        "52b330168f9a90c0f289e4c0443c74028e5392f8fe0fde493798fc6c88ba11ac",
+    );
+}
+
+fn assert_served_manifest(root: &Path, expected_digest: &str) {
+    let manifest = fs::read(root.join("SHA256SUMS")).unwrap();
+    assert_eq!(format!("{:x}", Sha256::digest(&manifest)), expected_digest);
     let mut listed = BTreeSet::new();
     for line in std::str::from_utf8(&manifest).unwrap().lines() {
         let (digest, name) = line.split_once("  ").unwrap();
@@ -74,24 +103,46 @@ fn basal_flow_install_cards_served_manifest_is_pinned_and_covers_exact_bytes() {
 
 #[test]
 fn basal_flow_install_cards_inputs_match_filing_samples_manifest() {
-    let root = corpus(CORPUS);
+    assert_filing_manifest(
+        &corpus(SERVED_V1),
+        "58fd4d3c51c9a66b04f54fafd21fd244132406619b8f4a5b1f0b3d9c4c2c0f28",
+    );
+}
+
+#[test]
+fn basal_flow_install_cards_v1_1_inputs_match_filing_samples_manifest() {
+    assert_filing_manifest(
+        &corpus(SERVED_V1_1),
+        "b866d60940240f08a85d2e32bf66ebd8441942cc22a7f4e5b5596839669559b9",
+    );
+}
+
+fn assert_filing_manifest(root: &Path, expected_digest: &str) {
     // Reconstruct the filing samples' manifest with the original filenames.
     let manifest: String = CARDS
         .into_iter()
         .map(|card| {
-            let bytes = fs::read(root.join(format!("{card}-request.json"))).unwrap();
+            let bytes = fs::read(root.join(format!("{card}{ARCHIVED_REQUEST_SUFFIX}"))).unwrap();
             format!("{:x}  {card}.json\n", Sha256::digest(bytes))
         })
         .collect();
     assert_eq!(
         format!("{:x}", Sha256::digest(manifest.as_bytes())),
-        "58fd4d3c51c9a66b04f54fafd21fd244132406619b8f4a5b1f0b3d9c4c2c0f28"
+        expected_digest
     );
 }
 
 #[test]
 fn basal_flow_install_cards_serve_full_explanation_and_statement_deadline() {
-    let root = corpus(CORPUS);
+    assert_explanation_and_deadline(&corpus(SERVED_V1));
+}
+
+#[test]
+fn basal_flow_install_cards_v1_1_serve_full_explanation_and_statement_deadline() {
+    assert_explanation_and_deadline(&corpus(SERVED_V1_1));
+}
+
+fn assert_explanation_and_deadline(root: &Path) {
     let read =
         |name| -> Value { serde_json::from_slice(&fs::read(root.join(name)).unwrap()).unwrap() };
     let filing = read("max-explanation-request.json");
@@ -101,9 +152,25 @@ fn basal_flow_install_cards_serve_full_explanation_and_statement_deadline() {
     assert_eq!(served.chars().count(), 1_500);
     assert_eq!(served.len(), 6_000);
 
+    let filing = read("flow-secrets-request.json");
+    let secrets = &filing["params"]["flow_install"]["secrets"];
+    let deadline = secrets
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|secret| {
+            let bytes = URL_SAFE_NO_PAD
+                .decode(secret["statement_b64url"].as_str().unwrap())
+                .unwrap();
+            let statement: Value = serde_json::from_slice(&bytes).unwrap();
+            statement["request_expires_at_ms"].as_i64().unwrap()
+        })
+        .min()
+        .unwrap();
+    assert_eq!(deadline, 1_777_593_660_000);
     let secret_get = read("flow-secrets-phone-get.json");
-    let deadline = 1_777_593_660_000_i64;
     assert_eq!(secret_get["result"]["expiresAtMs"], deadline);
+    assert_eq!(&secret_get["result"]["flowInstall"]["secrets"], secrets);
     for name in ["phone-list-pending.json", "desktop-list-pending.json"] {
         let list = read(name);
         let secret_row = list["result"]["records"]
@@ -113,10 +180,6 @@ fn basal_flow_install_cards_serve_full_explanation_and_statement_deadline() {
             .find(|row| row["elicitationId"] == secret_get["result"]["elicitationId"])
             .unwrap();
         assert_eq!(secret_row["expiresAtMs"], deadline, "{name}");
-        let filing = read("flow-secrets-request.json");
-        assert_eq!(
-            secret_row["flowInstall"]["secrets"], filing["params"]["flow_install"]["secrets"],
-            "{name}"
-        );
+        assert_eq!(&secret_row["flowInstall"]["secrets"], secrets, "{name}");
     }
 }

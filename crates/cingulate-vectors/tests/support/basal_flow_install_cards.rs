@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use ck_cingulate::{Stamp, DEVELOPMENT_LOCAL_OPERATOR};
 use serde_json::{json, Value};
@@ -7,11 +7,12 @@ use subc_protocol::Principal;
 
 use crate::{
     flow_card_structure::{bind, desktop, phone_stamp, served},
-    support::{corpus, worker, Fixture},
+    support::{worker, Fixture},
     watch_pending::INSTANCE,
 };
 
-pub const CORPUS: &str = "basal-flow-install-cards-served-v1";
+pub const SERVED_V1: &str = "basal-flow-install-cards-served-v1";
+pub const ARCHIVED_REQUEST_SUFFIX: &str = "-request.json";
 pub const CARDS: [&str; 7] = [
     "agent-new",
     "agent-update-v2",
@@ -23,8 +24,11 @@ pub const CARDS: [&str; 7] = [
 ];
 const FILED_AT_MS: i64 = 1_777_593_540_000;
 
-pub async fn generate() -> BTreeMap<String, Vec<u8>> {
-    let root = corpus(CORPUS);
+pub async fn generate(
+    input_dir: &Path,
+    output_dir: &Path,
+    input_suffix: &str,
+) -> BTreeMap<String, Vec<u8>> {
     let fixture = Fixture::open(None).await;
     fixture.clock.set(FILED_AT_MS);
     fixture.pin_store_instance(INSTANCE);
@@ -40,8 +44,10 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
     let mut phone_ids = Vec::new();
 
     for (index, card) in CARDS.into_iter().enumerate() {
-        let input_name = format!("{card}-request.json");
-        let input = fs::read(root.join(&input_name)).unwrap();
+        let input_name = format!("{card}{ARCHIVED_REQUEST_SUFFIX}");
+        let input_path = input_dir.join(format!("{card}{input_suffix}"));
+        let input = fs::read(&input_path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", input_path.display()));
         let filing: Value = serde_json::from_slice(&input).unwrap();
         assert_eq!(filing["provider"], "cingulate", "{card}");
         assert_eq!(filing["method"], "consent.request", "{card}");
@@ -108,7 +114,7 @@ pub async fn generate() -> BTreeMap<String, Vec<u8>> {
 
     files.insert(
         "README.md".into(),
-        fs::read(root.join("README.md")).unwrap(),
+        fs::read(output_dir.join("README.md")).unwrap(),
     );
     let sums: String = files
         .iter()
