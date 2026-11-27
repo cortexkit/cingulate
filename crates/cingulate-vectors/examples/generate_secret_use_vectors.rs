@@ -10,6 +10,10 @@ use std::fs;
 async fn main() {
     let root = support::corpus(secret_use::CORPUS);
     let mut files = secret_use::generate().await;
+    let refusals = files.get_mut("filer-refusals.json").unwrap();
+    let published = fs::read(root.join("filer-refusals.json")).unwrap();
+    secret_use::check_v1_filer_refusals(&published, refusals);
+    *refusals = published;
     for name in ["README.md", "secret-approval-v1.json"] {
         files.insert(name.into(), fs::read(root.join(name)).unwrap());
     }

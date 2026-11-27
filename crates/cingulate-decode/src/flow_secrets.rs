@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    lowercase_hex,
-    secret_use::{canonical, present_string, statement_version_ok, StatementRule},
+    lowercase_hex, secret_scope,
+    secret_use::{
+        parse_statement, present_string, statement_version_ok, StatementRule, StatementValidation,
+    },
     Refusal, SecretUse, SecretUseAnswer,
 };
 
@@ -100,6 +102,33 @@ impl FlowUse {
             Self::ExtendedLogin { .. } => v3 && kind == "site_login",
         }
     }
+
+    fn validate_scope(&self) -> Result<(), &'static str> {
+        match self {
+            Self::ApiKey {
+                host,
+                path_prefix,
+                location,
+                ..
+            } => secret_scope::flat_api_key(host, path_prefix, location),
+            Self::ExtendedApiKey {
+                rules, location, ..
+            } => secret_scope::extended_api_key(rules, location),
+            Self::ExtendedLogin { origins } => secret_scope::origins(origins),
+            Self::Login { .. } => Ok(()),
+        }
+    }
+
+    fn methods(&self) -> Option<&[String]> {
+        match self {
+            Self::ApiKey { methods, .. } | Self::ExtendedApiKey { methods, .. } => Some(methods),
+            Self::Login { origin } => {
+                let _ = origin;
+                None
+            }
+            Self::ExtendedLogin { .. } => None,
+        }
+    }
 }
 
 pub struct FlowInstallSecrets {
@@ -109,6 +138,13 @@ pub struct FlowInstallSecrets {
 
 impl FlowInstallSecrets {
     pub fn decode(body: &Map<String, Value>) -> Result<Option<Self>, Refusal> {
+        Self::decode_with(body, StatementValidation::Filing)
+    }
+
+    pub(super) fn decode_with(
+        body: &Map<String, Value>,
+        validation: StatementValidation,
+    ) -> Result<Option<Self>, Refusal> {
         let (identity, secrets) = match (body.get("flow_identity"), body.get("secrets")) {
             (None, None) => return Ok(None),
             (Some(identity), Some(secrets)) => (identity, secrets),
@@ -130,11 +166,11 @@ impl FlowInstallSecrets {
             identity,
             approvals,
         };
-        result.expiries()?;
+        result.expiries(validation)?;
         Ok(Some(result))
     }
 
-    fn expiries(&self) -> Result<Vec<i64>, Refusal> {
+    fn expiries(&self, validation: StatementValidation) -> Result<Vec<i64>, Refusal> {
         if !(1..=16).contains(&self.approvals.items.len()) {
             return Err(invalid().reason("request_shape"));
         }
@@ -147,9 +183,18 @@ impl FlowInstallSecrets {
         self.approvals
             .items
             .iter()
-            .map(|item| {
+            .enumerate()
+            .map(|(index, item)| {
+                let refusal = |problem: &str| match validation {
+                    StatementValidation::Filing => Refusal::new(
+                        "elicitation_invalid_flow_secrets",
+                        format!("flow_install.secrets[{index}] statement {problem}"),
+                    )
+                    .reason("statement_invalid"),
+                    StatementValidation::Retained => invalid(),
+                };
                 let (statement, _): (FlowStatement, _) =
-                    canonical(&item.statement_b64url).map_err(|_| invalid())?;
+                    parse_statement(&item.statement_b64url, invalid, refusal)?;
                 if !statement_version_ok(
                     &statement.v,
                     "ck-secret-flow-statement",
@@ -164,11 +209,21 @@ impl FlowInstallSecrets {
                         && matches!(statement.flow.flow_id.as_str(), USE_V3 | FLOW_V3))
                     || (statement.asking_member_id.is_some()
                         && matches!(statement.flow.flow_id.as_str(), USE_V2 | FLOW_V2))
-                    || *asking.get_or_insert_with(|| statement.asking_member_id.clone())
-                        != statement.asking_member_id
-                    || *member.get_or_insert_with(|| statement.member_id.clone())
-                        != statement.member_id
-                    || !super::secret_use::ulid(&item.request_id)
+                {
+                    return Err(invalid());
+                }
+                if *member.get_or_insert_with(|| statement.member_id.clone()) != statement.member_id
+                {
+                    return Err(refusal("member_id must match the first statement"));
+                }
+                if *asking.get_or_insert_with(|| statement.asking_member_id.clone())
+                    != statement.asking_member_id
+                {
+                    return Err(refusal(
+                        "asking_member_id must match the first statement, including when absent",
+                    ));
+                }
+                if !super::secret_use::ulid(&item.request_id)
                     || statement.request_id != item.request_id
                 {
                     return Err(invalid());
@@ -191,45 +246,12 @@ impl FlowInstallSecrets {
                         "flow durations must be exactly version",
                     ));
                 }
-                // The vault owns secret scope semantics. Decode the closed shape here
-                // without rewriting any of the bytes the phone will display and sign.
-                let _ = (&statement.member_id, &statement.secret);
-                let methods = match &statement.r#use {
-                    FlowUse::ApiKey {
-                        host,
-                        path_prefix,
-                        location,
-                        methods,
-                    } => {
-                        let _ = (host, path_prefix, location);
-                        Some(methods)
-                    }
-                    FlowUse::ExtendedApiKey {
-                        rules,
-                        location,
-                        methods,
-                    } => {
-                        let _ = (rules, location);
-                        Some(methods)
-                    }
-                    FlowUse::Login { origin } => {
-                        let _ = origin;
-                        None
-                    }
-                    FlowUse::ExtendedLogin { origins } => {
-                        let _ = origins;
-                        None
-                    }
-                };
-                if methods.is_some_and(|methods| {
-                    methods.is_empty()
-                        || methods.windows(2).any(|pair| pair[0] >= pair[1])
-                        || methods.iter().any(|m| {
-                            !(1..=16).contains(&m.len())
-                                || !m.bytes().all(|b| b.is_ascii_uppercase())
-                        })
-                }) {
-                    return Err(invalid().reason("methods_invalid"));
+                if let Some(methods) = statement.r#use.methods() {
+                    secret_scope::methods(methods)
+                        .map_err(|problem| refusal(problem).reason("methods_invalid"))?;
+                }
+                if validation == StatementValidation::Filing {
+                    statement.r#use.validate_scope().map_err(refusal)?;
                 }
                 i64::try_from(statement.request_expires_at_ms)
                     .map_err(|_| invalid().reason("expiry_invalid"))
@@ -238,7 +260,10 @@ impl FlowInstallSecrets {
     }
 
     pub fn expires_at_ms(&self) -> Result<i64, Refusal> {
-        self.expiries()?.into_iter().min().ok_or_else(invalid)
+        self.expiries(StatementValidation::Filing)?
+            .into_iter()
+            .min()
+            .ok_or_else(invalid)
     }
 
     pub fn answer(

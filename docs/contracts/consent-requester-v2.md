@@ -731,8 +731,9 @@ keys, closed shapes and safe integer bounds). The decoded closed statement is
 with `v: "ck-secret-flow-statement/v1"`. `flow` equals `flow_identity` exactly;
 `request_id` equals the entry's ULID; `durations` is exactly `["version"]`.
 `secret` has the same closed shape as an agent statement. A login uses
-`use: {origin}`; an API key uses `{host, path_prefix, location, methods}`, with
-nonempty, unique, ascending uppercase methods of 1–16 bytes each.
+`use: {origin}`; an API key uses `{host, path_prefix, location, methods}`. For
+every API-key flow statement version, `methods` must be nonempty and strictly
+ascending, with each entry 1–16 uppercase ASCII letters.
 
 Invalid filings store nothing. Named refusal codes are
 `elicitation_flow_secrets_pair_required` (one key missing),
@@ -806,13 +807,47 @@ The closed `use` shapes are version-specific:
 | v3 | `{rules: [{host, path_prefix}, ...], location}` | `{origins: [...]}` |
 
 Flow API keys additionally require the existing sorted, nonempty `methods` list
-beside the legacy fields or `rules`. Every v3 rule must contain both string keys;
-`path_prefix: ""` means no prefix. For v3, `secret.kind: "agent_api_key"` requires
-the API-key shape and `"site_login"` the login shape; any other kind refuses.
-Unknown keys, mixed shapes and shapes under the wrong version refuse with the
-existing invalid-statement codes. Cingulate checks shape/version agreement and
-card binding, not host grammar, scope counts, public suffixes or scope matching:
-the vault remains the authority on the signed scope.
+beside the legacy fields or `rules`. For v3, `secret.kind: "agent_api_key"`
+requires the API-key shape and `"site_login"` the login shape; any other kind
+refuses. Unknown keys, mixed shapes and shapes under the wrong version refuse
+with the existing invalid-statement codes.
+
+### Scope checks at filing (ck-cingulate 0.28.5)
+
+All secret-use and flow-install statements must be byte-identical to their
+canonical JSON encoding. Every statement on a card must have the same `member_id`
+and `asking_member_id`. Omission of `asking_member_id` means the request was made
+on the home computer; it does not match an explicit asking member.
+
+For API keys in either family and any version, `location` must be one of:
+
+| Form | Suffix |
+| --- | --- |
+| `authorization_bearer` | None |
+| `header:` | A 1–64 byte RFC 9110 token, excluding `host`, `cookie`, `content-length` and `authorization` in any letter case |
+| `query:` | 1–64 bytes of `A-Za-z0-9._-` |
+| `json_pointer:` | A pointer starting with `/`, at most 256 bytes of `0x21`–`0x7e`, with `~` only as `~0` or `~1` |
+| `authorization_basic:` | A user of 1–128 bytes of `A-Za-z0-9._@+-` |
+
+In v1 and v2, the flat API-key `use.host` must be nonempty and contain no `*`.
+In v3, an API key has 1–8 rules, each containing exactly the two string keys
+`host` and `path_prefix`. The host must be nonempty. A wildcard is allowed only
+as one leading `*.` with a nonempty suffix and no other `*`; a single-rule
+scope must use a wildcard. Rules are strictly ascending bytewise by host, then
+by path prefix, so duplicate rules refuse. In all versions `path_prefix` is
+empty or starts with `/`.
+
+A v3 login has 2–4 origins. Each starts with `https://` and has a nonempty
+remainder without `*`. Origins must be strictly ascending bytewise as written,
+and no two may be equal after a trailing `:443` is removed. The vault owns host
+grammar, public-suffix policy, and scope matching.
+
+These checks apply to new filings, not to answers on previously stored cards.
+Refusals identify the statement and rule, using `elicitation_invalid_request`
+for secret-use cards and `elicitation_invalid_flow_secrets` for flow statements.
+
+The [served Basal v1.1 corpus](../../test-vectors/basal-flow-install-cards-served-v1.1/README.md)
+supersedes v1, whose `flow-secrets` filing used a single non-wildcard v3 rule.
 
 For flow statements, an extended v3 request cannot use either v3 statement tag as
 `flow_id`, local or forwarded. A forwarded request (v2 or v3) also cannot use

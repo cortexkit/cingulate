@@ -528,7 +528,8 @@ For v3, `agent_api_key` carries `use: {rules: [{host, path_prefix}, ...], locati
 flow API keys also carry sorted `methods` beside `rules`. Each rule has both
 string keys, with `""` for no prefix. `site_login` carries `use: {origins: [...]}`.
 Cingulate refuses kind/shape or version/shape mismatches and unknown or mixed
-fields, but the vault owns host grammar, public-suffix policy and scope matching.
+fields. It also checks [scope readability at filing](consent-requester-v2.md#scope-checks-at-filing-ck-cingulate-0285);
+the vault owns host grammar, public-suffix policy and scope matching.
 
 Render rules and origins in their canonical signed order. Show all hosts and
 prefixes, or the first few plus "and N more"; preserve wildcard spelling such as

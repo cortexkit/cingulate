@@ -201,6 +201,23 @@ fn pretty(value: &Value) -> Vec<u8> {
     bytes
 }
 
+pub fn check_published_refusals(name: &str, pinned: &[u8], current: &[u8]) {
+    let field = match name {
+        "filer-refusals.json" => "secret_use.items",
+        "filing-refusals.json" => "flow_install.secrets",
+        _ => panic!("not a forwarded refusal file: {name}"),
+    };
+    let message = format!("{field}[1] statement asking_member_id must match the first statement, including when absent");
+    crate::secret_use::check_refusal_messages(
+        pinned,
+        current,
+        &[
+            ("mixed-asking-members", &message),
+            ("mixed-v1-and-v2", &message),
+        ],
+    );
+}
+
 async fn refusal_file(sender: &ck_cingulate::Stamp, cases: Vec<(&str, Value)>) -> Vec<u8> {
     let mut all = Vec::new();
     for (name, request) in cases {

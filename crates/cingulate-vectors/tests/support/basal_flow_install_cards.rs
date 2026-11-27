@@ -11,7 +11,7 @@ use crate::{
     watch_pending::INSTANCE,
 };
 
-pub const SERVED_V1: &str = "basal-flow-install-cards-served-v1";
+pub const SERVED_V1_1: &str = "basal-flow-install-cards-served-v1.1";
 pub const ARCHIVED_REQUEST_SUFFIX: &str = "-request.json";
 pub const CARDS: [&str; 7] = [
     "agent-new",
@@ -22,7 +22,7 @@ pub const CARDS: [&str; 7] = [
     "package-register",
     "switch-refile-agent",
 ];
-const FILED_AT_MS: i64 = 1_777_593_540_000;
+pub const FILED_AT_MS: i64 = 1_777_593_540_000;
 
 pub async fn generate(
     input_dir: &Path,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.5 (ck-cingulate)
+
+- Refuse new secret-use and flow-install filings whose signed scopes the approving
+  apps cannot read, and name the invalid statement and rule. Existing cards and
+  signed statement bytes are unchanged.
+- The served Basal v1.1 samples supersede v1, whose `flow-secrets` filing used
+  a single non-wildcard v3 rule. The historical v1 corpus remains pinned.
+
 ## 0.19.2 (cingulate-vectors)
 
 - Regenerate served v1.1 from filing samples v1.5, showing agent authors by name.

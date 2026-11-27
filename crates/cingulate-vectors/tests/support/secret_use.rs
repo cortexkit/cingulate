@@ -17,6 +17,32 @@ pub const CORPUS: &str = "secret-use-approval-v1";
 pub const DEVICE: &str = "11111111111111111111111111111111";
 pub const NOW: i64 = 1_700_000_000_000;
 
+pub fn check_refusal_messages(pinned: &[u8], current: &[u8], expected: &[(&str, &str)]) {
+    let historical: Value = serde_json::from_slice(pinned).unwrap();
+    let mut live: Value = serde_json::from_slice(current).unwrap();
+    let cases = live["cases"].as_array_mut().unwrap();
+    for &(name, expected_message) in expected {
+        let index = cases.iter().position(|case| case["name"] == name).unwrap();
+        let message = &mut cases[index]["reply"]["error"]["message"];
+        assert_eq!(*message, expected_message, "{name}");
+        // Apps pin the published bytes. Compare the live request and reply
+        // with only the diagnostic that we just checked restored.
+        *message = historical["cases"][index]["reply"]["error"]["message"].clone();
+    }
+    assert_eq!(live, historical);
+}
+
+pub fn check_v1_filer_refusals(pinned: &[u8], current: &[u8]) {
+    check_refusal_messages(
+        pinned,
+        current,
+        &[(
+            "non-canonical",
+            "secret_use.items[0] statement bytes must equal their canonical JSON encoding",
+        )],
+    );
+}
+
 pub fn vector(case: &str) -> Value {
     let all: Value = serde_json::from_slice(include_bytes!(
         "../../../../test-vectors/secret-use-approval-v1/secret-approval-v1.json"

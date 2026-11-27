@@ -16,6 +16,7 @@ mod flow_secrets;
 mod manifest_binding;
 mod sandbox_escape;
 mod sealed_text;
+mod secret_scope;
 mod secret_use;
 pub use access::{validate_note, AccessRequest};
 pub use broker_action::{BrokerAction, BrokerActionAnswer};
@@ -784,10 +785,25 @@ impl ConsentRequest {
     }
 
     pub fn flow_install_secrets(&self) -> Result<Option<FlowInstallSecrets>, Refusal> {
+        self.decode_flow_install_secrets(FlowInstallSecrets::decode)
+    }
+
+    /// Answer a stored card using the statement checks that predate the scope
+    /// filing policy, so an unreadable card can still be declined.
+    pub fn retained_flow_install_secrets(&self) -> Result<Option<FlowInstallSecrets>, Refusal> {
+        self.decode_flow_install_secrets(|body| {
+            FlowInstallSecrets::decode_with(body, secret_use::StatementValidation::Retained)
+        })
+    }
+
+    fn decode_flow_install_secrets(
+        &self,
+        decode: impl FnOnce(&Map<String, Value>) -> Result<Option<FlowInstallSecrets>, Refusal>,
+    ) -> Result<Option<FlowInstallSecrets>, Refusal> {
         if self.kind == "flow_install" {
             self.flow_install
                 .as_ref()
-                .map(FlowInstallSecrets::decode)
+                .map(decode)
                 .transpose()
                 .map(Option::flatten)
         } else {

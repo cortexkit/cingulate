@@ -17,7 +17,7 @@ use std::fs;
 async fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     assert!(args.is_empty() || args == ["--check"] || args == ["--stdout"]);
-    let corpora = [
+    let mut corpora = [
         (
             forwarded_secrets::USE_CORPUS,
             forwarded_secrets::USE_VAULT_FILE,
@@ -29,6 +29,16 @@ async fn main() {
             forwarded_secrets::generate_flow().await,
         ),
     ];
+    for (corpus, _, files) in &mut corpora {
+        let root = support::corpus(corpus);
+        for name in ["filer-refusals.json", "filing-refusals.json"] {
+            if let Some(current) = files.get_mut(name) {
+                let pinned = fs::read(root.join(name)).unwrap();
+                forwarded_secrets::check_published_refusals(name, &pinned, current);
+                *current = pinned;
+            }
+        }
+    }
     if args == ["--stdout"] {
         // Generated files only, keyed `<corpus>/<name>`, for writing them on a
         // machine other than the one that ran the handler.

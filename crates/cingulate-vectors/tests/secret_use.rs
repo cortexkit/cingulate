@@ -628,14 +628,14 @@ async fn secret_use_phone_feature_is_required_for_reads_allow_and_decline() {
 }
 
 #[tokio::test]
-async fn secret_use_served_vectors_regenerate_byte_for_byte() {
+async fn secret_use_served_vectors_match_published_corpus() {
     for (name, bytes) in generate().await {
-        assert_eq!(fs::read(support::corpus(CORPUS).join(name)).unwrap(), bytes);
+        assert_matches_published(&name, &bytes);
     }
 }
 
 #[tokio::test]
-async fn secret_use_filer_vectors_regenerate_byte_for_byte() {
+async fn secret_use_filer_vectors_match_published_corpus() {
     // Every filer reply comes from the real handler; the files hold the exact
     // framed method, request params and reply envelope for decoder builders.
     let files = generate().await;
@@ -649,11 +649,16 @@ async fn secret_use_filer_vectors_regenerate_byte_for_byte() {
         "filer-await-expired.json",
         "filer-refusals.json",
     ] {
-        assert_eq!(
-            fs::read(support::corpus(CORPUS).join(name)).unwrap(),
-            files[name],
-            "{name}"
-        );
+        assert_matches_published(name, &files[name]);
+    }
+}
+
+fn assert_matches_published(name: &str, current: &[u8]) {
+    let pinned = fs::read(support::corpus(CORPUS).join(name)).unwrap();
+    if name == "filer-refusals.json" {
+        secret_use::check_v1_filer_refusals(&pinned, current);
+    } else {
+        assert_eq!(pinned, current, "{name}");
     }
 }
 

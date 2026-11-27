@@ -8,7 +8,7 @@ use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::{lowercase_hex, Refusal};
+use crate::{lowercase_hex, secret_scope, Refusal};
 
 pub(super) const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 const DURATIONS: [&str; 4] = ["once", "hour", "session", "permanent"];
@@ -19,6 +19,17 @@ fn invalid() -> Refusal {
 
 fn invalid_envelope() -> Refusal {
     invalid().reason("envelope_invalid")
+}
+
+fn invalid_statement(index: usize, problem: &str) -> Refusal {
+    Refusal::invalid(format!("secret_use.items[{index}] statement {problem}"))
+        .reason("statement_invalid")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StatementValidation {
+    Filing,
+    Retained,
 }
 
 pub(super) fn ulid(value: &str) -> bool {
@@ -101,14 +112,35 @@ pub(super) fn check_canonical(value: &Value, bytes: &[u8]) -> Result<(), Refusal
     Ok(())
 }
 
-pub(super) fn canonical<T: DeserializeOwned>(encoded: &str) -> Result<(T, Vec<u8>), Refusal> {
-    let (value, bytes) = decode_json(encoded)?;
+fn canonical_json(
+    encoded: &str,
+    invalid: fn() -> Refusal,
+    rule_refusal: impl Fn(&str) -> Refusal,
+) -> Result<(Value, Vec<u8>), Refusal> {
+    let (value, bytes) = decode_json(encoded).map_err(|_| invalid())?;
     if !safe_numbers(&value) {
         return Err(invalid());
     }
-    check_canonical(&value, &bytes)?;
+    check_canonical(&value, &bytes)
+        .map_err(|_| rule_refusal("bytes must equal their canonical JSON encoding"))?;
+    Ok((value, bytes))
+}
+
+pub(super) fn canonical<T: DeserializeOwned>(encoded: &str) -> Result<(T, Vec<u8>), Refusal> {
+    let (value, bytes) = canonical_json(encoded, invalid, |_| invalid())?;
     let parsed = serde_json::from_value(value).map_err(|_| invalid())?;
     Ok((parsed, bytes))
+}
+
+pub(super) fn parse_statement<T: DeserializeOwned>(
+    encoded: &str,
+    invalid: fn() -> Refusal,
+    rule_refusal: impl Fn(&str) -> Refusal,
+) -> Result<(T, Value), Refusal> {
+    let (value, _) = canonical_json(encoded, invalid, &rule_refusal)?;
+    let parsed = T::deserialize(&value)
+        .map_err(|_| secret_scope::shape_error(&value).map_or_else(invalid, rule_refusal))?;
+    Ok((parsed, value))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -279,6 +311,21 @@ impl StatementUse {
             Self::ExtendedLogin { .. } => v3 && kind == "site_login",
         }
     }
+
+    fn validate_scope(&self) -> Result<(), &'static str> {
+        match self {
+            Self::ApiKey {
+                host,
+                path_prefix,
+                location,
+            } => secret_scope::flat_api_key(host, path_prefix, location),
+            Self::ExtendedApiKey { rules, location } => {
+                secret_scope::extended_api_key(rules, location)
+            }
+            Self::ExtendedLogin { origins } => secret_scope::origins(origins),
+            Self::Login { .. } | Self::Local(_) => Ok(()),
+        }
+    }
 }
 
 impl UseStatement {
@@ -395,14 +442,25 @@ pub struct SecretUseItemDecision {
 
 impl SecretUse {
     pub fn statements(&self) -> Result<Vec<UseStatement>, Refusal> {
+        self.parse_statements(StatementValidation::Filing)
+    }
+
+    fn parse_statements(
+        &self,
+        validation: StatementValidation,
+    ) -> Result<Vec<UseStatement>, Refusal> {
         if !(1..=16).contains(&self.items.len()) {
             return Err(invalid());
         }
         let mut seen = HashSet::new();
         let mut statements: Vec<UseStatement> = Vec::new();
-        for item in &self.items {
-            let (statement, _): (UseStatement, _) = canonical(&item.statement_b64url)?;
-            let (value, _): (Value, _) = canonical(&item.statement_b64url)?;
+        for (index, item) in self.items.iter().enumerate() {
+            let refusal = |problem: &str| match validation {
+                StatementValidation::Filing => invalid_statement(index, problem),
+                StatementValidation::Retained => invalid(),
+            };
+            let (statement, value): (UseStatement, _) =
+                parse_statement(&item.statement_b64url, invalid, refusal)?;
             // Every vault statement carries agent_id, using null for no agent.
             if value.get("agent_id").is_none()
                 || !statement.shape_ok(&value)
@@ -414,17 +472,25 @@ impl SecretUse {
                     .durations
                     .iter()
                     .any(|d| !DURATIONS.contains(&d.as_str()))
-                || statements.first().is_some_and(|first| {
-                    // One card is one request from one agent on one computer:
-                    // every statement shares the agent, the serving vault and
-                    // the asking computer (or its absence for home requests).
-                    first.agent_id != statement.agent_id
-                        || first.member_id != statement.member_id
-                        || first.asking_member_id != statement.asking_member_id
-                        || first.is_local() != statement.is_local()
-                })
             {
                 return Err(invalid());
+            }
+            if let Some(first) = statements.first() {
+                if first.member_id != statement.member_id {
+                    return Err(refusal("member_id must match the first statement"));
+                }
+                if first.asking_member_id != statement.asking_member_id {
+                    return Err(refusal(
+                        "asking_member_id must match the first statement, including when absent",
+                    ));
+                }
+                if first.agent_id != statement.agent_id || first.is_local() != statement.is_local()
+                {
+                    return Err(invalid());
+                }
+            }
+            if validation == StatementValidation::Filing {
+                statement.r#use.validate_scope().map_err(refusal)?;
             }
             statements.push(statement);
         }
@@ -446,7 +512,9 @@ impl SecretUse {
         device: Option<&str>,
         encoded: Option<&str>,
     ) -> Result<SecretUseAnswer, Refusal> {
-        let statements = self.statements()?;
+        // Outstanding cards may predate the filing checks; their answer rules
+        // still use the exact bytes and durations that were accepted then.
+        let statements = self.parse_statements(StatementValidation::Retained)?;
         self.answer_items(
             choice,
             device,

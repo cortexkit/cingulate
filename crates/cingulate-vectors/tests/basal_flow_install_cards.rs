@@ -14,18 +14,38 @@ mod watch_pending;
 use std::{collections::BTreeSet, fs, path::Path};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use ck_cingulate::Stamp;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, CARDS, SERVED_V1};
-use support::corpus;
+use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, CARDS, FILED_AT_MS, SERVED_V1_1};
+use support::{corpus, worker, Fixture};
 
-const SERVED_V1_1: &str = "basal-flow-install-cards-served-v1.1";
+const SERVED_V1: &str = "basal-flow-install-cards-served-v1";
 
 #[tokio::test]
-async fn basal_flow_install_cards_served_vectors_regenerate_byte_for_byte() {
+async fn basal_flow_install_cards_served_v1_stays_pinned_but_its_secret_filing_is_refused() {
     let root = corpus(SERVED_V1);
-    assert_regenerates(&root, &root).await;
+    assert_served_manifest(
+        &root,
+        "2753305ec614b7ed8c0ea08022bdbdc5bddde26cf0e683eb706d38ed5a97d8c5",
+    );
+
+    let request: Value =
+        serde_json::from_slice(&fs::read(root.join("flow-secrets-request.json")).unwrap()).unwrap();
+    let fixture = Fixture::open(None).await;
+    fixture.clock.set(FILED_AT_MS);
+    let requester = Stamp::from_bind(
+        &flow_card_structure::bind("sample-flow-runner").with_principal(worker::principal("basal")),
+    );
+    let before = fixture.rows();
+    let error = fixture
+        .call(&requester, "consent.request", request["params"].clone())
+        .await
+        .unwrap_err();
+    assert_eq!(error["code"], "elicitation_invalid_flow_secrets");
+    assert_eq!(error["message"], "flow_install.secrets[0] statement use.rules requires a wildcard host when there is only one rule");
+    assert_eq!(fixture.rows(), before);
 }
 
 #[tokio::test]
@@ -61,14 +81,6 @@ async fn assert_regenerates(input_dir: &Path, output_dir: &Path) {
             "{name} differs"
         );
     }
-}
-
-#[test]
-fn basal_flow_install_cards_served_manifest_is_pinned_and_covers_exact_bytes() {
-    assert_served_manifest(
-        &corpus(SERVED_V1),
-        "2753305ec614b7ed8c0ea08022bdbdc5bddde26cf0e683eb706d38ed5a97d8c5",
-    );
 }
 
 #[test]

@@ -919,7 +919,7 @@ impl ConsentStore {
             }
             let flow_secrets = record
                 .request
-                .flow_install_secrets()
+                .retained_flow_install_secrets()
                 .map_err(Error::Refused)?;
             let secret_answer = if let Some(body) = flow_secrets {
                 let decision = record
