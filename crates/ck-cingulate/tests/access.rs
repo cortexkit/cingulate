@@ -1901,7 +1901,8 @@ async fn access_asker_timeouts_bound_each_probe_and_pass_and_back_off() {
     }
 }
 
-#[tokio::test]
+// Time spent on SQLite writes must not consume the pass budget in this test.
+#[tokio::test(start_paused = true)]
 async fn access_asker_batch_progress_preserves_other_maintenance_and_unscoped_cards() {
     let f = Fixture::new(true).await;
     let unscoped = f.ask(&local_operator(), consent_card()).await;
