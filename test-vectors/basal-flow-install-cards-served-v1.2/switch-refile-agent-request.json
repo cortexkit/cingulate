@@ -1,0 +1,128 @@
+{
+  "method": "consent.request",
+  "params": {
+    "args_digest": "c91360b0bfd049e78eeba9545811b327ea43a06893db40fa3de716fb5949c514",
+    "binding": {
+      "attempt": 5,
+      "code_hash": "c91360b0bfd049e78eeba9545811b327ea43a06893db40fa3de716fb5949c514",
+      "flow_id": "sample-switch",
+      "version": 1
+    },
+    "capabilities": {
+      "rows": [
+        {
+          "label": "Runs",
+          "value": "Every hour"
+        },
+        {
+          "label": "Can read",
+          "value": "Nothing"
+        },
+        {
+          "label": "Can change",
+          "value": "Nothing"
+        },
+        {
+          "label": "Notifies",
+          "value": "Nothing"
+        }
+      ]
+    },
+    "dedup_key": "flow_install:sample-switch:1:5:c91360b0bfd049e78eeba9545811b327ea43a06893db40fa3de716fb5949c514",
+    "default": "decline",
+    "dry_run_text": {
+      "problems": [],
+      "summary": "In the last 24 hours it would have run 24 times, every hour; the dry run tried the newest 0.",
+      "would": []
+    },
+    "explanation": {
+      "label": "What it does",
+      "text": "Checks the queue once an hour."
+    },
+    "facts": [
+      {
+        "label": "Code hash",
+        "value": "c91360b0bfd049e78eeba9545811b327ea43a06893db40fa3de716fb5949c514"
+      },
+      {
+        "label": "Flow",
+        "value": "sample-switch"
+      },
+      {
+        "label": "Version",
+        "value": "1"
+      },
+      {
+        "label": "Author",
+        "value": "Sample Agent (verified)"
+      }
+    ],
+    "flow_install": {
+      "author": {
+        "agent_id": "ag_vector_sample",
+        "kind": "agent",
+        "name": "Sample Agent"
+      },
+      "code_hash": "c91360b0bfd049e78eeba9545811b327ea43a06893db40fa3de716fb5949c514",
+      "dry_run_summary": {
+        "mode": "capture",
+        "partial": false,
+        "runs": [],
+        "warnings": [],
+        "window": {
+          "capped": true,
+          "covered": null,
+          "due_times_in_window": 24,
+          "due_times_is_lower_bound": false,
+          "kind": "schedule",
+          "replayed": 0,
+          "requested": {
+            "from": "2026-04-30T00:00:00Z",
+            "to": "2026-05-01T00:00:00Z"
+          }
+        }
+      },
+      "flow_id": "sample-switch",
+      "manifest_json": "{\"explanation\":\"Checks the queue once an hour.\",\"id\":\"sample-switch\",\"purpose\":\"Review the queue\",\"trigger\":{\"schedule\":{\"interval\":\"1h\"}},\"version\":1}",
+      "placement": null,
+      "script": "return 1;",
+      "token_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "fresh_input": 0,
+        "output": 0,
+        "window": "1d"
+      },
+      "version": 1,
+      "warnings": []
+    },
+    "kind": "flow_install",
+    "late_execution": "notify_only",
+    "material_damage": false,
+    "on_expiry": "deny",
+    "options": [
+      {
+        "effect": "grant",
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "effect": "decline",
+        "id": "decline",
+        "label": "Decline"
+      }
+    ],
+    "prompt": "Install sample switch?",
+    "source": {
+      "language": "javascript",
+      "text": "return 1;"
+    },
+    "target": {
+      "kind": "flow",
+      "label": "sample-switch v1"
+    },
+    "title": "New flow",
+    "urgency": "normal"
+  },
+  "provider": "cingulate"
+}

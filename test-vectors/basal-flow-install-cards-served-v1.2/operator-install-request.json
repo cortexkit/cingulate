@@ -1,0 +1,126 @@
+{
+  "method": "consent.request",
+  "params": {
+    "args_digest": "13139d863f52e460ce934e9ed3fb93f4180f0a71664d88f32869a19a45f15d49",
+    "binding": {
+      "attempt": 1,
+      "code_hash": "13139d863f52e460ce934e9ed3fb93f4180f0a71664d88f32869a19a45f15d49",
+      "flow_id": "sample-operator",
+      "version": 1
+    },
+    "capabilities": {
+      "rows": [
+        {
+          "label": "Runs",
+          "value": "Every hour"
+        },
+        {
+          "label": "Can read",
+          "value": "Nothing"
+        },
+        {
+          "label": "Can change",
+          "value": "Nothing"
+        },
+        {
+          "label": "Notifies",
+          "value": "Nothing"
+        }
+      ]
+    },
+    "dedup_key": "flow_install:sample-operator:1:1:13139d863f52e460ce934e9ed3fb93f4180f0a71664d88f32869a19a45f15d49",
+    "default": "decline",
+    "dry_run_text": {
+      "problems": [],
+      "summary": "In the last 24 hours it would have run 24 times, every hour; the dry run tried the newest 0.",
+      "would": []
+    },
+    "explanation": {
+      "label": "What it does",
+      "text": "Checks the hourly summary for the operator."
+    },
+    "facts": [
+      {
+        "label": "Code hash",
+        "value": "13139d863f52e460ce934e9ed3fb93f4180f0a71664d88f32869a19a45f15d49"
+      },
+      {
+        "label": "Flow",
+        "value": "sample-operator"
+      },
+      {
+        "label": "Version",
+        "value": "1"
+      },
+      {
+        "label": "Author",
+        "value": "You"
+      }
+    ],
+    "flow_install": {
+      "author": {
+        "operator": true
+      },
+      "code_hash": "13139d863f52e460ce934e9ed3fb93f4180f0a71664d88f32869a19a45f15d49",
+      "dry_run_summary": {
+        "mode": "capture",
+        "partial": false,
+        "runs": [],
+        "warnings": [],
+        "window": {
+          "capped": true,
+          "covered": null,
+          "due_times_in_window": 24,
+          "due_times_is_lower_bound": false,
+          "kind": "schedule",
+          "replayed": 0,
+          "requested": {
+            "from": "2026-04-30T00:00:00Z",
+            "to": "2026-05-01T00:00:00Z"
+          }
+        }
+      },
+      "flow_id": "sample-operator",
+      "manifest_json": "{\"explanation\":\"Checks the hourly summary for the operator.\",\"id\":\"sample-operator\",\"purpose\":\"Review the daily summary\",\"trigger\":{\"schedule\":{\"interval\":\"1h\"}},\"version\":1}",
+      "placement": null,
+      "script": "return 1;",
+      "token_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "fresh_input": 0,
+        "output": 0,
+        "window": "1d"
+      },
+      "version": 1,
+      "warnings": []
+    },
+    "kind": "flow_install",
+    "late_execution": "notify_only",
+    "material_damage": false,
+    "on_expiry": "deny",
+    "options": [
+      {
+        "effect": "grant",
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "effect": "decline",
+        "id": "decline",
+        "label": "Decline"
+      }
+    ],
+    "prompt": "Install sample operator?",
+    "source": {
+      "language": "javascript",
+      "text": "return 1;"
+    },
+    "target": {
+      "kind": "flow",
+      "label": "sample-operator v1"
+    },
+    "title": "New flow",
+    "urgency": "normal"
+  },
+  "provider": "cingulate"
+}

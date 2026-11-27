@@ -18,10 +18,11 @@ use ck_cingulate::Stamp;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, CARDS, FILED_AT_MS, SERVED_V1_1};
+use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, CARDS, FILED_AT_MS, SERVED_V1_2};
 use support::{corpus, worker, Fixture};
 
 const SERVED_V1: &str = "basal-flow-install-cards-served-v1";
+const SERVED_V1_1: &str = "basal-flow-install-cards-served-v1.1";
 
 #[tokio::test]
 async fn basal_flow_install_cards_served_v1_stays_pinned_but_its_secret_filing_is_refused() {
@@ -51,6 +52,12 @@ async fn basal_flow_install_cards_served_v1_stays_pinned_but_its_secret_filing_i
 #[tokio::test]
 async fn basal_flow_install_cards_served_v1_1_regenerates_byte_for_byte() {
     let root = corpus(SERVED_V1_1);
+    assert_regenerates(&root, &root).await;
+}
+
+#[tokio::test]
+async fn basal_flow_install_cards_served_v1_2_regenerates_byte_for_byte() {
+    let root = corpus(SERVED_V1_2);
     assert_regenerates(&root, &root).await;
 }
 
@@ -88,6 +95,14 @@ fn basal_flow_install_cards_served_v1_1_manifest_is_pinned_and_covers_exact_byte
     assert_served_manifest(
         &corpus(SERVED_V1_1),
         "25060e1900620ecb1dc7f793ecbbcee749fd584e97b0025725aacb751c70e1fa",
+    );
+}
+
+#[test]
+fn basal_flow_install_cards_served_v1_2_manifest_is_pinned_and_covers_exact_bytes() {
+    assert_served_manifest(
+        &corpus(SERVED_V1_2),
+        "e1b5517e5129d20d633177d9c7ff5c094c8a2bcdc91c9c2e1256c910b10aba6a",
     );
 }
 
@@ -129,6 +144,14 @@ fn basal_flow_install_cards_v1_1_inputs_match_filing_samples_manifest() {
     );
 }
 
+#[test]
+fn basal_flow_install_cards_v1_2_inputs_match_filing_samples_manifest() {
+    assert_filing_manifest(
+        &corpus(SERVED_V1_2),
+        "0d282ed53ebfc05c1ada76b53e22b7ea53913c9822229b5290bdd8830a43a4e4",
+    );
+}
+
 fn assert_filing_manifest(root: &Path, expected_digest: &str) {
     // Reconstruct the filing samples' manifest with the original filenames.
     let manifest: String = CARDS
@@ -152,6 +175,11 @@ fn basal_flow_install_cards_serve_full_explanation_and_statement_deadline() {
 #[test]
 fn basal_flow_install_cards_v1_1_serve_full_explanation_and_statement_deadline() {
     assert_explanation_and_deadline(&corpus(SERVED_V1_1));
+}
+
+#[test]
+fn basal_flow_install_cards_v1_2_serve_full_explanation_and_statement_deadline() {
+    assert_explanation_and_deadline(&corpus(SERVED_V1_2));
 }
 
 fn assert_explanation_and_deadline(root: &Path) {

@@ -14,7 +14,7 @@ mod watch_pending;
 
 use std::{collections::BTreeSet, fs, path::Path};
 
-use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, SERVED_V1_1};
+use basal_flow_install_cards::{ARCHIVED_REQUEST_SUFFIX, SERVED_V1_2};
 
 #[tokio::main]
 async fn main() {
@@ -30,7 +30,7 @@ async fn main() {
         [flag, paths @ ..] if flag == "--check" => (true, paths),
         paths => (false, paths),
     };
-    let default_corpus = support::corpus(SERVED_V1_1);
+    let default_corpus = support::corpus(SERVED_V1_2);
     let (input_dir, output_dir, input_suffix) = match paths {
         [] => (default_corpus.as_path(), default_corpus.as_path(), ARCHIVED_REQUEST_SUFFIX),
         [served] => (Path::new(served), Path::new(served), ARCHIVED_REQUEST_SUFFIX),

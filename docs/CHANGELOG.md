@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.3 (cingulate-vectors)
+
+- Add `basal-flow-install-cards-served-v1.2` from the flow runner's v1.6 filing
+  samples: no card carries the `Dry run tokens` fact, the operator's own
+  install names its author `You`, and `package-register` is titled
+  `New template`. The earlier served samples are unchanged.
+
 ## 0.28.5 (ck-cingulate)
 
 - Refuse new secret-use and flow-install filings whose signed scopes the approving

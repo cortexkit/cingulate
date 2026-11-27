@@ -396,7 +396,7 @@ dependencies = [
 
 [[package]]
 name = "cingulate-vectors"
-version = "0.19.2"
+version = "0.19.3"
 dependencies = [
  "async-trait",
  "base64",
