@@ -1,3 +1,6 @@
+# Every text file checks out with LF on every platform. Generated vectors and their
+# inputs are compared byte for byte, and a CRLF checkout breaks them.
+* text=auto eol=lf
 # Vectors are byte-compared by their SHA256SUMS, so no checkout may rewrite their line endings.
 test-vectors/** -text
 # Generator inputs and test fixtures are compared byte for byte too.
